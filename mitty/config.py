@@ -27,6 +27,9 @@ class Settings(BaseModel):
         max_retries: Number of retry attempts for transient HTTP errors.
         per_page: Default page size for paginated Canvas API requests.
         max_concurrent: Maximum concurrent HTTP requests (semaphore size).
+        supabase_url: Supabase project URL (optional).
+        supabase_key: Supabase anon/service key (optional, secret).
+        database_url: PostgreSQL connection string (optional, secret).
     """
 
     canvas_base_url: str = "https://mitty.instructure.com"
@@ -38,6 +41,9 @@ class Settings(BaseModel):
     max_retries: int = 3
     per_page: int = 100
     max_concurrent: int = 3
+    supabase_url: str | None = None
+    supabase_key: SecretStr | None = None
+    database_url: SecretStr | None = None
 
 
 def load_settings() -> Settings:
@@ -73,6 +79,15 @@ def load_settings() -> Settings:
     if request_delay := os.environ.get("REQUEST_DELAY"):
         overrides["request_delay"] = float(request_delay)
 
+    if supabase_url := os.environ.get("SUPABASE_URL"):
+        overrides["supabase_url"] = supabase_url
+
+    if supabase_key := os.environ.get("SUPABASE_KEY"):
+        overrides["supabase_key"] = supabase_key
+
+    if database_url := os.environ.get("DATABASE_URL"):
+        overrides["database_url"] = database_url
+
     return Settings(**overrides)
 
 
@@ -84,7 +99,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
               when *None*.
 
     Returns:
-        Namespace with ``no_cache``, ``verbose``, and ``debug`` flags.
+        Namespace with ``no_cache``, ``verbose``, ``debug``, and ``json`` flags.
     """
     parser = argparse.ArgumentParser(
         prog="mitty",
@@ -107,5 +122,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         default=False,
         help="Set log level to DEBUG (implies --verbose)",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Output results as JSON to stdout",
     )
     return parser.parse_args(argv)

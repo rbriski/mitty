@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from mitty.config import load_settings, parse_args
+from mitty.config import Settings, load_settings, parse_args
 
 
 class TestLoadSettingsMissingToken:
@@ -93,3 +93,88 @@ class TestParseArgs:
         assert ns.no_cache is True
         assert ns.verbose is True
         assert ns.debug is True
+
+
+class TestSupabaseSettingsFields:
+    """Settings model supports optional Supabase configuration fields."""
+
+    def test_supabase_fields_default_to_none(self) -> None:
+        """Supabase fields are None when not provided."""
+        settings = Settings(canvas_token="test-token")
+
+        assert settings.supabase_url is None
+        assert settings.supabase_key is None
+        assert settings.database_url is None
+
+    def test_supabase_fields_accept_values(self) -> None:
+        """Supabase fields accept string / SecretStr values."""
+        settings = Settings(
+            canvas_token="test-token",
+            supabase_url="https://abc.supabase.co",
+            supabase_key="sb-key-123",
+            database_url="postgresql://user:pass@host:5432/db",
+        )
+
+        assert settings.supabase_url == "https://abc.supabase.co"
+        assert settings.supabase_key is not None
+        assert settings.supabase_key.get_secret_value() == "sb-key-123"
+        assert settings.database_url is not None
+        assert (
+            settings.database_url.get_secret_value()
+            == "postgresql://user:pass@host:5432/db"
+        )
+
+
+class TestLoadSettingsSupabaseEnv:
+    """load_settings() picks up Supabase env vars when present."""
+
+    def test_supabase_env_vars_loaded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("mitty.config.load_dotenv", lambda: None)
+        monkeypatch.setenv("CANVAS_TOKEN", "test-token")
+        monkeypatch.setenv("SUPABASE_URL", "https://xyz.supabase.co")
+        monkeypatch.setenv("SUPABASE_KEY", "sb-secret")
+        monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@h:5432/d")
+
+        settings = load_settings()
+
+        assert settings.supabase_url == "https://xyz.supabase.co"
+        assert settings.supabase_key is not None
+        assert settings.supabase_key.get_secret_value() == "sb-secret"
+        assert settings.database_url is not None
+        assert settings.database_url.get_secret_value() == "postgresql://u:p@h:5432/d"
+
+    def test_missing_supabase_vars_return_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("mitty.config.load_dotenv", lambda: None)
+        monkeypatch.setenv("CANVAS_TOKEN", "test-token")
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_KEY", raising=False)
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+
+        settings = load_settings()
+
+        assert settings.supabase_url is None
+        assert settings.supabase_key is None
+        assert settings.database_url is None
+
+
+class TestParseArgsJsonFlag:
+    """parse_args() supports --json flag."""
+
+    def test_json_flag_default_false(self) -> None:
+        ns = parse_args([])
+
+        assert ns.json is False
+
+    def test_json_flag_set(self) -> None:
+        ns = parse_args(["--json"])
+
+        assert ns.json is True
+
+    def test_json_flag_with_other_flags(self) -> None:
+        ns = parse_args(["--json", "--verbose", "--no-cache"])
+
+        assert ns.json is True
+        assert ns.verbose is True
+        assert ns.no_cache is True

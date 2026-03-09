@@ -37,7 +37,11 @@ def _serialize_result(result: dict[str, Any]) -> dict[str, Any]:
 
 
 async def main() -> None:
-    """Parse CLI args, load settings, fetch Canvas data, and print JSON."""
+    """Parse CLI args, load settings, fetch Canvas data, and output results.
+
+    Default mode stores results to Supabase.  With ``--json``, prints
+    JSON to stdout instead (original behavior).
+    """
     args = parse_args()
 
     # Configure logging
@@ -63,7 +67,16 @@ async def main() -> None:
     if args.no_cache:
         settings = settings.model_copy(update={"cache_enabled": False})
 
-    # Fetch data and output JSON
+    # Validate Supabase config when not in --json mode
+    if not args.json and (not settings.supabase_url or not settings.supabase_key):
+        print(
+            "Error: SUPABASE_URL and SUPABASE_KEY are required. "
+            "Set them in .env or use --json for JSON output.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Fetch data
     try:
         async with CanvasClient(settings) as client:
             result = await fetch_all(client, settings)
@@ -74,8 +87,27 @@ async def main() -> None:
         print(f"API error: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    serializable = _serialize_result(result)
-    print(json.dumps(serializable, indent=2, default=str))
+    # Output: --json mode or Supabase mode
+    if args.json:
+        serializable = _serialize_result(result)
+        print(json.dumps(serializable, indent=2, default=str))
+    else:
+        from mitty.storage import StorageError, create_storage, store_all
+
+        # Both fields are guaranteed non-None by the guard above.
+        assert settings.supabase_url is not None
+        assert settings.supabase_key is not None
+        try:
+            storage_client = await create_storage(
+                supabase_url=settings.supabase_url,
+                supabase_key=settings.supabase_key.get_secret_value(),
+            )
+            await store_all(storage_client, result)
+        except StorageError as exc:
+            print(f"Storage error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        print("Data stored successfully.", file=sys.stderr)
 
 
 if __name__ == "__main__":
