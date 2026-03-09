@@ -27,8 +27,10 @@ courses = sa.Table(
     sa.Column("id", sa.Integer, primary_key=True, autoincrement=False),
     sa.Column("name", sa.String, nullable=False),
     sa.Column("course_code", sa.String, nullable=False),
+    sa.Column("workflow_state", sa.String, nullable=True),
     sa.Column("term_id", sa.Integer, nullable=True),
     sa.Column("term_name", sa.String, nullable=True),
+    sa.Column("updated_at", sa.DateTime, nullable=False),
 )
 
 # ---------------------------------------------------------------------------
@@ -48,6 +50,7 @@ assignments = sa.Table(
     sa.Column("name", sa.String, nullable=False),
     sa.Column("due_at", sa.DateTime, nullable=True),
     sa.Column("points_possible", sa.Float, nullable=True),
+    sa.Column("html_url", sa.String, nullable=True),
     sa.Column("updated_at", sa.DateTime, nullable=False),
 )
 
@@ -70,6 +73,8 @@ submissions = sa.Table(
     sa.Column("grade", sa.String, nullable=True),
     sa.Column("submitted_at", sa.DateTime, nullable=True),
     sa.Column("workflow_state", sa.String, nullable=True),
+    sa.Column("late", sa.Boolean, nullable=False, server_default=sa.text("false")),
+    sa.Column("missing", sa.Boolean, nullable=False, server_default=sa.text("false")),
     sa.Column("updated_at", sa.DateTime, nullable=False),
 )
 

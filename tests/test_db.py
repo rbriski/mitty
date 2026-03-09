@@ -28,7 +28,7 @@ class TestCoursesTable:
         assert "courses" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("courses").columns) == 5
+        assert len(_table("courses").columns) == 7
 
     def test_primary_key(self) -> None:
         pk_cols = [c.name for c in _table("courses").primary_key]
@@ -43,16 +43,20 @@ class TestCoursesTable:
         assert isinstance(t.c.id.type, sa.Integer)
         assert isinstance(t.c.name.type, sa.String)
         assert isinstance(t.c.course_code.type, sa.String)
+        assert isinstance(t.c.workflow_state.type, sa.String)
         assert isinstance(t.c.term_id.type, sa.Integer)
         assert isinstance(t.c.term_name.type, sa.String)
+        assert isinstance(t.c.updated_at.type, sa.DateTime)
 
     def test_nullable_flags(self) -> None:
         t = _table("courses")
         assert t.c.id.nullable is False
         assert t.c.name.nullable is False
         assert t.c.course_code.nullable is False
+        assert t.c.workflow_state.nullable is True
         assert t.c.term_id.nullable is True
         assert t.c.term_name.nullable is True
+        assert t.c.updated_at.nullable is False
 
     def test_no_foreign_keys(self) -> None:
         assert len(_table("courses").foreign_keys) == 0
@@ -70,7 +74,7 @@ class TestAssignmentsTable:
         assert "assignments" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("assignments").columns) == 6
+        assert len(_table("assignments").columns) == 7
 
     def test_primary_key(self) -> None:
         pk_cols = [c.name for c in _table("assignments").primary_key]
@@ -83,6 +87,7 @@ class TestAssignmentsTable:
         assert isinstance(t.c.name.type, sa.String)
         assert isinstance(t.c.due_at.type, sa.DateTime)
         assert isinstance(t.c.points_possible.type, sa.Float)
+        assert isinstance(t.c.html_url.type, sa.String)
         assert isinstance(t.c.updated_at.type, sa.DateTime)
 
     def test_nullable_flags(self) -> None:
@@ -92,6 +97,7 @@ class TestAssignmentsTable:
         assert t.c.name.nullable is False
         assert t.c.due_at.nullable is True
         assert t.c.points_possible.nullable is True
+        assert t.c.html_url.nullable is True
         assert t.c.updated_at.nullable is False
 
     def test_foreign_key_to_courses(self) -> None:
@@ -117,7 +123,7 @@ class TestSubmissionsTable:
         assert "submissions" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("submissions").columns) == 6
+        assert len(_table("submissions").columns) == 8
 
     def test_primary_key_is_assignment_id(self) -> None:
         """DEC-006: submissions.assignment_id is PK (1:1 with assignment)."""
@@ -131,6 +137,8 @@ class TestSubmissionsTable:
         assert isinstance(t.c.grade.type, sa.String)
         assert isinstance(t.c.submitted_at.type, sa.DateTime)
         assert isinstance(t.c.workflow_state.type, sa.String)
+        assert isinstance(t.c.late.type, sa.Boolean)
+        assert isinstance(t.c.missing.type, sa.Boolean)
         assert isinstance(t.c.updated_at.type, sa.DateTime)
 
     def test_nullable_flags(self) -> None:
@@ -140,6 +148,8 @@ class TestSubmissionsTable:
         assert t.c.grade.nullable is True
         assert t.c.submitted_at.nullable is True
         assert t.c.workflow_state.nullable is True
+        assert t.c.late.nullable is False
+        assert t.c.missing.nullable is False
         assert t.c.updated_at.nullable is False
 
     def test_foreign_key_to_assignments(self) -> None:
