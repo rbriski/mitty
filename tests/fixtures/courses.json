@@ -1,0 +1,40 @@
+[
+  {
+    "id": 12345,
+    "name": "AP English Language",
+    "course_code": "ENG-AP",
+    "workflow_state": "available",
+    "enrollment_term_id": 100,
+    "term": {
+      "id": 100,
+      "name": "2025-2026",
+      "created_at": "2025-06-01T00:00:00Z"
+    },
+    "created_at": "2025-08-15T00:00:00Z",
+    "account_id": 1,
+    "uuid": "abc123"
+  },
+  {
+    "id": 12346,
+    "name": "Honors Chemistry",
+    "course_code": "CHEM-H",
+    "workflow_state": "available",
+    "enrollment_term_id": 100,
+    "term": null,
+    "created_at": "2025-08-15T00:00:00Z",
+    "account_id": 1
+  },
+  {
+    "id": 12300,
+    "name": "World History",
+    "course_code": "HIST-W",
+    "workflow_state": "completed",
+    "enrollment_term_id": 99,
+    "term": {
+      "id": 99,
+      "name": "2024-2025"
+    },
+    "created_at": "2024-08-15T00:00:00Z",
+    "account_id": 1
+  }
+]

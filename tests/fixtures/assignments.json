@@ -1,0 +1,75 @@
+[
+  {
+    "id": 67890,
+    "name": "Essay: Rhetorical Analysis",
+    "course_id": 12345,
+    "due_at": "2026-03-15T23:59:59Z",
+    "points_possible": 50.0,
+    "submission_types": ["online_text_entry"],
+    "grading_type": "points",
+    "html_url": "https://mitty.instructure.com/courses/12345/assignments/67890",
+    "published": true,
+    "submission": {
+      "score": 48.0,
+      "grade": "48",
+      "submitted_at": "2026-03-14T10:30:00Z",
+      "workflow_state": "graded",
+      "late": false,
+      "missing": false,
+      "attempt": 1,
+      "body": "<p>My essay...</p>"
+    }
+  },
+  {
+    "id": 67891,
+    "name": "Vocabulary Quiz 8",
+    "course_id": 12345,
+    "due_at": "2026-03-10T23:59:59Z",
+    "points_possible": 20.0,
+    "submission_types": ["online_quiz"],
+    "grading_type": "points",
+    "html_url": "https://mitty.instructure.com/courses/12345/assignments/67891",
+    "published": true,
+    "submission": {
+      "score": null,
+      "grade": null,
+      "submitted_at": null,
+      "workflow_state": "unsubmitted",
+      "late": false,
+      "missing": true,
+      "attempt": null
+    }
+  },
+  {
+    "id": 67892,
+    "name": "Final Project Proposal",
+    "course_id": 12345,
+    "due_at": null,
+    "points_possible": 30.0,
+    "submission_types": ["online_upload"],
+    "grading_type": "points",
+    "html_url": "https://mitty.instructure.com/courses/12345/assignments/67892",
+    "published": true,
+    "submission": null
+  },
+  {
+    "id": 67893,
+    "name": "Chapter 12 Reading Response",
+    "course_id": 12345,
+    "due_at": "2026-04-01T23:59:59Z",
+    "points_possible": 10.0,
+    "submission_types": ["online_text_entry"],
+    "grading_type": "points",
+    "html_url": "https://mitty.instructure.com/courses/12345/assignments/67893",
+    "published": true,
+    "submission": {
+      "score": null,
+      "grade": null,
+      "submitted_at": null,
+      "workflow_state": "unsubmitted",
+      "late": false,
+      "missing": false,
+      "attempt": null
+    }
+  }
+]
