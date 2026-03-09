@@ -94,6 +94,9 @@ async def main() -> None:
     else:
         from mitty.storage import StorageError, create_storage, store_all
 
+        # Both fields are guaranteed non-None by the guard above.
+        assert settings.supabase_url is not None
+        assert settings.supabase_key is not None
         try:
             storage_client = await create_storage(
                 supabase_url=settings.supabase_url,
