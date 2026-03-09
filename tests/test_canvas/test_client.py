@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import time
+
 import httpx
 import pytest
 import respx
 
-from mitty.canvas.client import CanvasAPIError, CanvasAuthError, CanvasClient
+from mitty.canvas.client import (
+    CanvasAPIError,
+    CanvasAuthError,
+    CanvasClient,
+    _cache_key,
+    _parse_link_header,
+)
 from mitty.config import Settings
 
 
@@ -256,3 +265,225 @@ class TestContextManager:
             assert not client._http.is_closed
 
         assert client._http.is_closed
+
+
+# ------------------------------------------------------------------ #
+#  New test classes — pagination & caching (US-005)
+# ------------------------------------------------------------------ #
+
+
+class TestParseLinkHeader:
+    """_parse_link_header extracts the 'next' URL from Canvas Link headers."""
+
+    def test_extracts_next_url(self) -> None:
+        header = (
+            '<https://canvas.test/api/v1/courses?page=2&per_page=100>; rel="next", '
+            '<https://canvas.test/api/v1/courses?page=5&per_page=100>; rel="last"'
+        )
+        assert (
+            _parse_link_header(header)
+            == "https://canvas.test/api/v1/courses?page=2&per_page=100"
+        )
+
+    def test_returns_none_when_no_next(self) -> None:
+        header = (
+            '<https://canvas.test/api/v1/courses?page=1&per_page=100>; rel="current", '
+            '<https://canvas.test/api/v1/courses?page=5&per_page=100>; rel="last"'
+        )
+        assert _parse_link_header(header) is None
+
+    def test_case_insensitive_rel(self) -> None:
+        header = '<https://canvas.test/api/v1/courses?page=3&per_page=100>; rel="Next"'
+        assert (
+            _parse_link_header(header)
+            == "https://canvas.test/api/v1/courses?page=3&per_page=100"
+        )
+
+
+class TestGetPaginated:
+    """get_paginated follows Link headers and concatenates pages."""
+
+    @respx.mock
+    async def test_multi_page_pagination(self) -> None:
+        """Two pages are concatenated into a single list."""
+        settings = _make_settings(cache_enabled=False)
+
+        page1_data = [{"id": 1}, {"id": 2}]
+        page2_data = [{"id": 3}]
+
+        page2_url = "https://canvas.test/api/v1/courses?page=2&per_page=100"
+        link = f'<{page2_url}>; rel="next", <{page2_url}>; rel="last"'
+
+        # Both requests go to /api/v1/courses (page 2 has query params).
+        # Use side_effect to return different responses for each call.
+        respx.get(url__startswith="https://canvas.test/api/v1/courses").mock(
+            side_effect=[
+                httpx.Response(200, json=page1_data, headers={"Link": link}),
+                httpx.Response(200, json=page2_data),
+            ]
+        )
+
+        async with CanvasClient(settings, _sleep=_nosleep) as client:
+            result = await client.get_paginated("/api/v1/courses")
+
+        assert result == [{"id": 1}, {"id": 2}, {"id": 3}]
+
+    @respx.mock
+    async def test_single_page_no_link_header(self) -> None:
+        """Single page response (no Link header) returns items directly."""
+        settings = _make_settings(cache_enabled=False)
+        data = [{"id": 1}]
+
+        respx.get("https://canvas.test/api/v1/courses").mock(
+            return_value=httpx.Response(200, json=data)
+        )
+
+        async with CanvasClient(settings, _sleep=_nosleep) as client:
+            result = await client.get_paginated("/api/v1/courses")
+
+        assert result == [{"id": 1}]
+
+    @respx.mock
+    async def test_empty_response(self) -> None:
+        """Empty JSON array returns empty list."""
+        settings = _make_settings(cache_enabled=False)
+
+        respx.get("https://canvas.test/api/v1/courses").mock(
+            return_value=httpx.Response(200, json=[])
+        )
+
+        async with CanvasClient(settings, _sleep=_nosleep) as client:
+            result = await client.get_paginated("/api/v1/courses")
+
+        assert result == []
+
+
+class TestCache:
+    """File-based JSON caching for get_paginated."""
+
+    @respx.mock
+    async def test_cache_hit_returns_cached_data(self, tmp_path: object) -> None:
+        """When a valid cache file exists, no HTTP call is made."""
+        from pathlib import Path
+
+        cache_dir = Path(str(tmp_path))
+        settings = _make_settings(
+            cache_enabled=True,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=3600,
+        )
+
+        # Pre-populate cache
+        full_url = f"{settings.canvas_base_url}/api/v1/courses"
+        key = _cache_key(full_url, None)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f"{key}.json"
+        cache_file.write_text(json.dumps([{"id": 99, "cached": True}]))
+
+        # No HTTP route mocked — if the client tries to fetch, respx will error
+        async with CanvasClient(settings, _sleep=_nosleep) as client:
+            result = await client.get_paginated("/api/v1/courses")
+
+        assert result == [{"id": 99, "cached": True}]
+
+    @respx.mock
+    async def test_cache_miss_makes_http_call_and_writes(
+        self, tmp_path: object
+    ) -> None:
+        """On cache miss, data is fetched and written to the cache file."""
+        from pathlib import Path
+
+        cache_dir = Path(str(tmp_path))
+        settings = _make_settings(
+            cache_enabled=True,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=3600,
+        )
+
+        data = [{"id": 1}]
+        respx.get("https://canvas.test/api/v1/courses").mock(
+            return_value=httpx.Response(200, json=data)
+        )
+
+        async with CanvasClient(settings, _sleep=_nosleep) as client:
+            result = await client.get_paginated("/api/v1/courses")
+
+        assert result == [{"id": 1}]
+
+        # Verify cache file was written
+        full_url = f"{settings.canvas_base_url}/api/v1/courses"
+        key = _cache_key(full_url, None)
+        cache_file = cache_dir / f"{key}.json"
+        assert cache_file.exists()
+        assert json.loads(cache_file.read_text()) == [{"id": 1}]
+
+        # Verify 0600 permissions
+        import stat
+
+        mode = cache_file.stat().st_mode
+        assert mode & 0o777 == stat.S_IRUSR | stat.S_IWUSR
+
+    @respx.mock
+    async def test_cache_disabled_always_fetches(self, tmp_path: object) -> None:
+        """When cache_enabled=False, HTTP is always called even if file exists."""
+        from pathlib import Path
+
+        cache_dir = Path(str(tmp_path))
+        settings = _make_settings(
+            cache_enabled=False,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=3600,
+        )
+
+        # Pre-populate cache file (should be ignored)
+        full_url = f"{settings.canvas_base_url}/api/v1/courses"
+        key = _cache_key(full_url, None)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f"{key}.json"
+        cache_file.write_text(json.dumps([{"id": 99, "stale": True}]))
+
+        fresh_data = [{"id": 1, "fresh": True}]
+        route = respx.get("https://canvas.test/api/v1/courses").mock(
+            return_value=httpx.Response(200, json=fresh_data)
+        )
+
+        async with CanvasClient(settings, _sleep=_nosleep) as client:
+            result = await client.get_paginated("/api/v1/courses")
+
+        assert result == [{"id": 1, "fresh": True}]
+        assert route.called
+
+    @respx.mock
+    async def test_cache_expiry_refetches(self, tmp_path: object) -> None:
+        """Expired cache entry is ignored; fresh data is fetched."""
+        from pathlib import Path
+
+        cache_dir = Path(str(tmp_path))
+        settings = _make_settings(
+            cache_enabled=True,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=60,
+        )
+
+        # Pre-populate cache with an old mtime
+        full_url = f"{settings.canvas_base_url}/api/v1/courses"
+        key = _cache_key(full_url, None)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f"{key}.json"
+        cache_file.write_text(json.dumps([{"id": 99, "expired": True}]))
+
+        import os
+
+        old_time = time.time() - 120  # 120 seconds ago (> 60s TTL)
+        os.utime(cache_file, (old_time, old_time))
+
+        fresh_data = [{"id": 1, "fresh": True}]
+        route = respx.get("https://canvas.test/api/v1/courses").mock(
+            return_value=httpx.Response(200, json=fresh_data)
+        )
+
+        async with CanvasClient(settings, _sleep=_nosleep) as client:
+            result = await client.get_paginated("/api/v1/courses")
+
+        assert result == [{"id": 1, "fresh": True}]
+        assert route.called
