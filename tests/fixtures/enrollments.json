@@ -1,0 +1,28 @@
+[
+  {
+    "id": 111,
+    "course_id": 12345,
+    "type": "StudentEnrollment",
+    "enrollment_state": "active",
+    "user_id": 9999,
+    "grades": {
+      "current_score": 96.2,
+      "current_grade": "A",
+      "final_score": 94.8,
+      "final_grade": "A",
+      "html_url": "https://mitty.instructure.com/courses/12345/grades/9999"
+    },
+    "html_url": "https://mitty.instructure.com/courses/12345/enrollments/111",
+    "created_at": "2025-08-20T00:00:00Z"
+  },
+  {
+    "id": 112,
+    "course_id": 12300,
+    "type": "StudentEnrollment",
+    "enrollment_state": "completed",
+    "user_id": 9999,
+    "grades": null,
+    "html_url": "https://mitty.instructure.com/courses/12300/enrollments/112",
+    "created_at": "2024-08-20T00:00:00Z"
+  }
+]
