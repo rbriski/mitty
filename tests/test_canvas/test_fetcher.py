@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
-from mitty.canvas.fetcher import fetch_assignments, fetch_courses, fetch_enrollments
+from mitty.canvas.fetcher import (
+    fetch_all,
+    fetch_assignments,
+    fetch_courses,
+    fetch_enrollments,
+)
 from mitty.models import Assignment, Course, Enrollment, Submission, Term
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
@@ -173,3 +178,130 @@ class TestFetchEnrollments:
             {"include[]": "current_points", "per_page": "100"},
         )
         assert result == []
+
+
+def _make_settings(max_concurrent: int = 3):
+    """Create a minimal Settings-like object for fetch_all tests."""
+    from mitty.config import Settings
+
+    return Settings(canvas_token="fake-token", max_concurrent=max_concurrent)
+
+
+def _make_course(course_id: int, name: str = "Test Course") -> Course:
+    """Create a Course instance for testing."""
+    return Course(id=course_id, name=name, course_code=f"C-{course_id}")
+
+
+def _make_assignment(assignment_id: int, course_id: int) -> Assignment:
+    """Create an Assignment instance for testing."""
+    return Assignment(id=assignment_id, name=f"HW {assignment_id}", course_id=course_id)
+
+
+def _make_enrollment(enrollment_id: int, course_id: int) -> Enrollment:
+    """Create an Enrollment instance for testing."""
+    return Enrollment(id=enrollment_id, course_id=course_id, type="StudentEnrollment")
+
+
+class TestFetchAll:
+    """fetch_all orchestrates concurrent fetching of all data."""
+
+    @patch("mitty.canvas.fetcher.fetch_enrollments", new_callable=AsyncMock)
+    @patch("mitty.canvas.fetcher.fetch_assignments", new_callable=AsyncMock)
+    @patch("mitty.canvas.fetcher.fetch_courses", new_callable=AsyncMock)
+    async def test_all_courses_succeed(
+        self,
+        mock_fetch_courses: AsyncMock,
+        mock_fetch_assignments: AsyncMock,
+        mock_fetch_enrollments: AsyncMock,
+    ) -> None:
+        """All courses fetched successfully — full result with no errors."""
+        courses = [_make_course(1, "Math"), _make_course(2, "English")]
+        assignments_1 = [_make_assignment(10, 1), _make_assignment(11, 1)]
+        assignments_2 = [_make_assignment(20, 2)]
+        enrollments = [_make_enrollment(100, 1), _make_enrollment(101, 2)]
+
+        mock_fetch_courses.return_value = courses
+        mock_fetch_enrollments.return_value = enrollments
+        mock_fetch_assignments.side_effect = [assignments_1, assignments_2]
+
+        client = AsyncMock()
+        settings = _make_settings()
+
+        result = await fetch_all(client, settings)
+
+        assert result["courses"] == courses
+        assert result["enrollments"] == enrollments
+        assert result["errors"] == []
+        assert result["assignments"]["1"] == assignments_1
+        assert result["assignments"]["2"] == assignments_2
+        assert len(result["assignments"]) == 2
+
+        mock_fetch_courses.assert_called_once_with(client)
+        mock_fetch_enrollments.assert_called_once_with(client)
+        assert mock_fetch_assignments.call_count == 2
+
+    @patch("mitty.canvas.fetcher.fetch_enrollments", new_callable=AsyncMock)
+    @patch("mitty.canvas.fetcher.fetch_assignments", new_callable=AsyncMock)
+    @patch("mitty.canvas.fetcher.fetch_courses", new_callable=AsyncMock)
+    async def test_one_course_fails(
+        self,
+        mock_fetch_courses: AsyncMock,
+        mock_fetch_assignments: AsyncMock,
+        mock_fetch_enrollments: AsyncMock,
+    ) -> None:
+        """One course's assignments fail — partial results + error recorded."""
+        courses = [_make_course(1, "Math"), _make_course(2, "English")]
+        assignments_1 = [_make_assignment(10, 1)]
+        enrollments = [_make_enrollment(100, 1)]
+
+        mock_fetch_courses.return_value = courses
+        mock_fetch_enrollments.return_value = enrollments
+        mock_fetch_assignments.side_effect = [
+            assignments_1,
+            RuntimeError("Canvas API timeout"),
+        ]
+
+        client = AsyncMock()
+        settings = _make_settings()
+
+        result = await fetch_all(client, settings)
+
+        assert result["courses"] == courses
+        assert result["enrollments"] == enrollments
+
+        # Only the successful course should appear in assignments
+        assert "1" in result["assignments"]
+        assert result["assignments"]["1"] == assignments_1
+        assert "2" not in result["assignments"]
+
+        # One error should be recorded
+        assert len(result["errors"]) == 1
+        assert "course 2" in result["errors"][0]
+        assert "English" in result["errors"][0]
+        assert "Canvas API timeout" in result["errors"][0]
+
+    @patch("mitty.canvas.fetcher.fetch_enrollments", new_callable=AsyncMock)
+    @patch("mitty.canvas.fetcher.fetch_assignments", new_callable=AsyncMock)
+    @patch("mitty.canvas.fetcher.fetch_courses", new_callable=AsyncMock)
+    async def test_empty_course_list(
+        self,
+        mock_fetch_courses: AsyncMock,
+        mock_fetch_assignments: AsyncMock,
+        mock_fetch_enrollments: AsyncMock,
+    ) -> None:
+        """No courses — empty assignments dict and no errors."""
+        mock_fetch_courses.return_value = []
+        mock_fetch_enrollments.return_value = [_make_enrollment(100, 1)]
+
+        client = AsyncMock()
+        settings = _make_settings()
+
+        result = await fetch_all(client, settings)
+
+        assert result["courses"] == []
+        assert result["assignments"] == {}
+        assert result["enrollments"] == [_make_enrollment(100, 1)]
+        assert result["errors"] == []
+
+        # fetch_assignments should never be called with no courses
+        mock_fetch_assignments.assert_not_called()
