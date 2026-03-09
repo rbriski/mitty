@@ -34,7 +34,7 @@ class TestLoadSettingsDefaults:
 
         settings = load_settings()
 
-        assert settings.canvas_token == "test-token-abc"
+        assert settings.canvas_token.get_secret_value() == "test-token-abc"
         assert settings.canvas_base_url == "https://mitty.instructure.com"
         assert settings.cache_dir == Path("data/.cache")
         assert settings.cache_enabled is True
@@ -56,7 +56,7 @@ class TestLoadSettingsEnvOverrides:
 
         settings = load_settings()
 
-        assert settings.canvas_token == "override-token"
+        assert settings.canvas_token.get_secret_value() == "override-token"
         assert settings.canvas_base_url == "https://custom.instructure.com"
         assert settings.max_concurrent == 5
         assert settings.request_delay == 0.5

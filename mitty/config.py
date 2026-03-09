@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 
 
 class Settings(BaseModel):
@@ -30,7 +30,7 @@ class Settings(BaseModel):
     """
 
     canvas_base_url: str = "https://mitty.instructure.com"
-    canvas_token: str
+    canvas_token: SecretStr
     cache_dir: Path = Path("data/.cache")
     cache_enabled: bool = True
     cache_ttl_seconds: int = 3600

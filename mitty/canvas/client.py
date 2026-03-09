@@ -103,7 +103,11 @@ class CanvasClient:
     async def __aenter__(self) -> CanvasClient:
         self._http = httpx.AsyncClient(
             base_url=self._settings.canvas_base_url,
-            headers={"Authorization": f"Bearer {self._settings.canvas_token}"},
+            headers={
+                "Authorization": (
+                    f"Bearer {self._settings.canvas_token.get_secret_value()}"
+                )
+            },
         )
         return self
 
@@ -136,10 +140,10 @@ class CanvasClient:
         max_retries = self._settings.max_retries
 
         for attempt in range(1 + max_retries):
-            # Rate-limit delay before each request
-            await self._sleep(self._settings.request_delay)
-
             async with self._semaphore:
+                # Rate-limit delay inside semaphore so concurrent requests
+                # are spaced out rather than bursting after a shared sleep.
+                await self._sleep(self._settings.request_delay)
                 response = await self._http.get(path, params=params)
 
             status = response.status_code
@@ -200,20 +204,24 @@ class CanvasClient:
         """Read cached JSON if the file exists and has not expired.
 
         Returns:
-            The cached list, or *None* on miss / expiry.
+            The cached list, or *None* on miss / expiry / read error.
         """
         path = self._cache_path(key)
         if not path.exists():
             return None
 
-        age = time.time() - path.stat().st_mtime
-        if age >= self._settings.cache_ttl_seconds:
-            logger.debug("Cache expired for %s (%.0fs old)", key[:12], age)
-            return None
+        try:
+            age = time.time() - path.stat().st_mtime
+            if age >= self._settings.cache_ttl_seconds:
+                logger.debug("Cache expired for %s (%.0fs old)", key[:12], age)
+                return None
 
-        logger.debug("Cache hit for %s", key[:12])
-        data: list[dict[str, Any]] = json.loads(path.read_text())
-        return data
+            logger.debug("Cache hit for %s", key[:12])
+            data: list[dict[str, Any]] = json.loads(path.read_text())
+            return data
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Cache read failed for %s: %s", key[:12], exc)
+            return None
 
     def _write_cache(self, key: str, data: list[dict[str, Any]]) -> None:
         """Write *data* as JSON to the cache directory with 0600 permissions.
@@ -292,6 +300,9 @@ class CanvasClient:
 
         # Write cache
         if self._settings.cache_enabled:
-            self._write_cache(key, items)
+            try:
+                self._write_cache(key, items)
+            except OSError as exc:
+                logger.warning("Cache write failed for %s: %s", key[:12], exc)
 
         return items

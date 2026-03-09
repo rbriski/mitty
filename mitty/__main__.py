@@ -11,7 +11,7 @@ import logging
 import sys
 from typing import Any
 
-from mitty.canvas.client import CanvasAuthError, CanvasClient
+from mitty.canvas.client import CanvasAPIError, CanvasAuthError, CanvasClient
 from mitty.canvas.fetcher import fetch_all
 from mitty.config import load_settings, parse_args
 
@@ -26,7 +26,7 @@ def _serialize_result(result: dict[str, Any]) -> dict[str, Any]:
 
     def _convert(obj: Any) -> Any:
         if isinstance(obj, BaseModel):
-            return obj.model_dump()
+            return obj.model_dump(mode="json")
         if isinstance(obj, list):
             return [_convert(item) for item in obj]
         if isinstance(obj, dict):
@@ -69,6 +69,9 @@ async def main() -> None:
             result = await fetch_all(client, settings)
     except CanvasAuthError as exc:
         print(f"Authentication error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except CanvasAPIError as exc:
+        print(f"API error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     serializable = _serialize_result(result)

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mitty.canvas.client import CanvasAuthError
+from mitty.canvas.client import CanvasAPIError, CanvasAuthError
 from mitty.config import Settings
 from mitty.models import Assignment, Course, Enrollment
 
@@ -145,6 +145,45 @@ class TestCanvasAuthError:
         assert (
             "authentication" in captured.err.lower() or "auth" in captured.err.lower()
         )
+
+
+class TestCanvasAPIError:
+    """CanvasAPIError should print error to stderr and exit non-zero."""
+
+    @patch("mitty.__main__.fetch_all", new_callable=AsyncMock)
+    @patch("mitty.__main__.CanvasClient")
+    @patch("mitty.__main__.load_settings")
+    @patch("mitty.__main__.parse_args")
+    async def test_api_error_exits_nonzero(
+        self,
+        mock_parse_args: MagicMock,
+        mock_load_settings: MagicMock,
+        mock_canvas_client_cls: MagicMock,
+        mock_fetch_all: AsyncMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        mock_parse_args.return_value = MagicMock(
+            no_cache=False, verbose=False, debug=False
+        )
+        mock_load_settings.return_value = _make_settings()
+        mock_fetch_all.side_effect = CanvasAPIError(
+            "Canvas API error after 3 retries: 500 for /api/v1/courses"
+        )
+
+        mock_client = AsyncMock()
+        mock_canvas_client_cls.return_value.__aenter__ = AsyncMock(
+            return_value=mock_client
+        )
+        mock_canvas_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        from mitty.__main__ import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            await main()
+
+        assert exc_info.value.code != 0
+        captured = capsys.readouterr()
+        assert "api error" in captured.err.lower() or "API" in captured.err
 
 
 class TestNoCacheFlag:
