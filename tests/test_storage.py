@@ -13,6 +13,7 @@ from mitty.storage import (
     _get_latest_snapshots,
     create_storage,
     insert_grade_snapshots,
+    store_all,
     upsert_assignments,
     upsert_courses,
     upsert_enrollments,
@@ -946,3 +947,209 @@ class TestInsertGradeSnapshots:
         assert row["current_grade"] == "A+"
         assert row["final_score"] == 100.0
         assert row["final_grade"] == "A+"
+
+
+# ------------------------------------------------------------------ #
+#  store_all
+# ------------------------------------------------------------------ #
+
+# Patch targets for store_all tests.
+_STORE_ALL_PATCHES = {
+    "upsert_courses": "mitty.storage.upsert_courses",
+    "upsert_enrollments": "mitty.storage.upsert_enrollments",
+    "upsert_assignments": "mitty.storage.upsert_assignments",
+    "upsert_submissions": "mitty.storage.upsert_submissions",
+    "insert_grade_snapshots": "mitty.storage.insert_grade_snapshots",
+}
+
+
+class TestStoreAll:
+    """store_all orchestrates all upserts in FK-safe order."""
+
+    async def test_calls_all_upserts_in_order(self) -> None:
+        """Full success path: all 5 functions called in correct FK order."""
+        call_order: list[str] = []
+
+        async def _track(name: str) -> AsyncMock:
+            async def _side_effect(*_args: object, **_kwargs: object) -> None:
+                call_order.append(name)
+
+            return _side_effect
+
+        client = AsyncMock()
+        courses = [Course(id=1, name="AP English", course_code="ENG")]
+        enrollments = [Enrollment(id=10, course_id=1, type="StudentEnrollment")]
+        assignments: dict[str, list[Assignment]] = {
+            "1": [Assignment(id=100, name="Essay", course_id=1)],
+        }
+
+        with (
+            patch(
+                _STORE_ALL_PATCHES["upsert_courses"],
+                new_callable=AsyncMock,
+                side_effect=lambda *a, **kw: call_order.append("upsert_courses"),
+            ) as mock_courses,
+            patch(
+                _STORE_ALL_PATCHES["upsert_enrollments"],
+                new_callable=AsyncMock,
+                side_effect=lambda *a, **kw: call_order.append("upsert_enrollments"),
+            ) as mock_enrollments,
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments"],
+                new_callable=AsyncMock,
+                side_effect=lambda *a, **kw: call_order.append("upsert_assignments"),
+            ) as mock_assignments,
+            patch(
+                _STORE_ALL_PATCHES["upsert_submissions"],
+                new_callable=AsyncMock,
+                side_effect=lambda *a, **kw: call_order.append("upsert_submissions"),
+            ) as mock_submissions,
+            patch(
+                _STORE_ALL_PATCHES["insert_grade_snapshots"],
+                new_callable=AsyncMock,
+                side_effect=lambda *a, **kw: call_order.append(
+                    "insert_grade_snapshots"
+                ),
+            ) as mock_snapshots,
+        ):
+            await store_all(
+                client,
+                {
+                    "courses": courses,
+                    "assignments": assignments,
+                    "enrollments": enrollments,
+                },
+            )
+
+        # Verify FK-safe order
+        assert call_order == [
+            "upsert_courses",
+            "upsert_enrollments",
+            "upsert_assignments",
+            "upsert_submissions",
+            "insert_grade_snapshots",
+        ]
+
+        # Verify correct args passed
+        mock_courses.assert_awaited_once_with(client, courses)
+        mock_enrollments.assert_awaited_once_with(client, enrollments)
+        mock_assignments.assert_awaited_once_with(client, assignments)
+        mock_submissions.assert_awaited_once_with(client, assignments)
+        mock_snapshots.assert_awaited_once_with(client, enrollments)
+
+    async def test_failure_mid_sequence_raises_storage_error(self) -> None:
+        """If a middle step fails, StorageError propagates."""
+        client = AsyncMock()
+
+        with (
+            patch(
+                _STORE_ALL_PATCHES["upsert_courses"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_enrollments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments"],
+                new_callable=AsyncMock,
+                side_effect=StorageError("Failed to upsert assignments: timeout"),
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_submissions"],
+                new_callable=AsyncMock,
+            ) as mock_submissions,
+            patch(
+                _STORE_ALL_PATCHES["insert_grade_snapshots"],
+                new_callable=AsyncMock,
+            ) as mock_snapshots,
+        ):
+            with pytest.raises(StorageError, match="upsert assignments"):
+                await store_all(
+                    client,
+                    {
+                        "courses": [Course(id=1, name="Test", course_code="T")],
+                        "assignments": {"1": [Assignment(id=1, name="A", course_id=1)]},
+                        "enrollments": [
+                            Enrollment(id=1, course_id=1, type="StudentEnrollment")
+                        ],
+                    },
+                )
+
+            # Steps after failure should NOT be called
+            mock_submissions.assert_not_awaited()
+            mock_snapshots.assert_not_awaited()
+
+    async def test_empty_data_succeeds_silently(self) -> None:
+        """Empty/missing keys don't cause errors."""
+        client = AsyncMock()
+
+        with (
+            patch(
+                _STORE_ALL_PATCHES["upsert_courses"],
+                new_callable=AsyncMock,
+            ) as mock_courses,
+            patch(
+                _STORE_ALL_PATCHES["upsert_enrollments"],
+                new_callable=AsyncMock,
+            ) as mock_enrollments,
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments"],
+                new_callable=AsyncMock,
+            ) as mock_assignments,
+            patch(
+                _STORE_ALL_PATCHES["upsert_submissions"],
+                new_callable=AsyncMock,
+            ) as mock_submissions,
+            patch(
+                _STORE_ALL_PATCHES["insert_grade_snapshots"],
+                new_callable=AsyncMock,
+            ) as mock_snapshots,
+        ):
+            # Completely empty dict
+            await store_all(client, {})
+
+            # All functions still called (with empty data)
+            mock_courses.assert_awaited_once_with(client, [])
+            mock_enrollments.assert_awaited_once_with(client, [])
+            mock_assignments.assert_awaited_once_with(client, {})
+            mock_submissions.assert_awaited_once_with(client, {})
+            mock_snapshots.assert_awaited_once_with(client, [])
+
+    async def test_ignores_errors_key(self) -> None:
+        """The 'errors' key from fetch_all output is ignored."""
+        client = AsyncMock()
+
+        with (
+            patch(
+                _STORE_ALL_PATCHES["upsert_courses"],
+                new_callable=AsyncMock,
+            ) as mock_courses,
+            patch(
+                _STORE_ALL_PATCHES["upsert_enrollments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_submissions"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["insert_grade_snapshots"],
+                new_callable=AsyncMock,
+            ),
+        ):
+            courses = [Course(id=1, name="Test", course_code="T")]
+            await store_all(
+                client,
+                {
+                    "courses": courses,
+                    "errors": ["some error that should be ignored"],
+                },
+            )
+
+            # Should proceed normally, courses called with data
+            mock_courses.assert_awaited_once_with(client, courses)

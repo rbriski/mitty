@@ -359,3 +359,48 @@ async def insert_grade_snapshots(
         raise StorageError(msg) from exc
 
     logger.info("Inserted %d grade snapshots", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Orchestrator
+# ------------------------------------------------------------------ #
+
+
+async def store_all(
+    client: AsyncClient,
+    data: dict,
+) -> None:
+    """Persist all scraped data to Supabase in FK-safe order.
+
+    Calls upsert/insert functions sequentially in dependency order:
+    courses -> enrollments -> assignments -> submissions -> grade_snapshots.
+
+    Args:
+        client: Async Supabase client.
+        data: Dict with keys "courses", "assignments", "enrollments"
+              (same shape as ``fetch_all()`` output).
+
+    Raises:
+        StorageError: If any upsert/insert step fails.
+    """
+    courses = data.get("courses", [])
+    assignments = data.get("assignments", {})
+    enrollments = data.get("enrollments", [])
+
+    steps = [
+        ("upsert_courses", upsert_courses, [client, courses]),
+        ("upsert_enrollments", upsert_enrollments, [client, enrollments]),
+        ("upsert_assignments", upsert_assignments, [client, assignments]),
+        ("upsert_submissions", upsert_submissions, [client, assignments]),
+        ("insert_grade_snapshots", insert_grade_snapshots, [client, enrollments]),
+    ]
+
+    for step_name, func, args in steps:
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await func(*args)
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
