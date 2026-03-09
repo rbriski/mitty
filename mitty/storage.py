@@ -253,3 +253,109 @@ async def upsert_enrollments(
         raise StorageError(msg) from exc
 
     logger.info("Upserted %d enrollments", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Grade Snapshots
+# ------------------------------------------------------------------ #
+
+
+async def _get_latest_snapshots(
+    client: AsyncClient,
+    enrollment_ids: list[int],
+) -> dict[int, dict]:
+    """Fetch the most recent grade snapshot per enrollment.
+
+    Queries the ``grade_snapshots`` table for the given enrollment IDs,
+    ordered by ``scraped_at`` descending, and returns a dict mapping each
+    enrollment ID to its latest grade field values.
+
+    Args:
+        client: Async Supabase client.
+        enrollment_ids: Enrollment IDs to look up.
+
+    Returns:
+        Mapping of enrollment_id -> dict with grade field values.
+        Enrollments without a prior snapshot are absent from the dict.
+
+    Raises:
+        StorageError: If the Supabase query fails.
+    """
+    if not enrollment_ids:
+        return {}
+
+    try:
+        response = await (
+            client.table("grade_snapshots")
+            .select("enrollment_id,current_score,current_grade,final_score,final_grade")
+            .in_("enrollment_id", enrollment_ids)
+            .order("scraped_at", desc=True)
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to fetch latest snapshots: {exc}"
+        raise StorageError(msg) from exc
+
+    # Group by enrollment_id, keep only the first (most recent) per enrollment.
+    latest: dict[int, dict] = {}
+    for row in response.data:
+        eid = row["enrollment_id"]
+        if eid not in latest:
+            latest[eid] = {col: row.get(col) for col in _GRADE_COLUMNS}
+    return latest
+
+
+async def insert_grade_snapshots(
+    client: AsyncClient,
+    enrollments: list[Enrollment],
+) -> None:
+    """Insert grade snapshots only for enrollments whose grades changed.
+
+    Compares each enrollment's current grades against the most recent
+    stored snapshot.  A new row is inserted only when at least one grade
+    field differs.  First-time scrapes (no prior snapshot) always insert.
+
+    Args:
+        client: Async Supabase client.
+        enrollments: List of Enrollment models with current grades.
+
+    Raises:
+        StorageError: If the Supabase insert fails.
+    """
+    if not enrollments:
+        return
+
+    enrollment_ids = [e.id for e in enrollments]
+    latest = await _get_latest_snapshots(client, enrollment_ids)
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for enrollment in enrollments:
+        current_grades = {
+            col: (enrollment.grades or {}).get(col) for col in _GRADE_COLUMNS
+        }
+        previous = latest.get(enrollment.id)
+
+        if previous is not None and current_grades == previous:
+            continue  # No change — skip
+
+        rows.append(
+            {
+                "enrollment_id": enrollment.id,
+                "course_id": enrollment.course_id,
+                "scraped_at": now,
+                **current_grades,
+            }
+        )
+
+    if not rows:
+        logger.info("No grade changes detected, skipping snapshot insert")
+        return
+
+    try:
+        await client.table("grade_snapshots").insert(rows).execute()
+    except Exception as exc:
+        msg = f"Failed to insert grade snapshots: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Inserted %d grade snapshots", len(rows))

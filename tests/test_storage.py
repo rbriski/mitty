@@ -10,7 +10,9 @@ import pytest
 from mitty.models import Assignment, Course, Enrollment, Submission, Term
 from mitty.storage import (
     StorageError,
+    _get_latest_snapshots,
     create_storage,
+    insert_grade_snapshots,
     upsert_assignments,
     upsert_courses,
     upsert_enrollments,
@@ -30,6 +32,47 @@ def _mock_client() -> AsyncMock:
     upsert_builder.execute = AsyncMock(return_value=execute_result)
     table_builder.upsert = MagicMock(return_value=upsert_builder)
     client.table = MagicMock(return_value=table_builder)
+
+    return client
+
+
+def _mock_snapshot_client(
+    *, select_data: list[dict] | None = None, insert_fail: bool = False
+) -> AsyncMock:
+    """Build a mock client supporting both select chain and insert chain.
+
+    The select chain: table().select().in_().order().execute()
+    The insert chain: table().insert().execute()
+    """
+    client = AsyncMock()
+
+    select_result = MagicMock()
+    select_result.data = select_data if select_data is not None else []
+
+    insert_result = MagicMock()
+    insert_result.data = []
+
+    # Build a flexible table mock that supports both chains
+    table_mock = MagicMock()
+
+    # Select chain
+    select_builder = MagicMock()
+    in_builder = MagicMock()
+    order_builder = MagicMock()
+    order_builder.execute = AsyncMock(return_value=select_result)
+    in_builder.order = MagicMock(return_value=order_builder)
+    select_builder.in_ = MagicMock(return_value=in_builder)
+    table_mock.select = MagicMock(return_value=select_builder)
+
+    # Insert chain
+    insert_builder = MagicMock()
+    if insert_fail:
+        insert_builder.execute = AsyncMock(side_effect=Exception("insert failed"))
+    else:
+        insert_builder.execute = AsyncMock(return_value=insert_result)
+    table_mock.insert = MagicMock(return_value=insert_builder)
+
+    client.table = MagicMock(return_value=table_mock)
 
     return client
 
@@ -523,3 +566,383 @@ class TestUpsertEnrollments:
         assert row["current_grade"] is None
         assert row["final_score"] is None
         assert row["final_grade"] is None
+
+
+# ------------------------------------------------------------------ #
+#  _get_latest_snapshots
+# ------------------------------------------------------------------ #
+
+
+class TestGetLatestSnapshots:
+    """_get_latest_snapshots fetches the most recent snapshot per enrollment."""
+
+    async def test_returns_latest_per_enrollment(self) -> None:
+        """Multiple rows per enrollment — only the first (most recent) kept."""
+        client = _mock_snapshot_client(
+            select_data=[
+                # enrollment 1: most recent (appears first due to ORDER BY)
+                {
+                    "enrollment_id": 1,
+                    "current_score": 95.0,
+                    "current_grade": "A",
+                    "final_score": 90.0,
+                    "final_grade": "A-",
+                },
+                # enrollment 1: older snapshot (should be ignored)
+                {
+                    "enrollment_id": 1,
+                    "current_score": 80.0,
+                    "current_grade": "B-",
+                    "final_score": 78.0,
+                    "final_grade": "C+",
+                },
+                # enrollment 2: only one snapshot
+                {
+                    "enrollment_id": 2,
+                    "current_score": 88.0,
+                    "current_grade": "B+",
+                    "final_score": 85.0,
+                    "final_grade": "B",
+                },
+            ],
+        )
+
+        result = await _get_latest_snapshots(client, [1, 2])
+
+        assert len(result) == 2
+        assert result[1] == {
+            "current_score": 95.0,
+            "current_grade": "A",
+            "final_score": 90.0,
+            "final_grade": "A-",
+        }
+        assert result[2] == {
+            "current_score": 88.0,
+            "current_grade": "B+",
+            "final_score": 85.0,
+            "final_grade": "B",
+        }
+
+    async def test_empty_enrollment_ids_returns_empty_dict(self) -> None:
+        """Empty list should short-circuit, no API calls."""
+        client = _mock_snapshot_client()
+
+        result = await _get_latest_snapshots(client, [])
+
+        assert result == {}
+        client.table.assert_not_called()
+
+    async def test_no_snapshots_returns_empty_dict(self) -> None:
+        """Enrollments with no prior snapshots → empty dict."""
+        client = _mock_snapshot_client(select_data=[])
+
+        result = await _get_latest_snapshots(client, [1, 2, 3])
+
+        assert result == {}
+
+    async def test_queries_correct_table_and_columns(self) -> None:
+        """Verify the select chain calls the right table/columns/ordering."""
+        client = _mock_snapshot_client(select_data=[])
+
+        await _get_latest_snapshots(client, [10, 20])
+
+        client.table.assert_called_once_with("grade_snapshots")
+        table_mock = client.table.return_value
+        table_mock.select.assert_called_once_with(
+            "enrollment_id,current_score,current_grade,final_score,final_grade"
+        )
+        table_mock.select.return_value.in_.assert_called_once_with(
+            "enrollment_id", [10, 20]
+        )
+        table_mock.select.return_value.in_.return_value.order.assert_called_once_with(
+            "scraped_at", desc=True
+        )
+
+    async def test_api_failure_raises_storage_error(self) -> None:
+        """Select chain failure is wrapped in StorageError."""
+        client = _mock_snapshot_client()
+        # Make the execute() call on the select chain fail
+        table_mock = client.table.return_value
+        table_mock.select.return_value.in_.return_value.order.return_value.execute = (
+            AsyncMock(side_effect=Exception("select failed"))
+        )
+
+        with pytest.raises(StorageError, match="select failed"):
+            await _get_latest_snapshots(client, [1])
+
+    async def test_null_grade_fields_preserved(self) -> None:
+        """Snapshot rows with None grade values are preserved correctly."""
+        client = _mock_snapshot_client(
+            select_data=[
+                {
+                    "enrollment_id": 1,
+                    "current_score": None,
+                    "current_grade": None,
+                    "final_score": None,
+                    "final_grade": None,
+                },
+            ],
+        )
+
+        result = await _get_latest_snapshots(client, [1])
+
+        assert result[1] == {
+            "current_score": None,
+            "current_grade": None,
+            "final_score": None,
+            "final_grade": None,
+        }
+
+
+# ------------------------------------------------------------------ #
+#  insert_grade_snapshots
+# ------------------------------------------------------------------ #
+
+
+class TestInsertGradeSnapshots:
+    """insert_grade_snapshots compares grades and inserts only changes."""
+
+    async def test_first_scrape_inserts_all(self) -> None:
+        """No prior snapshots → all enrollments are inserted."""
+        client = _mock_snapshot_client(select_data=[])
+        enrollments = [
+            Enrollment(
+                id=1,
+                course_id=100,
+                type="StudentEnrollment",
+                grades={
+                    "current_score": 95.0,
+                    "current_grade": "A",
+                    "final_score": 90.0,
+                    "final_grade": "A-",
+                },
+            ),
+            Enrollment(
+                id=2,
+                course_id=200,
+                type="StudentEnrollment",
+                grades={
+                    "current_score": 80.0,
+                    "current_grade": "B-",
+                    "final_score": 78.0,
+                    "final_grade": "C+",
+                },
+            ),
+        ]
+
+        await insert_grade_snapshots(client, enrollments)
+
+        # insert was called
+        table_mock = client.table.return_value
+        table_mock.insert.assert_called_once()
+        rows = table_mock.insert.call_args[0][0]
+        assert len(rows) == 2
+
+        # Check row content
+        row_by_eid = {r["enrollment_id"]: r for r in rows}
+        assert row_by_eid[1]["course_id"] == 100
+        assert row_by_eid[1]["current_score"] == 95.0
+        assert row_by_eid[1]["current_grade"] == "A"
+        assert row_by_eid[1]["final_score"] == 90.0
+        assert row_by_eid[1]["final_grade"] == "A-"
+        assert "scraped_at" in row_by_eid[1]
+
+        assert row_by_eid[2]["course_id"] == 200
+        assert row_by_eid[2]["current_score"] == 80.0
+
+    async def test_no_change_skips_insert(self) -> None:
+        """Latest snapshot matches current grades → nothing inserted."""
+        client = _mock_snapshot_client(
+            select_data=[
+                {
+                    "enrollment_id": 1,
+                    "current_score": 95.0,
+                    "current_grade": "A",
+                    "final_score": 90.0,
+                    "final_grade": "A-",
+                },
+            ],
+        )
+        enrollments = [
+            Enrollment(
+                id=1,
+                course_id=100,
+                type="StudentEnrollment",
+                grades={
+                    "current_score": 95.0,
+                    "current_grade": "A",
+                    "final_score": 90.0,
+                    "final_grade": "A-",
+                },
+            ),
+        ]
+
+        await insert_grade_snapshots(client, enrollments)
+
+        # insert should NOT be called since grades haven't changed
+        table_mock = client.table.return_value
+        table_mock.insert.assert_not_called()
+
+    async def test_partial_change_inserts_changed_only(self) -> None:
+        """Mix of changed and unchanged enrollments → only changed inserted."""
+        client = _mock_snapshot_client(
+            select_data=[
+                # enrollment 1: unchanged
+                {
+                    "enrollment_id": 1,
+                    "current_score": 95.0,
+                    "current_grade": "A",
+                    "final_score": 90.0,
+                    "final_grade": "A-",
+                },
+                # enrollment 2: will be different
+                {
+                    "enrollment_id": 2,
+                    "current_score": 80.0,
+                    "current_grade": "B-",
+                    "final_score": 78.0,
+                    "final_grade": "C+",
+                },
+            ],
+        )
+        enrollments = [
+            # Enrollment 1: same grades as snapshot
+            Enrollment(
+                id=1,
+                course_id=100,
+                type="StudentEnrollment",
+                grades={
+                    "current_score": 95.0,
+                    "current_grade": "A",
+                    "final_score": 90.0,
+                    "final_grade": "A-",
+                },
+            ),
+            # Enrollment 2: grades changed (score went up)
+            Enrollment(
+                id=2,
+                course_id=200,
+                type="StudentEnrollment",
+                grades={
+                    "current_score": 85.0,
+                    "current_grade": "B",
+                    "final_score": 82.0,
+                    "final_grade": "B-",
+                },
+            ),
+        ]
+
+        await insert_grade_snapshots(client, enrollments)
+
+        table_mock = client.table.return_value
+        table_mock.insert.assert_called_once()
+        rows = table_mock.insert.call_args[0][0]
+        assert len(rows) == 1
+        assert rows[0]["enrollment_id"] == 2
+        assert rows[0]["current_score"] == 85.0
+
+    async def test_empty_enrollments_skips(self) -> None:
+        """Empty enrollments list → no API calls at all."""
+        client = _mock_snapshot_client()
+
+        await insert_grade_snapshots(client, [])
+
+        client.table.assert_not_called()
+
+    async def test_api_failure_raises_storage_error(self) -> None:
+        """Insert failure is wrapped in StorageError."""
+        client = _mock_snapshot_client(select_data=[], insert_fail=True)
+        enrollments = [
+            Enrollment(
+                id=1,
+                course_id=100,
+                type="StudentEnrollment",
+                grades={"current_score": 95.0},
+            ),
+        ]
+
+        with pytest.raises(StorageError, match="insert failed"):
+            await insert_grade_snapshots(client, enrollments)
+
+    async def test_null_grades_handled(self) -> None:
+        """Enrollment with grades=None vs snapshot with all None → no change."""
+        client = _mock_snapshot_client(
+            select_data=[
+                {
+                    "enrollment_id": 1,
+                    "current_score": None,
+                    "current_grade": None,
+                    "final_score": None,
+                    "final_grade": None,
+                },
+            ],
+        )
+        enrollments = [
+            Enrollment(
+                id=1,
+                course_id=100,
+                type="StudentEnrollment",
+                grades=None,  # All grade columns will be None
+            ),
+        ]
+
+        await insert_grade_snapshots(client, enrollments)
+
+        # grades=None maps to all None, which matches the snapshot → skip
+        table_mock = client.table.return_value
+        table_mock.insert.assert_not_called()
+
+    async def test_null_grades_first_scrape_inserts(self) -> None:
+        """Enrollment with grades=None on first scrape → inserts with all None."""
+        client = _mock_snapshot_client(select_data=[])
+        enrollments = [
+            Enrollment(
+                id=1,
+                course_id=100,
+                type="StudentEnrollment",
+                grades=None,
+            ),
+        ]
+
+        await insert_grade_snapshots(client, enrollments)
+
+        table_mock = client.table.return_value
+        table_mock.insert.assert_called_once()
+        rows = table_mock.insert.call_args[0][0]
+        assert len(rows) == 1
+        assert rows[0]["current_score"] is None
+        assert rows[0]["current_grade"] is None
+        assert rows[0]["final_score"] is None
+        assert rows[0]["final_grade"] is None
+
+    async def test_snapshot_row_includes_required_fields(self) -> None:
+        """Each inserted row has enrollment_id, course_id, scraped_at, grades."""
+        client = _mock_snapshot_client(select_data=[])
+        enrollments = [
+            Enrollment(
+                id=42,
+                course_id=999,
+                type="StudentEnrollment",
+                grades={
+                    "current_score": 100.0,
+                    "current_grade": "A+",
+                    "final_score": 100.0,
+                    "final_grade": "A+",
+                },
+            ),
+        ]
+
+        await insert_grade_snapshots(client, enrollments)
+
+        table_mock = client.table.return_value
+        rows = table_mock.insert.call_args[0][0]
+        row = rows[0]
+
+        # Required fields
+        assert row["enrollment_id"] == 42
+        assert row["course_id"] == 999
+        assert "scraped_at" in row
+        assert row["current_score"] == 100.0
+        assert row["current_grade"] == "A+"
+        assert row["final_score"] == 100.0
+        assert row["final_grade"] == "A+"
