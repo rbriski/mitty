@@ -3,6 +3,8 @@ services:
     build: .
     init: true
     env_file: .env
+    volumes:
+      - scraper_data:/app/data
     restart: unless-stopped
 
   caddy:
@@ -37,5 +39,6 @@ services:
   #   restart: unless-stopped
 
 volumes:
+  scraper_data:
   caddy_data:
   caddy_config:

@@ -39,7 +39,9 @@ COPY crontab /app/crontab
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Run as non-root
-RUN useradd --create-home appuser
+RUN useradd --create-home appuser \
+    && mkdir -p /app/data/.cache \
+    && chown -R appuser:appuser /app/data
 USER appuser
 
 CMD ["supercronic", "/app/crontab"]
