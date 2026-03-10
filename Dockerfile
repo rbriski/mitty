@@ -5,10 +5,11 @@ WORKDIR /app
 
 # Install dependencies first (layer cache)
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev
+RUN uv sync --locked --no-dev --no-install-project
 
-# Copy application code
+# Copy application code and install project
 COPY mitty/ mitty/
+RUN uv sync --locked --no-dev
 
 # ---- runtime ----
 FROM python:3.12-slim-bookworm

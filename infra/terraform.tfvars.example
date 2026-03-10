@@ -1,12 +1,13 @@
 # Hetzner Cloud API token (from https://console.hetzner.cloud/)
 hcloud_token = "your-hcloud-api-token"
 
-# Hetzner DNS API token (from https://dns.hetzner.com/settings/api-token)
-hdns_token = "your-hdns-api-token"
+# DNSimple (from https://dnsimple.com/user)
+dnsimple_token      = "your-dnsimple-api-token"
+dnsimple_account_id = "12345"
 
 # Server configuration
 server_name     = "mitty"
-server_type     = "cx22"
+server_type     = "cx23"
 server_location = "fsn1"
 server_image    = "ubuntu-24.04"
 
@@ -14,8 +15,8 @@ server_image    = "ubuntu-24.04"
 ssh_public_key_path = "~/.ssh/id_ed25519.pub"
 
 # Domain configuration
-domain    = "mitty.example.com"
-zone_name = "example.com"
+domain    = "mitty.ayla.works"
+zone_name = "ayla.works"
 
 # Restrict SSH access to your IP (recommended)
 # ssh_allowed_ips = ["YOUR.IP.ADDRESS/32"]

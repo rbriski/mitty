@@ -21,7 +21,7 @@ echo "==> Deploying Mitty to ${SERVER_USER}@${SERVER_HOST}..."
 rsync -avz --delete \
     --exclude='.env' \
     --exclude='.git/' \
-    --exclude='infra/.terraform/' \
+    --exclude='infra/' \
     --exclude='tests/' \
     --exclude='.venv/' \
     --exclude='.beads/' \
@@ -33,6 +33,11 @@ rsync -avz --delete \
     --exclude='tickets/' \
     --exclude='results.json' \
     --exclude='data/' \
+    --exclude='__pycache__/' \
+    --exclude='*.pyc' \
+    --exclude='AGENTS.md' \
+    --exclude='CLAUDE.md' \
+    --exclude='.barkrc*' \
     ./ "${SERVER_USER}@${SERVER_HOST}:${REMOTE_DIR}/"
 
 echo "==> Files synced. Starting containers..."

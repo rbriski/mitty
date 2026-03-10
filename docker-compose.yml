@@ -1,6 +1,7 @@
 services:
   scraper:
     build: .
+    init: true
     env_file: .env
     restart: unless-stopped
 

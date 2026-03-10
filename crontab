@@ -1,1 +1,1 @@
-0 */6 * * * python -m mitty --verbose
+0 */6 * * * /app/.venv/bin/python -m mitty --verbose

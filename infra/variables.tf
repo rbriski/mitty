@@ -4,10 +4,15 @@ variable "hcloud_token" {
   sensitive   = true
 }
 
-variable "hdns_token" {
-  description = "Hetzner DNS API token"
+variable "dnsimple_token" {
+  description = "DNSimple API token"
   type        = string
   sensitive   = true
+}
+
+variable "dnsimple_account_id" {
+  description = "DNSimple account ID"
+  type        = string
 }
 
 variable "server_name" {
@@ -19,7 +24,7 @@ variable "server_name" {
 variable "server_type" {
   description = "Hetzner server type (e.g. cx22, cx32)"
   type        = string
-  default     = "cx22"
+  default     = "cx23"
 }
 
 variable "server_location" {
