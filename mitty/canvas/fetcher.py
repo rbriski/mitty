@@ -36,7 +36,13 @@ async def fetch_courses(client: CanvasClient) -> list[Course]:
         "/api/v1/courses",
         {"include[]": "term", "per_page": "100"},
     )
-    return [Course.model_validate(item) for item in raw]
+    # Canvas returns minimal stubs for access-restricted courses (e.g. past
+    # semesters) that lack required fields like ``name``.  Skip them.
+    return [
+        Course.model_validate(item)
+        for item in raw
+        if not item.get("access_restricted_by_date")
+    ]
 
 
 async def fetch_assignments(

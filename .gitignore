@@ -6,3 +6,10 @@ __pycache__/
 .pytest_cache/
 results.json
 work-*/
+
+# Tool / editor config (local-only)
+.barkrc
+.barkrc.bak
+.beads/
+.claude/
+.playwright-mcp/

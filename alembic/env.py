@@ -9,10 +9,13 @@ from __future__ import annotations
 import os
 from logging.config import fileConfig
 
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from mitty.db import metadata
+
+load_dotenv()
 
 # Alembic Config object — provides access to alembic.ini values.
 config = context.config

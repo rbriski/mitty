@@ -2,7 +2,8 @@
 
 ## Meta
 - **Ticket:** tickets/supabase-storage.md
-- **Phase:** detailing
+- **Phase:** published
+- **PR:** https://github.com/rbriski/mitty/pull/2
 - **Sessions:** 1
 - **Branch:** `feature/supabase-storage` (from `main`)
 
