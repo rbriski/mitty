@@ -1,0 +1,35 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - unattended-upgrades
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+
+runcmd:
+  # Install Docker via official convenience script
+  - curl -fsSL https://get.docker.com | sh
+
+  # Create deploy user with Docker group access
+  - useradd -m -s /bin/bash -G docker deploy
+  - mkdir -p /home/deploy/.ssh
+  - cp /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+  - chown -R deploy:deploy /home/deploy/.ssh
+  - chmod 700 /home/deploy/.ssh
+  - chmod 600 /home/deploy/.ssh/authorized_keys
+
+  # Create app directory
+  - mkdir -p /home/deploy/mitty
+  - chown deploy:deploy /home/deploy/mitty
+
+  # Harden SSH - disable root login and password auth
+  - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+  - sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+  - systemctl restart sshd
+
+  # Enable unattended upgrades
+  - dpkg-reconfigure -f noninteractive unattended-upgrades

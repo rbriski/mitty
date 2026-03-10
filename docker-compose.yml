@@ -1,0 +1,40 @@
+services:
+  scraper:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  # --- future services ---
+  # web:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.web
+  #   env_file: .env
+  #   ports:
+  #     - "8000:8000"
+  #   restart: unless-stopped
+
+  # agent:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.agent
+  #   env_file: .env
+  #   restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

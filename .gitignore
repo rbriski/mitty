@@ -13,3 +13,10 @@ work-*/
 .beads/
 .claude/
 .playwright-mcp/
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.backup
+infra/*.tfvars
+!infra/terraform.tfvars.example

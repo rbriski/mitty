@@ -1,0 +1,4 @@
+{$DOMAIN} {
+    tls {$ACME_EMAIL}
+    respond "Mitty is running."
+}
