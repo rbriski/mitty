@@ -1,4 +1,6 @@
 {$DOMAIN} {
     tls {$ACME_EMAIL}
-    respond "Mitty is running."
+    root * /srv/web
+    file_server
+    try_files {path} /index.html
 }

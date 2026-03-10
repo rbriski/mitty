@@ -17,6 +17,7 @@ services:
       - ACME_EMAIL=${ACME_EMAIL:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web:/srv/web:ro
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped

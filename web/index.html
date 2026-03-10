@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mitty — Grades Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            mitty: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              900: '#0c4a6e',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<div x-data="app()" x-init="init()" x-cloak>
+
+  <!-- Login Screen -->
+  <template x-if="!session">
+    <div class="min-h-screen flex items-center justify-center px-4">
+      <div class="w-full max-w-sm">
+        <div class="bg-white rounded-2xl shadow-lg p-8">
+          <h1 class="text-2xl font-bold text-gray-900 text-center mb-1">Mitty</h1>
+          <p class="text-sm text-gray-500 text-center mb-6">Grades Dashboard</p>
+
+          <div x-show="authError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p class="text-sm text-red-700" x-text="authError"></p>
+          </div>
+
+          <form @submit.prevent="signIn()">
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="email">Email</label>
+            <input
+              id="email"
+              type="email"
+              x-model="email"
+              required
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none mb-4"
+              placeholder="you@example.com"
+            />
+
+            <label class="block text-sm font-medium text-gray-700 mb-1" for="password">Password</label>
+            <input
+              id="password"
+              type="password"
+              x-model="password"
+              required
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none mb-6"
+              placeholder="********"
+            />
+
+            <button
+              type="submit"
+              :disabled="loading"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
+            >
+              <span x-show="!loading">Sign In</span>
+              <span x-show="loading">Signing in...</span>
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Dashboard -->
+  <template x-if="session">
+    <div class="max-w-4xl mx-auto px-4 py-8">
+
+      <!-- Header -->
+      <div class="flex items-center justify-between mb-8">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Grades</h1>
+          <p class="text-sm text-gray-500" x-text="termName || 'Current Term'"></p>
+        </div>
+        <button
+          @click="signOut()"
+          class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+        >
+          Sign out
+        </button>
+      </div>
+
+      <!-- Loading State -->
+      <div x-show="loading" class="text-center py-12">
+        <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+        <p class="text-sm text-gray-500 mt-3">Loading grades...</p>
+      </div>
+
+      <!-- Error State -->
+      <div x-show="fetchError && !loading" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
+        <p class="text-sm text-red-700" x-text="fetchError"></p>
+      </div>
+
+      <!-- Scoreboard -->
+      <div x-show="!loading && !fetchError && grades.length > 0" class="mb-8">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+
+          <!-- Score Display -->
+          <div class="flex items-center justify-between mb-5">
+            <div>
+              <h2 class="text-sm font-medium text-gray-500 uppercase tracking-wide">Privilege Score</h2>
+              <div class="flex items-baseline gap-1 mt-1">
+                <span class="text-5xl font-bold" :class="scoreColor(totalPoints)" x-text="totalPoints"></span>
+                <span class="text-xl text-gray-400">/ <span x-text="maxPoints"></span></span>
+              </div>
+            </div>
+            <div class="text-right">
+              <p class="text-xs text-gray-400 uppercase tracking-wide mb-2">Level</p>
+              <span
+                class="inline-block px-3 py-1 rounded-full text-sm font-semibold"
+                :class="levelBadgeColor(totalPoints)"
+                x-text="levelName(totalPoints)"
+              ></span>
+            </div>
+          </div>
+
+          <!-- Milestone Progress Track (scaled 7–12 range) -->
+          <div class="overflow-hidden">
+            <div class="relative mb-2 pr-6">
+              <!-- Background track -->
+              <div class="w-full bg-gray-100 rounded-full h-3">
+                <div
+                  class="h-3 rounded-full transition-all duration-700"
+                  :class="scoreBarColor(totalPoints)"
+                  :style="'width: ' + scaledPercent(totalPoints) + '%'"
+                ></div>
+              </div>
+
+              <!-- Milestone markers on the bar -->
+              <template x-for="ms in milestones" :key="ms.points">
+                <div
+                  class="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full border-2 border-white shadow-sm transition-colors"
+                  :class="totalPoints >= ms.points ? 'bg-emerald-500' : 'bg-gray-300'"
+                  :style="'left: calc(' + scaledPercent(ms.points) + '% - 7px)'"
+                ></div>
+              </template>
+            </div>
+
+            <!-- Milestone labels below the bar -->
+            <div class="relative h-14 mt-1 mb-4 pr-6">
+              <template x-for="ms in milestones" :key="ms.points">
+                <div
+                  class="absolute text-center"
+                  :style="'left: ' + scaledPercent(ms.points) + '%; transform: translateX(-50%); width: 70px;'"
+                >
+                  <p class="text-xs font-bold" :class="totalPoints >= ms.points ? 'text-emerald-600' : 'text-gray-400'" x-text="ms.points + ' pts'"></p>
+                  <p class="text-xs mt-0.5 whitespace-nowrap" :class="totalPoints >= ms.points ? 'text-emerald-600' : 'text-gray-400'" x-text="ms.label"></p>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Current privileges -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <template x-for="priv in privileges" :key="priv.name">
+              <div
+                class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+                :class="priv.unlocked ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-400'"
+              >
+                <span x-text="priv.unlocked ? '\u2705' : '\u274C'"></span>
+                <span :class="priv.unlocked ? 'font-medium' : 'line-through'" x-text="priv.name"></span>
+              </div>
+            </template>
+          </div>
+
+          <!-- Points-to-next-level hint -->
+          <p
+            x-show="nextLevelInfo"
+            class="text-xs text-gray-400 text-center mt-4"
+            x-text="nextLevelInfo"
+          ></p>
+        </div>
+
+        <!-- Points Breakdown -->
+        <div class="mt-4 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-gray-100">
+                <th class="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Class</th>
+                <th class="text-center px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Grade</th>
+                <th class="text-center px-3 py-3 text-xs font-medium text-gray-500 uppercase tracking-wide">Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="item in grades" :key="item.course_id">
+                <tr class="border-b border-gray-50 last:border-0">
+                  <td class="px-5 py-3 text-gray-900" x-text="item.course_name"></td>
+                  <td class="text-center px-3 py-3">
+                    <span
+                      class="inline-block w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm"
+                      :class="gradeColor(item.current_score)"
+                      x-text="item.current_grade || '—'"
+                    ></span>
+                  </td>
+                  <td class="text-center px-3 py-3 font-bold" :class="pointsColor(item.points)" x-text="item.points"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Grade Cards -->
+      <div x-show="!loading && !fetchError && grades.length > 0">
+        <h2 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">Class Details</h2>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <template x-for="item in grades" :key="item.course_id">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
+              <div class="flex items-start justify-between mb-3">
+                <div class="flex-1 min-w-0 mr-3">
+                  <h2 class="font-semibold text-gray-900 truncate" x-text="item.course_name"></h2>
+                  <p class="text-xs text-gray-400 mt-0.5" x-text="item.course_code"></p>
+                </div>
+                <div
+                  class="flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg"
+                  :class="gradeColor(item.current_score)"
+                  x-text="item.current_grade || '—'"
+                ></div>
+              </div>
+
+              <!-- Score Bar -->
+              <div class="mt-3">
+                <div class="flex items-center justify-between text-sm mb-1">
+                  <span class="text-gray-500">Current</span>
+                  <span class="font-medium text-gray-700" x-text="item.current_score != null ? item.current_score.toFixed(1) + '%' : 'N/A'"></span>
+                </div>
+                <div class="w-full bg-gray-100 rounded-full h-2">
+                  <div
+                    class="h-2 rounded-full transition-all duration-500"
+                    :class="barColor(item.current_score)"
+                    :style="'width: ' + Math.min(item.current_score || 0, 100) + '%'"
+                  ></div>
+                </div>
+              </div>
+
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Empty State -->
+      <div x-show="!loading && !fetchError && grades.length === 0" class="text-center py-12">
+        <p class="text-gray-500">No active classes found.</p>
+      </div>
+
+      <!-- Last Updated -->
+      <p x-show="lastUpdated && !loading" class="text-xs text-gray-400 text-center mt-8" x-text="'Last updated: ' + lastUpdated"></p>
+
+    </div>
+  </template>
+</div>
+
+<script>
+  const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
+
+  // Privilege thresholds: [minPoints, privileges unlocked]
+  const PRIVILEGE_LEVELS = [
+    { min: 12, name: 'All Privileges', privileges: ['Phone', 'Car', 'Snapchat', 'Homework in Bedroom'] },
+    { min: 11, name: '5A 1B',          privileges: ['Phone', 'Car', 'Snapchat'] },
+    { min: 10, name: 'Almost There',   privileges: ['Phone', 'Car'] },
+    { min: 8,  name: 'Getting There',  privileges: ['Phone'] },
+    { min: 0,  name: 'Locked',         privileges: [] },
+  ];
+
+  const ALL_PRIVILEGES = ['Phone', 'Car', 'Snapchat', 'Homework in Bedroom'];
+
+  function gradeToPoints(letterGrade) {
+    if (!letterGrade) return 0;
+    const letter = letterGrade.charAt(0).toUpperCase();
+    if (letter === 'A') return 2;
+    if (letter === 'B') return 1;
+    return 0;
+  }
+
+  function app() {
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    return {
+      session: null,
+      email: '',
+      password: '',
+      authError: '',
+
+      grades: [],
+      totalPoints: 0,
+      maxPoints: 0,
+      privileges: [],
+      milestones: [
+        { points: 8, label: 'Phone' },
+        { points: 10, label: '+ Car' },
+        { points: 11, label: '+ Snapchat' },
+        { points: 12, label: '+ Bedroom' },
+      ],
+      nextLevelInfo: '',
+      termName: '',
+      loading: false,
+      fetchError: '',
+      lastUpdated: '',
+
+      async init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        this.session = session;
+
+        supabase.auth.onAuthStateChange((_event, session) => {
+          this.session = session;
+          if (session) this.fetchGrades();
+        });
+
+        if (this.session) this.fetchGrades();
+      },
+
+      async signIn() {
+        this.loading = true;
+        this.authError = '';
+
+        const { error } = await supabase.auth.signInWithPassword({
+          email: this.email,
+          password: this.password,
+        });
+
+        if (error) {
+          this.authError = error.message;
+          this.loading = false;
+          return;
+        }
+      },
+
+      async signOut() {
+        await supabase.auth.signOut();
+        this.session = null;
+        this.grades = [];
+        this.totalPoints = 0;
+      },
+
+      async fetchGrades() {
+        this.loading = true;
+        this.fetchError = '';
+
+        const { data, error } = await supabase
+          .from('enrollments')
+          .select(`
+            id,
+            course_id,
+            current_score,
+            current_grade,
+            final_score,
+            final_grade,
+            enrollment_state,
+            courses (
+              name,
+              course_code,
+              term_name,
+              workflow_state
+            )
+          `)
+          .eq('enrollment_state', 'active');
+
+        this.loading = false;
+
+        if (error) {
+          this.fetchError = 'Failed to load grades: ' + error.message;
+          return;
+        }
+
+        this.grades = (data || [])
+          .filter(e => e.courses
+            && e.courses.workflow_state === 'available'
+            && e.current_score != null
+            && e.courses.term_name === '2025-2026 Second Semester'
+          )
+          .map(e => {
+            const points = gradeToPoints(e.current_grade);
+            return {
+              course_id: e.course_id,
+              course_name: e.courses.name,
+              course_code: e.courses.course_code,
+              term_name: e.courses.term_name,
+              current_score: e.current_score,
+              current_grade: e.current_grade,
+              points,
+            };
+          })
+          .sort((a, b) => a.course_name.localeCompare(b.course_name));
+
+        // Calculate scoreboard
+        this.totalPoints = this.grades.reduce((sum, g) => sum + g.points, 0);
+        this.maxPoints = this.grades.length * 2;
+
+        // Determine unlocked privileges
+        const level = PRIVILEGE_LEVELS.find(l => this.totalPoints >= l.min);
+        const unlocked = level ? level.privileges : [];
+        this.privileges = ALL_PRIVILEGES.map(name => ({
+          name,
+          unlocked: unlocked.includes(name),
+        }));
+
+        // Next level hint
+        const nextLevel = PRIVILEGE_LEVELS.slice().reverse().find(l => l.min > this.totalPoints);
+        if (nextLevel) {
+          const needed = nextLevel.min - this.totalPoints;
+          const nextPriv = nextLevel.privileges.filter(p => !unlocked.includes(p))[0];
+          this.nextLevelInfo = needed + ' more point' + (needed > 1 ? 's' : '') + ' to unlock ' + (nextPriv || 'next level');
+        } else {
+          this.nextLevelInfo = '';
+        }
+
+        if (this.grades.length > 0 && this.grades[0].term_name) {
+          this.termName = this.grades[0].term_name;
+        }
+
+        this.lastUpdated = new Date().toLocaleString();
+      },
+
+      // Scale the bar so 0-7 takes ~15% and 8-12 spans to 95% (leaving room for labels)
+      scaledPercent(points) {
+        const low = 7, high = 12;
+        const lowPct = 15, highPct = 95;
+        if (points <= low) return (points / low) * lowPct;
+        return lowPct + ((points - low) / (high - low)) * (highPct - lowPct);
+      },
+
+      levelName(points) {
+        const level = PRIVILEGE_LEVELS.find(l => points >= l.min);
+        return level ? level.name : 'Locked';
+      },
+
+      scoreColor(points) {
+        if (points >= 12) return 'text-emerald-600';
+        if (points >= 10) return 'text-blue-600';
+        if (points >= 8) return 'text-yellow-600';
+        return 'text-red-600';
+      },
+
+      scoreBarColor(points) {
+        if (points >= 12) return 'bg-emerald-500';
+        if (points >= 10) return 'bg-blue-500';
+        if (points >= 8) return 'bg-yellow-500';
+        return 'bg-red-400';
+      },
+
+      levelBadgeColor(points) {
+        if (points >= 12) return 'bg-emerald-100 text-emerald-700';
+        if (points >= 10) return 'bg-blue-100 text-blue-700';
+        if (points >= 8) return 'bg-yellow-100 text-yellow-700';
+        return 'bg-red-100 text-red-700';
+      },
+
+      pointsColor(points) {
+        if (points === 2) return 'text-emerald-600';
+        if (points === 1) return 'text-blue-600';
+        return 'text-red-500';
+      },
+
+      gradeColor(score) {
+        if (score == null) return 'bg-gray-100 text-gray-500';
+        if (score >= 90) return 'bg-emerald-50 text-emerald-700';
+        if (score >= 80) return 'bg-blue-50 text-blue-700';
+        if (score >= 70) return 'bg-yellow-50 text-yellow-700';
+        if (score >= 60) return 'bg-orange-50 text-orange-700';
+        return 'bg-red-50 text-red-700';
+      },
+
+      barColor(score) {
+        if (score == null) return 'bg-gray-300';
+        if (score >= 90) return 'bg-emerald-500';
+        if (score >= 80) return 'bg-blue-500';
+        if (score >= 70) return 'bg-yellow-500';
+        if (score >= 60) return 'bg-orange-500';
+        return 'bg-red-500';
+      },
+    };
+  }
+</script>
+
+</body>
+</html>
