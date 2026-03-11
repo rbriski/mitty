@@ -192,6 +192,28 @@
           ></p>
         </div>
 
+        <!-- Due Tomorrow -->
+        <div x-show="tomorrowAssignments.length > 0" class="mt-4 bg-amber-50 rounded-xl shadow-sm border border-amber-200 p-4">
+          <h3 class="text-xs font-medium text-amber-700 uppercase tracking-wide mb-2">Due Tomorrow</h3>
+          <div class="space-y-2">
+            <template x-for="a in tomorrowAssignments" :key="a.id">
+              <a :href="a.html_url" target="_blank" rel="noopener" class="flex items-center justify-between hover:bg-amber-100 rounded-lg px-2 py-1.5 -mx-2 transition-colors">
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-gray-500" x-text="a.course_name"></span>
+                    <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                      <span x-text="assignmentStatus(a).icon"></span>
+                      <span x-text="assignmentStatus(a).label"></span>
+                    </span>
+                  </div>
+                </div>
+                <span class="text-xs text-gray-400 flex-shrink-0 ml-2" x-text="a.points_possible + ' pts'"></span>
+              </a>
+            </template>
+          </div>
+        </div>
+
         <!-- Points Breakdown -->
         <div class="mt-4 bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           <table class="w-full text-sm">
@@ -471,6 +493,7 @@
       assignments: [],
       overdueAssignments: [],
       assignmentCounts: {},
+      tomorrowAssignments: [],
       assignmentsLoading: false,
       assignmentsError: '',
 
@@ -708,6 +731,27 @@
           });
 
           this.assignmentCounts = counts;
+
+          // Fetch tomorrow's assignments (all, not just unsubmitted)
+          const tomorrow = new Date();
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          const tStart = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate()).toISOString();
+          const tEnd = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate() + 1).toISOString();
+
+          const { data: tomorrowData } = await supabase
+            .from('assignments')
+            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, workflow_state, late, missing)')
+            .in('course_id', courseIds)
+            .not('due_at', 'is', null)
+            .gt('points_possible', 0)
+            .gte('due_at', tStart)
+            .lt('due_at', tEnd)
+            .order('due_at', { ascending: true });
+
+          this.tomorrowAssignments = (tomorrowData || []).map(a => {
+            const course = this.grades.find(g => g.course_id === a.course_id);
+            return { ...a, course_name: course?.course_name || '' };
+          });
         } catch (err) {
           console.warn('Failed to fetch assignment counts:', err.message);
         }
