@@ -653,7 +653,7 @@
 
           (data || []).forEach(a => {
             const dueAt = new Date(a.due_at);
-            const submission = a.submissions[0] || {};
+            const submission = (Array.isArray(a.submissions) ? a.submissions[0] : a.submissions) || {};
 
             if (dueAt < now && (submission.workflow_state === 'unsubmitted' || submission.missing)) {
               overdue.push(a);
@@ -772,7 +772,7 @@
       },
 
       assignmentStatus(a) {
-        const sub = a.submissions?.[0];
+        const sub = Array.isArray(a.submissions) ? a.submissions[0] : a.submissions;
         if (!sub) return { icon: '○', label: 'Unknown', colorClass: 'text-gray-400', late: false };
 
         let status;
