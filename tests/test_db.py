@@ -286,6 +286,550 @@ class TestGradeSnapshotsTable:
 
 
 # ---------------------------------------------------------------------------
+# app_config
+# ---------------------------------------------------------------------------
+
+
+class TestAppConfigTable:
+    """Verify the ``app_config`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "app_config" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("app_config").columns) == 6
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("app_config").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("app_config").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("app_config")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.current_term_name.type, sa.String)
+        assert isinstance(t.c.privilege_thresholds.type, sa.JSON)
+        assert isinstance(t.c.privilege_names.type, sa.JSON)
+        assert isinstance(t.c.created_at.type, sa.DateTime)
+        assert isinstance(t.c.updated_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("app_config")
+        assert t.c.id.nullable is False
+        assert t.c.current_term_name.nullable is True
+        assert t.c.privilege_thresholds.nullable is False
+        assert t.c.privilege_names.nullable is False
+        assert t.c.created_at.nullable is False
+        assert t.c.updated_at.nullable is False
+
+    def test_no_foreign_keys(self) -> None:
+        assert len(_table("app_config").foreign_keys) == 0
+
+
+# ---------------------------------------------------------------------------
+# assessments
+# ---------------------------------------------------------------------------
+
+
+class TestAssessmentsTable:
+    """Verify the ``assessments`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "assessments" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("assessments").columns) == 11
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("assessments").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("assessments").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("assessments")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.course_id.type, sa.Integer)
+        assert isinstance(t.c.name.type, sa.String)
+        assert isinstance(t.c.assessment_type.type, sa.String)
+        assert isinstance(t.c.scheduled_date.type, sa.DateTime)
+        assert isinstance(t.c.weight.type, sa.Float)
+        assert isinstance(t.c.unit_or_topic.type, sa.String)
+        assert isinstance(t.c.description.type, sa.String)
+        assert isinstance(t.c.canvas_assignment_id.type, sa.Integer)
+        assert isinstance(t.c.created_at.type, sa.DateTime)
+        assert isinstance(t.c.updated_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("assessments")
+        assert t.c.id.nullable is False
+        assert t.c.course_id.nullable is False
+        assert t.c.name.nullable is False
+        assert t.c.assessment_type.nullable is False
+        assert t.c.scheduled_date.nullable is True
+        assert t.c.weight.nullable is True
+        assert t.c.unit_or_topic.nullable is True
+        assert t.c.description.nullable is True
+        assert t.c.canvas_assignment_id.nullable is True
+        assert t.c.created_at.nullable is False
+        assert t.c.updated_at.nullable is False
+
+    def test_foreign_key_to_courses(self) -> None:
+        fks = _table("assessments").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "courses.id" in fk_targets
+
+    def test_foreign_key_to_assignments(self) -> None:
+        fks = _table("assessments").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "assignments.id" in fk_targets
+
+    def test_course_scheduled_index(self) -> None:
+        idx_cols = _index_column_sets(_table("assessments"))
+        assert ("course_id", "scheduled_date") in idx_cols
+
+    def test_scheduled_date_index(self) -> None:
+        idx_cols = _index_column_sets(_table("assessments"))
+        assert ("scheduled_date",) in idx_cols
+
+
+# ---------------------------------------------------------------------------
+# resources
+# ---------------------------------------------------------------------------
+
+
+class TestResourcesTable:
+    """Verify the ``resources`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "resources" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("resources").columns) == 9
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("resources").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("resources").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("resources")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.course_id.type, sa.Integer)
+        assert isinstance(t.c.title.type, sa.String)
+        assert isinstance(t.c.resource_type.type, sa.String)
+        assert isinstance(t.c.source_url.type, sa.String)
+        assert isinstance(t.c.canvas_module_id.type, sa.Integer)
+        assert isinstance(t.c.sort_order.type, sa.Integer)
+        assert isinstance(t.c.created_at.type, sa.DateTime)
+        assert isinstance(t.c.updated_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("resources")
+        assert t.c.id.nullable is False
+        assert t.c.course_id.nullable is False
+        assert t.c.title.nullable is False
+        assert t.c.resource_type.nullable is False
+        assert t.c.source_url.nullable is True
+        assert t.c.canvas_module_id.nullable is True
+        assert t.c.sort_order.nullable is False
+        assert t.c.created_at.nullable is False
+        assert t.c.updated_at.nullable is False
+
+    def test_foreign_key_to_courses(self) -> None:
+        fks = _table("resources").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "courses.id" in fk_targets
+
+    def test_course_type_index(self) -> None:
+        idx_cols = _index_column_sets(_table("resources"))
+        assert ("course_id", "resource_type") in idx_cols
+
+
+# ---------------------------------------------------------------------------
+# resource_chunks
+# ---------------------------------------------------------------------------
+
+
+class TestResourceChunksTable:
+    """Verify the ``resource_chunks`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "resource_chunks" in metadata.tables
+
+    def test_column_count(self) -> None:
+        # 7 columns: id, resource_id, chunk_index, content_text,
+        # embedding_vector, token_count, created_at
+        assert len(_table("resource_chunks").columns) == 7
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("resource_chunks").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("resource_chunks").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("resource_chunks")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.resource_id.type, sa.Integer)
+        assert isinstance(t.c.chunk_index.type, sa.Integer)
+        assert isinstance(t.c.content_text.type, sa.String)
+        assert isinstance(t.c.token_count.type, sa.Integer)
+        assert isinstance(t.c.created_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("resource_chunks")
+        assert t.c.id.nullable is False
+        assert t.c.resource_id.nullable is False
+        assert t.c.chunk_index.nullable is False
+        assert t.c.content_text.nullable is False
+        assert t.c.embedding_vector.nullable is True
+        assert t.c.token_count.nullable is False
+        assert t.c.created_at.nullable is False
+
+    def test_foreign_key_to_resources(self) -> None:
+        fks = _table("resource_chunks").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "resources.id" in fk_targets
+
+    def test_resource_chunk_unique_index(self) -> None:
+        """Unique constraint on (resource_id, chunk_index)."""
+        idx_cols = _index_column_sets(_table("resource_chunks"))
+        assert ("resource_id", "chunk_index") in idx_cols
+
+
+# ---------------------------------------------------------------------------
+# student_signals
+# ---------------------------------------------------------------------------
+
+
+class TestStudentSignalsTable:
+    """Verify the ``student_signals`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "student_signals" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("student_signals").columns) == 10
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("student_signals").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("student_signals").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("student_signals")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.user_id.type, sa.Uuid)
+        assert isinstance(t.c.recorded_at.type, sa.DateTime)
+        assert isinstance(t.c.available_minutes.type, sa.Integer)
+        assert isinstance(t.c.confidence_level.type, sa.Integer)
+        assert isinstance(t.c.energy_level.type, sa.Integer)
+        assert isinstance(t.c.stress_level.type, sa.Integer)
+        assert isinstance(t.c.blockers.type, sa.String)
+        assert isinstance(t.c.preferences.type, sa.JSON)
+        assert isinstance(t.c.notes.type, sa.String)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("student_signals")
+        assert t.c.id.nullable is False
+        assert t.c.user_id.nullable is False
+        assert t.c.recorded_at.nullable is False
+        assert t.c.available_minutes.nullable is False
+        assert t.c.confidence_level.nullable is False
+        assert t.c.energy_level.nullable is False
+        assert t.c.stress_level.nullable is False
+        assert t.c.blockers.nullable is True
+        assert t.c.preferences.nullable is True
+        assert t.c.notes.nullable is True
+
+    def test_no_foreign_keys(self) -> None:
+        assert len(_table("student_signals").foreign_keys) == 0
+
+    def test_user_recorded_index(self) -> None:
+        idx_cols = _index_column_sets(_table("student_signals"))
+        assert ("user_id", "recorded_at") in idx_cols
+
+
+# ---------------------------------------------------------------------------
+# study_plans
+# ---------------------------------------------------------------------------
+
+
+class TestStudyPlansTable:
+    """Verify the ``study_plans`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "study_plans" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("study_plans").columns) == 7
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("study_plans").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("study_plans").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("study_plans")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.user_id.type, sa.Uuid)
+        assert isinstance(t.c.plan_date.type, sa.Date)
+        assert isinstance(t.c.total_minutes.type, sa.Integer)
+        assert isinstance(t.c.status.type, sa.String)
+        assert isinstance(t.c.created_at.type, sa.DateTime)
+        assert isinstance(t.c.updated_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("study_plans")
+        assert t.c.id.nullable is False
+        assert t.c.user_id.nullable is False
+        assert t.c.plan_date.nullable is False
+        assert t.c.total_minutes.nullable is False
+        assert t.c.status.nullable is False
+        assert t.c.created_at.nullable is False
+        assert t.c.updated_at.nullable is False
+
+    def test_no_foreign_keys(self) -> None:
+        assert len(_table("study_plans").foreign_keys) == 0
+
+    def test_user_date_index(self) -> None:
+        idx_cols = _index_column_sets(_table("study_plans"))
+        assert ("user_id", "plan_date") in idx_cols
+
+
+# ---------------------------------------------------------------------------
+# study_blocks
+# ---------------------------------------------------------------------------
+
+
+class TestStudyBlocksTable:
+    """Verify the ``study_blocks`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "study_blocks" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("study_blocks").columns) == 13
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("study_blocks").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("study_blocks").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("study_blocks")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.plan_id.type, sa.Integer)
+        assert isinstance(t.c.block_type.type, sa.String)
+        assert isinstance(t.c.title.type, sa.String)
+        assert isinstance(t.c.description.type, sa.String)
+        assert isinstance(t.c.target_minutes.type, sa.Integer)
+        assert isinstance(t.c.actual_minutes.type, sa.Integer)
+        assert isinstance(t.c.course_id.type, sa.Integer)
+        assert isinstance(t.c.assessment_id.type, sa.Integer)
+        assert isinstance(t.c.sort_order.type, sa.Integer)
+        assert isinstance(t.c.status.type, sa.String)
+        assert isinstance(t.c.started_at.type, sa.DateTime)
+        assert isinstance(t.c.completed_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("study_blocks")
+        assert t.c.id.nullable is False
+        assert t.c.plan_id.nullable is False
+        assert t.c.block_type.nullable is False
+        assert t.c.title.nullable is False
+        assert t.c.description.nullable is True
+        assert t.c.target_minutes.nullable is False
+        assert t.c.actual_minutes.nullable is True
+        assert t.c.course_id.nullable is True
+        assert t.c.assessment_id.nullable is True
+        assert t.c.sort_order.nullable is False
+        assert t.c.status.nullable is False
+        assert t.c.started_at.nullable is True
+        assert t.c.completed_at.nullable is True
+
+    def test_foreign_key_to_study_plans(self) -> None:
+        fks = _table("study_blocks").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "study_plans.id" in fk_targets
+
+    def test_foreign_key_to_courses(self) -> None:
+        fks = _table("study_blocks").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "courses.id" in fk_targets
+
+    def test_foreign_key_to_assessments(self) -> None:
+        fks = _table("study_blocks").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "assessments.id" in fk_targets
+
+    def test_plan_sort_index(self) -> None:
+        idx_cols = _index_column_sets(_table("study_blocks"))
+        assert ("plan_id", "sort_order") in idx_cols
+
+
+# ---------------------------------------------------------------------------
+# mastery_states
+# ---------------------------------------------------------------------------
+
+
+class TestMasteryStatesTable:
+    """Verify the ``mastery_states`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "mastery_states" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("mastery_states").columns) == 11
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("mastery_states").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("mastery_states").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("mastery_states")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.user_id.type, sa.Uuid)
+        assert isinstance(t.c.course_id.type, sa.Integer)
+        assert isinstance(t.c.concept.type, sa.String)
+        assert isinstance(t.c.mastery_level.type, sa.Float)
+        assert isinstance(t.c.confidence_self_report.type, sa.Float)
+        assert isinstance(t.c.last_retrieval_at.type, sa.DateTime)
+        assert isinstance(t.c.next_review_at.type, sa.DateTime)
+        assert isinstance(t.c.retrieval_count.type, sa.Integer)
+        assert isinstance(t.c.success_rate.type, sa.Float)
+        assert isinstance(t.c.updated_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("mastery_states")
+        assert t.c.id.nullable is False
+        assert t.c.user_id.nullable is False
+        assert t.c.course_id.nullable is False
+        assert t.c.concept.nullable is False
+        assert t.c.mastery_level.nullable is False
+        assert t.c.confidence_self_report.nullable is True
+        assert t.c.last_retrieval_at.nullable is True
+        assert t.c.next_review_at.nullable is True
+        assert t.c.retrieval_count.nullable is False
+        assert t.c.success_rate.nullable is True
+        assert t.c.updated_at.nullable is False
+
+    def test_foreign_key_to_courses(self) -> None:
+        fks = _table("mastery_states").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "courses.id" in fk_targets
+
+    def test_user_course_index(self) -> None:
+        idx_cols = _index_column_sets(_table("mastery_states"))
+        assert ("user_id", "course_id") in idx_cols
+
+    def test_user_review_index(self) -> None:
+        idx_cols = _index_column_sets(_table("mastery_states"))
+        assert ("user_id", "next_review_at") in idx_cols
+
+    def test_unique_user_course_concept_index(self) -> None:
+        idx_cols = _index_column_sets(_table("mastery_states"))
+        assert ("user_id", "course_id", "concept") in idx_cols
+
+
+# ---------------------------------------------------------------------------
+# practice_results
+# ---------------------------------------------------------------------------
+
+
+class TestPracticeResultsTable:
+    """Verify the ``practice_results`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "practice_results" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("practice_results").columns) == 13
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("practice_results").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("practice_results").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("practice_results")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.user_id.type, sa.Uuid)
+        assert isinstance(t.c.study_block_id.type, sa.Integer)
+        assert isinstance(t.c.course_id.type, sa.Integer)
+        assert isinstance(t.c.concept.type, sa.String)
+        assert isinstance(t.c.practice_type.type, sa.String)
+        assert isinstance(t.c.question_text.type, sa.String)
+        assert isinstance(t.c.student_answer.type, sa.String)
+        assert isinstance(t.c.correct_answer.type, sa.String)
+        assert isinstance(t.c.is_correct.type, sa.Boolean)
+        assert isinstance(t.c.confidence_before.type, sa.Float)
+        assert isinstance(t.c.time_spent_seconds.type, sa.Integer)
+        assert isinstance(t.c.created_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("practice_results")
+        assert t.c.id.nullable is False
+        assert t.c.user_id.nullable is False
+        assert t.c.study_block_id.nullable is True
+        assert t.c.course_id.nullable is False
+        assert t.c.concept.nullable is True
+        assert t.c.practice_type.nullable is False
+        assert t.c.question_text.nullable is False
+        assert t.c.student_answer.nullable is True
+        assert t.c.correct_answer.nullable is True
+        assert t.c.is_correct.nullable is True
+        assert t.c.confidence_before.nullable is True
+        assert t.c.time_spent_seconds.nullable is True
+        assert t.c.created_at.nullable is False
+
+    def test_foreign_key_to_study_blocks(self) -> None:
+        fks = _table("practice_results").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "study_blocks.id" in fk_targets
+
+    def test_foreign_key_to_courses(self) -> None:
+        fks = _table("practice_results").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "courses.id" in fk_targets
+
+    def test_user_course_index(self) -> None:
+        idx_cols = _index_column_sets(_table("practice_results"))
+        assert ("user_id", "course_id") in idx_cols
+
+    def test_user_created_index(self) -> None:
+        idx_cols = _index_column_sets(_table("practice_results"))
+        assert ("user_id", "created_at") in idx_cols
+
+
+# ---------------------------------------------------------------------------
 # Cross-table checks
 # ---------------------------------------------------------------------------
 
@@ -294,7 +838,7 @@ class TestMetadata:
     """Cross-cutting checks on the full metadata."""
 
     def test_table_count(self) -> None:
-        assert len(metadata.tables) == 5
+        assert len(metadata.tables) == 14
 
     def test_all_tables_present(self) -> None:
         expected = {
@@ -303,6 +847,15 @@ class TestMetadata:
             "submissions",
             "enrollments",
             "grade_snapshots",
+            "app_config",
+            "assessments",
+            "resources",
+            "resource_chunks",
+            "student_signals",
+            "study_plans",
+            "study_blocks",
+            "mastery_states",
+            "practice_results",
         }
         assert set(metadata.tables.keys()) == expected
 
