@@ -104,7 +104,6 @@ class TestSupabaseSettingsFields:
 
         assert settings.supabase_url is None
         assert settings.supabase_key is None
-        assert settings.database_url is None
 
     def test_supabase_fields_accept_values(self) -> None:
         """Supabase fields accept string / SecretStr values."""
@@ -112,17 +111,11 @@ class TestSupabaseSettingsFields:
             canvas_token="test-token",
             supabase_url="https://abc.supabase.co",
             supabase_key="sb-key-123",
-            database_url="postgresql://user:pass@host:5432/db",
         )
 
         assert settings.supabase_url == "https://abc.supabase.co"
         assert settings.supabase_key is not None
         assert settings.supabase_key.get_secret_value() == "sb-key-123"
-        assert settings.database_url is not None
-        assert (
-            settings.database_url.get_secret_value()
-            == "postgresql://user:pass@host:5432/db"
-        )
 
 
 class TestLoadSettingsSupabaseEnv:
@@ -133,15 +126,12 @@ class TestLoadSettingsSupabaseEnv:
         monkeypatch.setenv("CANVAS_TOKEN", "test-token")
         monkeypatch.setenv("SUPABASE_URL", "https://xyz.supabase.co")
         monkeypatch.setenv("SUPABASE_KEY", "sb-secret")
-        monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@h:5432/d")
 
         settings = load_settings()
 
         assert settings.supabase_url == "https://xyz.supabase.co"
         assert settings.supabase_key is not None
         assert settings.supabase_key.get_secret_value() == "sb-secret"
-        assert settings.database_url is not None
-        assert settings.database_url.get_secret_value() == "postgresql://u:p@h:5432/d"
 
     def test_missing_supabase_vars_return_none(
         self, monkeypatch: pytest.MonkeyPatch
@@ -150,13 +140,11 @@ class TestLoadSettingsSupabaseEnv:
         monkeypatch.setenv("CANVAS_TOKEN", "test-token")
         monkeypatch.delenv("SUPABASE_URL", raising=False)
         monkeypatch.delenv("SUPABASE_KEY", raising=False)
-        monkeypatch.delenv("DATABASE_URL", raising=False)
 
         settings = load_settings()
 
         assert settings.supabase_url is None
         assert settings.supabase_key is None
-        assert settings.database_url is None
 
 
 class TestParseArgsJsonFlag:

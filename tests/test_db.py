@@ -308,41 +308,6 @@ class TestMetadata:
 
 
 # ---------------------------------------------------------------------------
-# Alembic migration importability
-# ---------------------------------------------------------------------------
-
-
-class TestAlembicMigration:
-    """Verify that the initial Alembic migration file is importable."""
-
-    def test_migration_importable(self) -> None:
-        import importlib.util
-        from pathlib import Path
-
-        migration_path = (
-            Path(__file__).resolve().parent.parent
-            / "alembic"
-            / "versions"
-            / "001_initial_schema.py"
-        )
-        assert migration_path.exists(), f"Migration file not found: {migration_path}"
-
-        spec = importlib.util.spec_from_file_location(
-            "alembic_001_initial_schema",
-            migration_path,
-        )
-        assert spec is not None
-        assert spec.loader is not None
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-
-        assert hasattr(mod, "upgrade")
-        assert hasattr(mod, "downgrade")
-        assert hasattr(mod, "revision")
-        assert mod.revision is not None
-
-
-# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
