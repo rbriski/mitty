@@ -1,0 +1,47 @@
+[
+  {
+    "id": 1,
+    "plan_id": 1,
+    "block_type": "urgent_deliverable",
+    "title": "Finish Persuasive Essay Draft",
+    "description": "Complete the first draft of the persuasive essay for English.",
+    "target_minutes": 30,
+    "actual_minutes": null,
+    "course_id": 12345,
+    "assessment_id": 3,
+    "sort_order": 0,
+    "status": "pending",
+    "started_at": null,
+    "completed_at": null
+  },
+  {
+    "id": 2,
+    "plan_id": 1,
+    "block_type": "retrieval",
+    "title": "Chemistry Flashcards",
+    "description": null,
+    "target_minutes": 25,
+    "actual_minutes": 28,
+    "course_id": 12346,
+    "assessment_id": null,
+    "sort_order": 1,
+    "status": "completed",
+    "started_at": "2026-03-11T08:00:00Z",
+    "completed_at": "2026-03-11T08:28:00Z"
+  },
+  {
+    "id": 3,
+    "plan_id": 1,
+    "block_type": "reflection",
+    "title": "Daily Reflection",
+    "description": "Review what went well and what to improve.",
+    "target_minutes": 10,
+    "actual_minutes": null,
+    "course_id": null,
+    "assessment_id": null,
+    "sort_order": 2,
+    "status": "pending",
+    "started_at": null,
+    "completed_at": null
+  }
+]

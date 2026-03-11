@@ -1,0 +1,41 @@
+[
+  {
+    "id": 1,
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "course_id": 12345,
+    "concept": "Rhetorical Analysis",
+    "mastery_level": 0.75,
+    "confidence_self_report": 0.8,
+    "last_retrieval_at": "2026-03-10T15:00:00Z",
+    "next_review_at": "2026-03-13T15:00:00Z",
+    "retrieval_count": 5,
+    "success_rate": 0.9,
+    "updated_at": "2026-03-10T15:00:00Z"
+  },
+  {
+    "id": 2,
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "course_id": 12346,
+    "concept": "Balancing Chemical Equations",
+    "mastery_level": 0.4,
+    "confidence_self_report": 0.3,
+    "last_retrieval_at": "2026-03-09T10:00:00Z",
+    "next_review_at": "2026-03-11T10:00:00Z",
+    "retrieval_count": 2,
+    "success_rate": 0.5,
+    "updated_at": "2026-03-09T10:00:00Z"
+  },
+  {
+    "id": 3,
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "course_id": 12346,
+    "concept": "Molar Mass Calculations",
+    "mastery_level": 0.0,
+    "confidence_self_report": null,
+    "last_retrieval_at": null,
+    "next_review_at": null,
+    "retrieval_count": 0,
+    "success_rate": null,
+    "updated_at": "2026-03-05T08:00:00Z"
+  }
+]

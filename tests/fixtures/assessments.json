@@ -1,0 +1,41 @@
+[
+  {
+    "id": 1,
+    "course_id": 12345,
+    "name": "Chapter 5 Unit Test",
+    "assessment_type": "test",
+    "scheduled_date": "2026-03-15T09:00:00Z",
+    "weight": 0.25,
+    "unit_or_topic": "Chapter 5 - Rhetoric",
+    "description": "Comprehensive test on rhetorical analysis and persuasion techniques.",
+    "canvas_assignment_id": 9001,
+    "created_at": "2026-02-01T10:00:00Z",
+    "updated_at": "2026-02-15T14:30:00Z"
+  },
+  {
+    "id": 2,
+    "course_id": 12346,
+    "name": "Lab Quiz 3",
+    "assessment_type": "quiz",
+    "scheduled_date": "2026-03-12T13:00:00Z",
+    "weight": 0.1,
+    "unit_or_topic": "Chemical Reactions",
+    "description": null,
+    "canvas_assignment_id": null,
+    "created_at": "2026-02-10T08:00:00Z",
+    "updated_at": "2026-02-10T08:00:00Z"
+  },
+  {
+    "id": 3,
+    "course_id": 12345,
+    "name": "Persuasive Essay",
+    "assessment_type": "essay",
+    "scheduled_date": null,
+    "weight": null,
+    "unit_or_topic": null,
+    "description": "Write a 5-paragraph persuasive essay on a topic of your choice.",
+    "canvas_assignment_id": 9002,
+    "created_at": "2026-01-20T09:00:00Z",
+    "updated_at": "2026-03-01T11:00:00Z"
+  }
+]

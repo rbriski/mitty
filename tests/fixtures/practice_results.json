@@ -1,0 +1,47 @@
+[
+  {
+    "id": 1,
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "study_block_id": 2,
+    "course_id": 12346,
+    "concept": "Balancing Chemical Equations",
+    "practice_type": "flashcard",
+    "question_text": "Balance the equation: H2 + O2 -> H2O",
+    "student_answer": "2H2 + O2 -> 2H2O",
+    "correct_answer": "2H2 + O2 -> 2H2O",
+    "is_correct": true,
+    "confidence_before": 3.0,
+    "time_spent_seconds": 45,
+    "created_at": "2026-03-11T08:05:00Z"
+  },
+  {
+    "id": 2,
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "study_block_id": 2,
+    "course_id": 12346,
+    "concept": "Balancing Chemical Equations",
+    "practice_type": "quiz",
+    "question_text": "What coefficient goes in front of O2 when balancing: Fe + O2 -> Fe2O3?",
+    "student_answer": "2",
+    "correct_answer": "3",
+    "is_correct": false,
+    "confidence_before": 2.0,
+    "time_spent_seconds": 90,
+    "created_at": "2026-03-11T08:10:00Z"
+  },
+  {
+    "id": 3,
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "study_block_id": null,
+    "course_id": 12345,
+    "concept": null,
+    "practice_type": "reflection",
+    "question_text": "What are the key elements of a strong persuasive argument?",
+    "student_answer": null,
+    "correct_answer": null,
+    "is_correct": null,
+    "confidence_before": null,
+    "time_spent_seconds": null,
+    "created_at": "2026-03-11T09:00:00Z"
+  }
+]

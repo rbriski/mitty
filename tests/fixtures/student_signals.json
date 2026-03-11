@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "recorded_at": "2026-03-11T07:30:00Z",
+    "available_minutes": 90,
+    "confidence_level": 4,
+    "energy_level": 3,
+    "stress_level": 2,
+    "blockers": null,
+    "preferences": {"preferred_subjects": ["english", "chemistry"]},
+    "notes": "Feeling good about today's study plan."
+  },
+  {
+    "id": 2,
+    "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "recorded_at": "2026-03-10T07:00:00Z",
+    "available_minutes": 45,
+    "confidence_level": 2,
+    "energy_level": 2,
+    "stress_level": 4,
+    "blockers": "Big chemistry test tomorrow, haven't started reviewing.",
+    "preferences": null,
+    "notes": null
+  }
+]
