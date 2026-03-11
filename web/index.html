@@ -109,6 +109,9 @@
         <p class="text-sm text-red-700" x-text="fetchError"></p>
       </div>
 
+      <!-- Dashboard View -->
+      <div x-show="currentView === 'dashboard'">
+
       <!-- Scoreboard -->
       <div x-show="!loading && !fetchError && grades.length > 0" class="mb-8">
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -261,6 +264,12 @@
         <p class="text-gray-500">No active classes found.</p>
       </div>
 
+      </div><!-- /Dashboard View -->
+
+      <!-- Class Detail View (US-003 will add content here) -->
+      <div x-show="currentView === 'classDetail'">
+      </div>
+
       <!-- Last Updated -->
       <p x-show="lastUpdated && !loading" class="text-xs text-gray-400 text-center mt-8" x-text="'Last updated: ' + lastUpdated"></p>
 
@@ -299,6 +308,14 @@
       email: '',
       password: '',
       authError: '',
+
+      currentView: 'dashboard',
+      selectedClass: null,
+      assignments: [],
+      overdueAssignments: [],
+      assignmentCounts: {},
+      assignmentsLoading: false,
+      assignmentsError: '',
 
       grades: [],
       totalPoints: 0,
@@ -428,6 +445,108 @@
         }
 
         this.lastUpdated = new Date().toLocaleString();
+
+        await this.fetchAssignmentCounts();
+      },
+
+      selectClass(item) {
+        this.selectedClass = item;
+        this.currentView = 'classDetail';
+        this.fetchAssignments(item.course_id);
+      },
+
+      goBack() {
+        this.currentView = 'dashboard';
+        this.selectedClass = null;
+        this.assignments = [];
+        this.overdueAssignments = [];
+      },
+
+      async fetchAssignments(courseId) {
+        this.assignmentsLoading = true;
+        this.assignmentsError = '';
+
+        try {
+          const { data, error } = await supabase
+            .from('assignments')
+            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, workflow_state, late, missing)')
+            .eq('course_id', courseId)
+            .not('due_at', 'is', null)
+            .order('due_at', { ascending: true });
+
+          if (error) {
+            this.assignmentsError = 'Failed to load assignments: ' + error.message;
+            return;
+          }
+
+          const now = new Date();
+          const weekFromNow = new Date(Date.now() + 7 * 86400000);
+          const twoWeeksFromNow = new Date(Date.now() + 14 * 86400000);
+
+          const overdue = [];
+          const upcoming = [];
+
+          (data || []).forEach(a => {
+            const dueAt = new Date(a.due_at);
+            const submission = a.submissions[0] || {};
+
+            if (dueAt < now && submission.workflow_state !== 'graded') {
+              overdue.push(a);
+            } else if (dueAt >= now && dueAt <= twoWeeksFromNow) {
+              a._section = dueAt <= weekFromNow ? 'thisWeek' : 'later';
+              upcoming.push(a);
+            }
+          });
+
+          // Overdue: most recent first (descending due_at)
+          overdue.sort((a, b) => new Date(b.due_at) - new Date(a.due_at));
+
+          // Upcoming: ascending due_at (already sorted by query, but ensure)
+          upcoming.sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
+
+          this.overdueAssignments = overdue;
+          this.assignments = upcoming;
+
+          console.log('Assignments fetched for course', courseId, { overdue, upcoming });
+        } catch (err) {
+          this.assignmentsError = 'Failed to load assignments: ' + err.message;
+        } finally {
+          this.assignmentsLoading = false;
+        }
+      },
+
+      async fetchAssignmentCounts() {
+        try {
+          const now = new Date().toISOString();
+          const weekLater = new Date(Date.now() + 7 * 86400000).toISOString();
+          const courseIds = this.grades.map(g => g.course_id);
+
+          if (courseIds.length === 0) return;
+
+          const { data, error } = await supabase
+            .from('assignments')
+            .select('id, course_id, submissions!inner(workflow_state)')
+            .in('course_id', courseIds)
+            .not('due_at', 'is', null)
+            .gte('due_at', now)
+            .lte('due_at', weekLater)
+            .eq('submissions.workflow_state', 'unsubmitted');
+
+          if (error) {
+            console.warn('Failed to fetch assignment counts:', error.message);
+            return;
+          }
+
+          const counts = {};
+          (data || []).forEach(a => {
+            counts[a.course_id] = (counts[a.course_id] || 0) + 1;
+          });
+
+          this.assignmentCounts = counts;
+          console.log('Assignment counts:', counts);
+        } catch (err) {
+          console.warn('Failed to fetch assignment counts:', err.message);
+        }
       },
 
       // Scale the bar so 0-7 takes ~15% and 8-12 spans to 95% (leaving room for labels)
