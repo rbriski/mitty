@@ -109,6 +109,9 @@
         <p class="text-sm text-red-700" x-text="fetchError"></p>
       </div>
 
+      <!-- Dashboard View -->
+      <div x-show="currentView === 'dashboard'">
+
       <!-- Scoreboard -->
       <div x-show="!loading && !fetchError && grades.length > 0" class="mb-8">
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -223,11 +226,16 @@
         <h2 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">Class Details</h2>
         <div class="grid gap-4 sm:grid-cols-2">
           <template x-for="item in grades" :key="item.course_id">
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
+            <div @click="selectClass(item)" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow cursor-pointer">
               <div class="flex items-start justify-between mb-3">
                 <div class="flex-1 min-w-0 mr-3">
                   <h2 class="font-semibold text-gray-900 truncate" x-text="item.course_name"></h2>
                   <p class="text-xs text-gray-400 mt-0.5" x-text="item.course_code"></p>
+                  <span
+                    x-show="assignmentCounts[item.course_id]"
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 mt-1"
+                    x-text="assignmentCounts[item.course_id] + ' due'"
+                  ></span>
                 </div>
                 <div
                   class="flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg"
@@ -259,6 +267,164 @@
       <!-- Empty State -->
       <div x-show="!loading && !fetchError && grades.length === 0" class="text-center py-12">
         <p class="text-gray-500">No active classes found.</p>
+      </div>
+
+      </div><!-- /Dashboard View -->
+
+      <!-- Class Detail View -->
+      <div x-show="currentView === 'classDetail'">
+
+        <!-- Back button -->
+        <button @click="goBack()" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-6 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
+          Back to Grades
+        </button>
+
+        <!-- Class header card -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+          <div class="flex items-start justify-between">
+            <div class="flex-1 min-w-0 mr-4">
+              <h1 class="text-xl font-bold text-gray-900" x-text="selectedClass?.course_name"></h1>
+              <p class="text-sm text-gray-400 mt-1" x-text="selectedClass?.course_code"></p>
+            </div>
+            <div class="flex items-center gap-3 flex-shrink-0">
+              <span class="text-lg font-medium text-gray-700" x-text="selectedClass?.current_score != null ? selectedClass.current_score.toFixed(1) + '%' : 'N/A'"></span>
+              <div class="w-14 h-14 rounded-xl flex items-center justify-center font-bold text-xl"
+                   :class="gradeColor(selectedClass?.current_score)"
+                   x-text="selectedClass?.current_grade || '\u2014'"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Loading state -->
+        <div x-show="assignmentsLoading" class="text-center py-12">
+          <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+          <p class="text-sm text-gray-500 mt-3">Loading assignments...</p>
+        </div>
+
+        <!-- Error state -->
+        <div x-show="assignmentsError && !assignmentsLoading" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
+          <p class="text-sm text-red-700" x-text="assignmentsError"></p>
+        </div>
+
+        <!-- Assignment list -->
+        <div x-show="!assignmentsLoading && !assignmentsError">
+
+          <!-- Empty state -->
+          <div x-show="assignments.length === 0 && overdueAssignments.length === 0" class="text-center py-16">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 mb-4">
+              <span class="text-3xl">✓</span>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-1">All caught up!</h3>
+            <p class="text-sm text-gray-500">No upcoming or overdue assignments for this class.</p>
+          </div>
+
+          <!-- Overdue -->
+          <div x-show="overdueAssignments.length > 0" class="mb-6">
+            <h3 class="text-sm font-medium text-red-600 uppercase tracking-wide mb-3">Overdue</h3>
+            <div class="bg-white rounded-xl shadow-sm border border-red-100 divide-y divide-gray-100">
+              <template x-for="a in overdueAssignments" :key="a.id">
+                <a :href="a.html_url" target="_blank" rel="noopener" class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-3">
+                      <div class="text-xs text-gray-400 w-16 flex-shrink-0">
+                        <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
+                      </div>
+                      <div class="min-w-0">
+                        <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                            <span x-text="assignmentStatus(a).icon"></span>
+                            <span x-text="assignmentStatus(a).label"></span>
+                          </span>
+                          <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+                    <span class="text-xs text-gray-400" x-text="a.points_possible != null ? a.points_possible + ' pts' : '—'"></span>
+                    <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                    </svg>
+                  </div>
+                </a>
+              </template>
+            </div>
+          </div>
+
+          <!-- This Week -->
+          <div x-show="thisWeekAssignments.length > 0" class="mb-6">
+            <h3 class="text-sm font-medium text-gray-700 uppercase tracking-wide mb-3">This Week</h3>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 divide-y divide-gray-100">
+              <template x-for="a in thisWeekAssignments" :key="a.id">
+                <a :href="a.html_url" target="_blank" rel="noopener" class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-3">
+                      <div class="text-xs text-gray-400 w-16 flex-shrink-0">
+                        <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
+                      </div>
+                      <div class="min-w-0">
+                        <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                            <span x-text="assignmentStatus(a).icon"></span>
+                            <span x-text="assignmentStatus(a).label"></span>
+                          </span>
+                          <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+                    <span class="text-xs text-gray-400" x-text="a.points_possible != null ? a.points_possible + ' pts' : '—'"></span>
+                    <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                    </svg>
+                  </div>
+                </a>
+              </template>
+            </div>
+          </div>
+
+          <!-- Later -->
+          <div x-show="laterAssignments.length > 0" class="mb-6">
+            <h3 class="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">Later</h3>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 divide-y divide-gray-100">
+              <template x-for="a in laterAssignments" :key="a.id">
+                <a :href="a.html_url" target="_blank" rel="noopener" class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-3">
+                      <div class="text-xs text-gray-400 w-16 flex-shrink-0">
+                        <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
+                      </div>
+                      <div class="min-w-0">
+                        <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                            <span x-text="assignmentStatus(a).icon"></span>
+                            <span x-text="assignmentStatus(a).label"></span>
+                          </span>
+                          <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+                    <span class="text-xs text-gray-400" x-text="a.points_possible != null ? a.points_possible + ' pts' : '—'"></span>
+                    <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                    </svg>
+                  </div>
+                </a>
+              </template>
+            </div>
+          </div>
+
+        </div>
+
       </div>
 
       <!-- Last Updated -->
@@ -299,6 +465,21 @@
       email: '',
       password: '',
       authError: '',
+
+      currentView: 'dashboard',
+      selectedClass: null,
+      assignments: [],
+      overdueAssignments: [],
+      assignmentCounts: {},
+      assignmentsLoading: false,
+      assignmentsError: '',
+
+      get thisWeekAssignments() {
+        return this.assignments.filter(a => a._section === 'thisWeek');
+      },
+      get laterAssignments() {
+        return this.assignments.filter(a => a._section === 'later');
+      },
 
       grades: [],
       totalPoints: 0,
@@ -428,6 +609,106 @@
         }
 
         this.lastUpdated = new Date().toLocaleString();
+
+        await this.fetchAssignmentCounts();
+      },
+
+      selectClass(item) {
+        this.selectedClass = item;
+        this.currentView = 'classDetail';
+        this.fetchAssignments(item.course_id);
+      },
+
+      goBack() {
+        this.currentView = 'dashboard';
+        this.selectedClass = null;
+        this.assignments = [];
+        this.overdueAssignments = [];
+      },
+
+      async fetchAssignments(courseId) {
+        this.assignmentsLoading = true;
+        this.assignmentsError = '';
+
+        try {
+          const { data, error } = await supabase
+            .from('assignments')
+            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, workflow_state, late, missing)')
+            .eq('course_id', courseId)
+            .not('due_at', 'is', null)
+            .order('due_at', { ascending: true });
+
+          if (error) {
+            this.assignmentsError = 'Failed to load assignments: ' + error.message;
+            return;
+          }
+
+          const now = new Date();
+          const weekFromNow = new Date(Date.now() + 7 * 86400000);
+          const twoWeeksFromNow = new Date(Date.now() + 14 * 86400000);
+
+          const overdue = [];
+          const upcoming = [];
+
+          (data || []).forEach(a => {
+            const dueAt = new Date(a.due_at);
+            const submission = a.submissions[0] || {};
+
+            if (dueAt < now && (submission.workflow_state === 'unsubmitted' || submission.missing)) {
+              overdue.push(a);
+            } else if (dueAt >= now && dueAt <= twoWeeksFromNow) {
+              a._section = dueAt <= weekFromNow ? 'thisWeek' : 'later';
+              upcoming.push(a);
+            }
+          });
+
+          // Overdue: most recent first (descending due_at)
+          overdue.sort((a, b) => new Date(b.due_at) - new Date(a.due_at));
+
+          // Upcoming: ascending due_at (already sorted by query, but ensure)
+          upcoming.sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
+
+          this.overdueAssignments = overdue;
+          this.assignments = upcoming;
+
+        } catch (err) {
+          this.assignmentsError = 'Failed to load assignments: ' + err.message;
+        } finally {
+          this.assignmentsLoading = false;
+        }
+      },
+
+      async fetchAssignmentCounts() {
+        try {
+          const now = new Date().toISOString();
+          const weekLater = new Date(Date.now() + 7 * 86400000).toISOString();
+          const courseIds = this.grades.map(g => g.course_id);
+
+          if (courseIds.length === 0) return;
+
+          const { data, error } = await supabase
+            .from('assignments')
+            .select('id, course_id, submissions!inner(workflow_state)')
+            .in('course_id', courseIds)
+            .not('due_at', 'is', null)
+            .gte('due_at', now)
+            .lte('due_at', weekLater)
+            .eq('submissions.workflow_state', 'unsubmitted');
+
+          if (error) {
+            console.warn('Failed to fetch assignment counts:', error.message);
+            return;
+          }
+
+          const counts = {};
+          (data || []).forEach(a => {
+            counts[a.course_id] = (counts[a.course_id] || 0) + 1;
+          });
+
+          this.assignmentCounts = counts;
+        } catch (err) {
+          console.warn('Failed to fetch assignment counts:', err.message);
+        }
       },
 
       // Scale the bar so 0-7 takes ~15% and 8-12 spans to 95% (leaving room for labels)
@@ -486,6 +767,27 @@
         if (score >= 70) return 'bg-yellow-500';
         if (score >= 60) return 'bg-orange-500';
         return 'bg-red-500';
+      },
+
+      assignmentStatus(a) {
+        const sub = a.submissions?.[0];
+        if (!sub) return { icon: '○', label: 'Unknown', colorClass: 'text-gray-400', late: false };
+
+        let status;
+        if (sub.workflow_state === 'graded') {
+          const scoreText = sub.score != null && a.points_possible != null
+            ? sub.score + '/' + a.points_possible
+            : sub.grade || 'Graded';
+          status = { icon: '✓', label: 'Graded: ' + scoreText, colorClass: 'text-emerald-600' };
+        } else if (sub.workflow_state === 'submitted' || sub.workflow_state === 'pending_review') {
+          status = { icon: '●', label: 'Submitted', colorClass: 'text-blue-500' };
+        } else if (sub.missing) {
+          status = { icon: '⚠', label: 'Missing', colorClass: 'text-red-500' };
+        } else {
+          status = { icon: '○', label: 'Not submitted', colorClass: 'text-gray-400' };
+        }
+
+        return { ...status, late: sub.late };
       },
     };
   }
