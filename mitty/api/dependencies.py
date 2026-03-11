@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from fastapi import Request  # noqa: TCH002 - FastAPI needs runtime type for DI
+
 if TYPE_CHECKING:
-    from fastapi import Request
     from supabase import AsyncClient
 
 

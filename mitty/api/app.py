@@ -20,11 +20,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from mitty.api.middleware import RequestLoggingMiddleware
 from mitty.api.routers import (
+    assessments,
     config,
     health,
     mastery_states,
     pages,
     practice_results,
+    resource_chunks,
+    resources,
     student_signals,
     study_blocks,
     study_plans,
@@ -95,6 +98,9 @@ def create_app() -> FastAPI:
     app.include_router(mastery_states.router)
     app.include_router(practice_results.router)
     app.include_router(config.router)
+    app.include_router(assessments.router)
+    app.include_router(resources.router)
+    app.include_router(resource_chunks.router)
 
     # Standardized error handler (covers both FastAPI and Starlette HTTPException)
     @app.exception_handler(StarletteHTTPException)
