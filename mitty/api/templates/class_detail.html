@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+
+{% block title %}Mitty — Class Detail{% endblock %}
+
+{% block nav %}
+{# Hide default nav; Alpine.js controls nav visibility based on auth state #}
+{% endblock %}
+
+{% block content %}
+<div x-data="classDetailApp()" x-init="init()" x-cloak>
+
+  {# ── Nav (only when authenticated) ── #}
+  <template x-if="session">
+    <nav class="bg-white shadow-sm border-b border-gray-200 -mx-4 -mt-6 mb-6">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="flex items-center justify-between h-14">
+          <a href="/" class="text-xl font-bold text-mitty-700 hover:text-mitty-600 transition-colors">
+            Mitty
+          </a>
+          <div class="flex items-center space-x-6">
+            <a href="/"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Dashboard
+            </a>
+            <a href="/study-plan"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Study Plan
+            </a>
+            <button
+              @click="signOut()"
+              class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </template>
+
+  {# ── Not authenticated ── #}
+  <template x-if="!session">
+    <div class="text-center py-16">
+      <p class="text-gray-500 mb-4">Please sign in to view class details.</p>
+      <a href="/" class="text-mitty-600 hover:text-mitty-700 font-medium">Go to Dashboard</a>
+    </div>
+  </template>
+
+  {# ── Authenticated Content ── #}
+  <template x-if="session">
+    <div class="max-w-4xl mx-auto py-8">
+
+      {# Back button #}
+      <a href="/" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-6 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Grades
+      </a>
+
+      {# Loading state #}
+      <div x-show="loading" class="text-center py-12">
+        <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+        <p class="text-sm text-gray-500 mt-3">Loading class details...</p>
+      </div>
+
+      {# Error state #}
+      <div x-show="fetchError && !loading" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
+        <p class="text-sm text-red-700" x-text="fetchError"></p>
+      </div>
+
+      {# Class header card #}
+      <div x-show="selectedClass && !loading" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+        <div class="flex items-start justify-between">
+          <div class="flex-1 min-w-0 mr-4">
+            <h1 class="text-xl font-bold text-gray-900" x-text="selectedClass?.course_name"></h1>
+            <p class="text-sm text-gray-400 mt-1" x-text="selectedClass?.course_code"></p>
+          </div>
+          <div class="flex items-center gap-3 flex-shrink-0">
+            <span class="text-lg font-medium text-gray-700" x-text="selectedClass?.current_score != null ? selectedClass.current_score.toFixed(1) + '%' : 'N/A'"></span>
+            <div class="w-14 h-14 rounded-xl flex items-center justify-center font-bold text-xl"
+                 :class="gradeColor(selectedClass?.current_score)"
+                 x-text="selectedClass?.current_grade || '\u2014'"></div>
+          </div>
+        </div>
+      </div>
+
+      {# Assignments loading state #}
+      <div x-show="assignmentsLoading" class="text-center py-12">
+        <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+        <p class="text-sm text-gray-500 mt-3">Loading assignments...</p>
+      </div>
+
+      {# Assignments error state #}
+      <div x-show="assignmentsError && !assignmentsLoading" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
+        <p class="text-sm text-red-700" x-text="assignmentsError"></p>
+      </div>
+
+      {# Assignment list #}
+      <div x-show="!assignmentsLoading && !assignmentsError && selectedClass">
+
+        {# Empty state #}
+        <div x-show="assignments.length === 0 && overdueAssignments.length === 0" class="text-center py-16">
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 mb-4">
+            <span class="text-3xl">&#10003;</span>
+          </div>
+          <h3 class="text-lg font-semibold text-gray-900 mb-1">All caught up!</h3>
+          <p class="text-sm text-gray-500">No upcoming or overdue assignments for this class.</p>
+        </div>
+
+        {# Overdue #}
+        <div x-show="overdueAssignments.length > 0" class="mb-6">
+          <h3 class="text-sm font-medium text-red-600 uppercase tracking-wide mb-3">Overdue</h3>
+          <div class="bg-white rounded-xl shadow-sm border border-red-100 divide-y divide-gray-100">
+            <template x-for="a in overdueAssignments" :key="a.id">
+              <a :href="a.html_url" target="_blank" rel="noopener" class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-3">
+                    <div class="text-xs text-gray-400 w-16 flex-shrink-0">
+                      <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
+                    </div>
+                    <div class="min-w-0">
+                      <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                      <div class="flex items-center gap-2 mt-1">
+                        <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                          <span x-text="assignmentStatus(a).icon"></span>
+                          <span x-text="assignmentStatus(a).label"></span>
+                        </span>
+                        <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+                  <span class="text-xs text-gray-400" x-text="a.points_possible != null ? a.points_possible + ' pts' : '\u2014'"></span>
+                  <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                  </svg>
+                </div>
+              </a>
+            </template>
+          </div>
+        </div>
+
+        {# This Week #}
+        <div x-show="thisWeekAssignments.length > 0" class="mb-6">
+          <h3 class="text-sm font-medium text-gray-700 uppercase tracking-wide mb-3">This Week</h3>
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100 divide-y divide-gray-100">
+            <template x-for="a in thisWeekAssignments" :key="a.id">
+              <a :href="a.html_url" target="_blank" rel="noopener" class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-3">
+                    <div class="text-xs text-gray-400 w-16 flex-shrink-0">
+                      <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
+                    </div>
+                    <div class="min-w-0">
+                      <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                      <div class="flex items-center gap-2 mt-1">
+                        <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                          <span x-text="assignmentStatus(a).icon"></span>
+                          <span x-text="assignmentStatus(a).label"></span>
+                        </span>
+                        <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+                  <span class="text-xs text-gray-400" x-text="a.points_possible != null ? a.points_possible + ' pts' : '\u2014'"></span>
+                  <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                  </svg>
+                </div>
+              </a>
+            </template>
+          </div>
+        </div>
+
+        {# Later #}
+        <div x-show="laterAssignments.length > 0" class="mb-6">
+          <h3 class="text-sm font-medium text-gray-400 uppercase tracking-wide mb-3">Later</h3>
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100 divide-y divide-gray-100">
+            <template x-for="a in laterAssignments" :key="a.id">
+              <a :href="a.html_url" target="_blank" rel="noopener" class="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-3">
+                    <div class="text-xs text-gray-400 w-16 flex-shrink-0">
+                      <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
+                    </div>
+                    <div class="min-w-0">
+                      <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                      <div class="flex items-center gap-2 mt-1">
+                        <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                          <span x-text="assignmentStatus(a).icon"></span>
+                          <span x-text="assignmentStatus(a).label"></span>
+                        </span>
+                        <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 flex-shrink-0 ml-3">
+                  <span class="text-xs text-gray-400" x-text="a.points_possible != null ? a.points_possible + ' pts' : '\u2014'"></span>
+                  <svg class="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                  </svg>
+                </div>
+              </a>
+            </template>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
+
+  const COURSE_ID = {{ course_id }};
+
+  function gradeToPoints(letterGrade) {
+    if (!letterGrade) return 0;
+    const letter = letterGrade.charAt(0).toUpperCase();
+    if (letter === 'A') return 2;
+    if (letter === 'B') return 1;
+    return 0;
+  }
+
+  function classDetailApp() {
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    return {
+      session: null,
+      loading: false,
+      fetchError: '',
+
+      selectedClass: null,
+      assignments: [],
+      overdueAssignments: [],
+      assignmentsLoading: false,
+      assignmentsError: '',
+
+      get thisWeekAssignments() {
+        return this.assignments.filter(a => a._section === 'thisWeek');
+      },
+      get laterAssignments() {
+        return this.assignments.filter(a => a._section === 'later');
+      },
+
+      async init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        this.session = session;
+
+        supabase.auth.onAuthStateChange((_event, session) => {
+          this.session = session;
+          if (session) this.loadCourse();
+        });
+
+        if (this.session) this.loadCourse();
+      },
+
+      async signOut() {
+        await supabase.auth.signOut();
+        this.session = null;
+        window.location.href = '/';
+      },
+
+      async loadCourse() {
+        this.loading = true;
+        this.fetchError = '';
+
+        // Fetch enrollment for this course
+        const { data, error } = await supabase
+          .from('enrollments')
+          .select(`
+            id,
+            course_id,
+            current_score,
+            current_grade,
+            courses (
+              name,
+              course_code,
+              term_name,
+              workflow_state
+            )
+          `)
+          .eq('course_id', COURSE_ID)
+          .eq('enrollment_state', 'active')
+          .limit(1)
+          .single();
+
+        this.loading = false;
+
+        if (error) {
+          this.fetchError = 'Failed to load class details: ' + error.message;
+          return;
+        }
+
+        if (!data || !data.courses) {
+          this.fetchError = 'Class not found.';
+          return;
+        }
+
+        this.selectedClass = {
+          course_id: data.course_id,
+          course_name: data.courses.name,
+          course_code: data.courses.course_code,
+          current_score: data.current_score,
+          current_grade: data.current_grade,
+        };
+
+        await this.fetchAssignments(COURSE_ID);
+      },
+
+      async fetchAssignments(courseId) {
+        this.assignmentsLoading = true;
+        this.assignmentsError = '';
+
+        try {
+          const { data, error } = await supabase
+            .from('assignments')
+            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, workflow_state, late, missing)')
+            .eq('course_id', courseId)
+            .not('due_at', 'is', null)
+            .gt('points_possible', 0)
+            .order('due_at', { ascending: true });
+
+          if (error) {
+            this.assignmentsError = 'Failed to load assignments: ' + error.message;
+            return;
+          }
+
+          const now = new Date();
+          const weekFromNow = new Date(Date.now() + 7 * 86400000);
+          const twoWeeksFromNow = new Date(Date.now() + 14 * 86400000);
+
+          const overdue = [];
+          const upcoming = [];
+
+          (data || []).forEach(a => {
+            const dueAt = new Date(a.due_at);
+            const submission = (Array.isArray(a.submissions) ? a.submissions[0] : a.submissions) || {};
+
+            if (dueAt < now && submission.score == null && (submission.workflow_state === 'unsubmitted' || submission.missing)) {
+              overdue.push(a);
+            } else if (dueAt >= now && dueAt <= twoWeeksFromNow) {
+              a._section = dueAt <= weekFromNow ? 'thisWeek' : 'later';
+              upcoming.push(a);
+            }
+          });
+
+          overdue.sort((a, b) => new Date(b.due_at) - new Date(a.due_at));
+          upcoming.sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
+
+          this.overdueAssignments = overdue;
+          this.assignments = upcoming;
+
+        } catch (err) {
+          this.assignmentsError = 'Failed to load assignments: ' + err.message;
+        } finally {
+          this.assignmentsLoading = false;
+        }
+      },
+
+      gradeColor(score) {
+        if (score == null) return 'bg-gray-100 text-gray-500';
+        if (score >= 90) return 'bg-emerald-50 text-emerald-700';
+        if (score >= 80) return 'bg-blue-50 text-blue-700';
+        if (score >= 70) return 'bg-yellow-50 text-yellow-700';
+        if (score >= 60) return 'bg-orange-50 text-orange-700';
+        return 'bg-red-50 text-red-700';
+      },
+
+      assignmentStatus(a) {
+        const sub = Array.isArray(a.submissions) ? a.submissions[0] : a.submissions;
+        if (!sub) return { icon: '\u25CB', label: 'Unknown', colorClass: 'text-gray-400', late: false };
+
+        let status;
+        if (sub.workflow_state === 'graded') {
+          const scoreText = sub.score != null && a.points_possible != null
+            ? sub.score + '/' + a.points_possible
+            : sub.grade || 'Graded';
+          status = { icon: '\u2713', label: 'Graded: ' + scoreText, colorClass: 'text-emerald-600' };
+        } else if (sub.workflow_state === 'submitted' || sub.workflow_state === 'pending_review') {
+          status = { icon: '\u25CF', label: 'Submitted', colorClass: 'text-blue-500' };
+        } else if (sub.missing) {
+          status = { icon: '\u26A0', label: 'Missing', colorClass: 'text-red-500' };
+        } else {
+          status = { icon: '\u25CB', label: 'Not submitted', colorClass: 'text-gray-400' };
+        }
+
+        return { ...status, late: sub.late };
+      },
+    };
+  }
+</script>
+{% endblock %}

@@ -18,3 +18,11 @@ templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 async def index(request: Request) -> HTMLResponse:
     """Render the main dashboard page."""
     return templates.TemplateResponse("dashboard.html", {"request": request})
+
+
+@router.get("/class/{course_id}", response_class=HTMLResponse)
+async def class_detail(request: Request, course_id: int) -> HTMLResponse:
+    """Render the class detail page for a specific course."""
+    return templates.TemplateResponse(
+        "class_detail.html", {"request": request, "course_id": course_id}
+    )
