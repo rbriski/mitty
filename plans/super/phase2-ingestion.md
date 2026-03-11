@@ -2,7 +2,7 @@
 
 ## Meta
 - **Source**: tickets/phase2-ingestion.md
-- **Phase**: detailing
+- **Phase**: devolved
 - **Branch**: feature/phase2-ingestion
 - **Created**: 2026-03-11
 - **Sessions**: 1
@@ -538,4 +538,23 @@ Phase 2 extends Mitty's data ingestion beyond courses/assignments/enrollments to
 
 ## Beads Manifest
 
-*(Phase 7 — pending)*
+- **Epic**: mitty-t2d
+- **Branch**: feature/phase2-ingestion
+- **Tasks**: 14 (12 implementation + Quality Gate + Patterns & Memory)
+
+| Bead | Story | Depends On |
+|------|-------|-----------|
+| mitty-t2d.1 | US-001: Schema migration | none |
+| mitty-t2d.2 | US-002: Pydantic models | none |
+| mitty-t2d.3 | US-003: Quiz fetcher + storage | .1, .2 |
+| mitty-t2d.4 | US-004: Modules + items fetcher + storage | .1, .2 |
+| mitty-t2d.5 | US-005: Pages fetcher + storage | .1, .2 |
+| mitty-t2d.6 | US-006: Files fetcher + storage | .1, .2 |
+| mitty-t2d.7 | US-007: Calendar events fetcher + storage | .1, .2 |
+| mitty-t2d.8 | US-008: Wire fetch_all() + store_all() | .3, .4, .5, .6, .7 |
+| mitty-t2d.9 | US-009: Chunking pipeline | .1 |
+| mitty-t2d.10 | US-010: Assessment management page | .1 |
+| mitty-t2d.11 | US-011: Resource management page | .1 |
+| mitty-t2d.12 | US-012: Integrate chunking into storage | .5, .8, .9 |
+| mitty-t2d.13 | US-013: Quality Gate | .8, .9, .10, .11, .12 |
+| mitty-t2d.14 | US-014: Patterns & Memory | .13 |
