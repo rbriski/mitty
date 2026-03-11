@@ -29,6 +29,9 @@ class Settings(BaseModel):
         max_concurrent: Maximum concurrent HTTP requests (semaphore size).
         supabase_url: Supabase project URL (optional).
         supabase_key: Supabase anon/service key (optional, secret).
+        supabase_service_role_key: Supabase service-role key for API (optional).
+        allowed_origins: Comma-separated CORS origins for the API.
+        fastapi_debug: Enable FastAPI debug mode.
     """
 
     canvas_base_url: str = "https://mitty.instructure.com"
@@ -42,6 +45,9 @@ class Settings(BaseModel):
     max_concurrent: int = 3
     supabase_url: str | None = None
     supabase_key: SecretStr | None = None
+    supabase_service_role_key: SecretStr | None = None
+    allowed_origins: str = ""
+    fastapi_debug: bool = False
 
 
 def load_settings() -> Settings:
@@ -82,6 +88,15 @@ def load_settings() -> Settings:
 
     if supabase_key := os.environ.get("SUPABASE_KEY"):
         overrides["supabase_key"] = supabase_key
+
+    if service_role_key := os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+        overrides["supabase_service_role_key"] = service_role_key
+
+    if allowed_origins := os.environ.get("ALLOWED_ORIGINS"):
+        overrides["allowed_origins"] = allowed_origins
+
+    if os.environ.get("FASTAPI_DEBUG", "").lower() in ("1", "true", "yes"):
+        overrides["fastapi_debug"] = True
 
     return Settings(**overrides)
 
