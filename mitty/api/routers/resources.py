@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import AsyncClient
 
 from mitty.api.auth import get_current_user
-from mitty.api.dependencies import get_supabase_client
+from mitty.api.dependencies import get_user_client
 from mitty.api.schemas import (
     ListResponse,
     ResourceCreate,
@@ -19,7 +19,7 @@ from mitty.api.schemas import (
 router = APIRouter(prefix="/resources", tags=["resources"])
 
 CurrentUser = Annotated[dict, Depends(get_current_user)]
-SupabaseClient = Annotated[AsyncClient, Depends(get_supabase_client)]
+SupabaseClient = Annotated[AsyncClient, Depends(get_user_client)]
 
 
 @router.post("/", response_model=ResourceResponse, status_code=201)

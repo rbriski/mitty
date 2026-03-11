@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from mitty.api.auth import get_current_user
-from mitty.api.dependencies import get_supabase_client
+from mitty.api.dependencies import get_supabase_client, get_user_client
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -164,6 +164,7 @@ def full_app_client(
     app = create_app()
     mock_supabase_client.table = MagicMock()
     with TestClient(app) as tc:
+        app.state.supabase_admin = mock_supabase_client
         app.state.supabase_client = mock_supabase_client
         yield tc
 
@@ -178,6 +179,7 @@ def _make_user_scoped_app(
 
     mod = importlib.import_module(f"mitty.api.routers.{router_module}")
     app = FastAPI()
+    app.state.supabase_admin = supabase_client
     app.state.supabase_client = supabase_client
 
     mock_user = MagicMock()
@@ -676,7 +678,7 @@ class TestUserIsolationPracticeResults:
             return mock_client
 
         app.dependency_overrides[get_current_user] = _user
-        app.dependency_overrides[get_supabase_client] = _client
+        app.dependency_overrides[get_user_client] = _client
 
         chain = _chain_mock_dep(SAMPLE_PRACTICE)
         mock_client.table.return_value = chain
@@ -701,7 +703,7 @@ class TestUserIsolationPracticeResults:
             return mock_client
 
         app.dependency_overrides[get_current_user] = _user
-        app.dependency_overrides[get_supabase_client] = _client
+        app.dependency_overrides[get_user_client] = _client
 
         updated = {**SAMPLE_PRACTICE, "is_correct": False}
         chain = _chain_mock_dep(updated)
@@ -731,7 +733,7 @@ class TestUserIsolationMasteryStates:
             return mock_client
 
         app.dependency_overrides[get_current_user] = _user
-        app.dependency_overrides[get_supabase_client] = _client
+        app.dependency_overrides[get_user_client] = _client
 
         updated = {**SAMPLE_MASTERY, "mastery_level": 0.9}
         chain = _chain_mock_dep(updated)
@@ -805,7 +807,7 @@ class TestConfigAuthBehavior:
             return mock_client
 
         app.dependency_overrides[get_current_user] = _user
-        app.dependency_overrides[get_supabase_client] = _client
+        app.dependency_overrides[get_user_client] = _client
 
         updated = {**SAMPLE_CONFIG, "current_term_name": "Fall 2025"}
         result = MagicMock()
@@ -838,7 +840,7 @@ class TestAuthMessageContent:
         from fastapi import Depends
 
         app = FastAPI()
-        app.state.supabase_client = supabase_client
+        app.state.supabase_admin = supabase_client
 
         @app.get("/protected")
         async def protected(
@@ -957,7 +959,7 @@ class TestUserScopedPagination:
             return mock_client
 
         app.dependency_overrides[get_current_user] = _user
-        app.dependency_overrides[get_supabase_client] = _client
+        app.dependency_overrides[get_user_client] = _client
 
         chain = _chain_mock_dep([], count=0)
         chain.execute = AsyncMock(return_value=MagicMock(data=[], count=0))
@@ -984,7 +986,7 @@ class TestUserScopedPagination:
             return mock_client
 
         app.dependency_overrides[get_current_user] = _user
-        app.dependency_overrides[get_supabase_client] = _client
+        app.dependency_overrides[get_user_client] = _client
 
         chain = _chain_mock_dep([], count=0)
         chain.execute = AsyncMock(return_value=MagicMock(data=[], count=0))
@@ -1043,7 +1045,7 @@ class TestLimitBoundaryUserScoped:
             return mock_client
 
         app.dependency_overrides[get_current_user] = _user
-        app.dependency_overrides[get_supabase_client] = _client
+        app.dependency_overrides[get_user_client] = _client
 
         with TestClient(app) as tc:
             resp = tc.get("/mastery-states/?limit=101")
@@ -1064,7 +1066,7 @@ class TestLimitBoundaryUserScoped:
             return mock_client
 
         app.dependency_overrides[get_current_user] = _user
-        app.dependency_overrides[get_supabase_client] = _client
+        app.dependency_overrides[get_user_client] = _client
 
         with TestClient(app) as tc:
             resp = tc.get("/practice-results/?limit=101")

@@ -1,6 +1,9 @@
 """Authentication dependency for FastAPI routes.
 
-Validates Supabase JWT tokens via the server-side auth.get_user() call.
+Validates Supabase JWT tokens via the server-side auth.get_user() call
+using the service-role (admin) client.  Returns user info plus the raw
+JWT so downstream dependencies can set it on the anon-key data client
+for RLS enforcement.
 """
 
 from __future__ import annotations
@@ -15,15 +18,17 @@ logger = logging.getLogger("mitty.api.auth")
 async def get_current_user(request: Request) -> dict[str, str]:
     """Extract and validate the Bearer token from the Authorization header.
 
-    Uses the Supabase service-role client stored on ``request.app.state``
-    to call ``auth.get_user(jwt)`` for server-side JWT validation.
+    Uses the Supabase **admin** (service-role) client stored on
+    ``request.app.state.supabase_admin`` to call ``auth.get_user(jwt)``
+    for server-side JWT validation.
 
     Returns:
-        dict with ``user_id`` (str) and ``email`` (str) on success.
+        dict with ``user_id`` (str), ``email`` (str), and ``access_token``
+        (str — the raw JWT for RLS passthrough).
 
     Raises:
         HTTPException: 401 if the token is missing, malformed, invalid,
-            or if the Supabase client is unavailable.
+            or if the Supabase admin client is unavailable.
     """
     # Extract Authorization header
     auth_header = request.headers.get("Authorization")
@@ -53,10 +58,10 @@ async def get_current_user(request: Request) -> dict[str, str]:
             },
         )
 
-    # Get Supabase client
-    client = getattr(request.app.state, "supabase_client", None)
-    if client is None:
-        logger.error("Supabase client is not configured — cannot validate token")
+    # Get the admin client (service-role) — used ONLY for token validation
+    admin = getattr(request.app.state, "supabase_admin", None)
+    if admin is None:
+        logger.error("Supabase admin client is not configured — cannot validate token")
         raise HTTPException(
             status_code=401,
             detail={"code": "401", "message": "Authentication service unavailable"},
@@ -64,7 +69,7 @@ async def get_current_user(request: Request) -> dict[str, str]:
 
     # Validate token via Supabase
     try:
-        response = await client.auth.get_user(token)
+        response = await admin.auth.get_user(token)
     except Exception:
         logger.warning("Supabase auth.get_user failed", exc_info=True)
         raise HTTPException(
@@ -79,4 +84,8 @@ async def get_current_user(request: Request) -> dict[str, str]:
             detail={"code": "401", "message": "Invalid or expired token"},
         )
 
-    return {"user_id": str(user.id), "email": user.email}
+    return {
+        "user_id": str(user.id),
+        "email": user.email,
+        "access_token": token,
+    }

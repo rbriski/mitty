@@ -19,11 +19,17 @@ def mock_user() -> MagicMock:
 
 @pytest.fixture()
 def mock_supabase_client(mock_user: MagicMock) -> AsyncMock:
-    """AsyncMock Supabase client with auth.get_user configured."""
+    """AsyncMock Supabase client with auth.get_user configured.
+
+    Used as both the admin client (for auth) and the data client.
+    """
     client = AsyncMock()
     response = MagicMock()
     response.user = mock_user
     client.auth.get_user = AsyncMock(return_value=response)
+    # postgrest.auth() is called by get_user_client to set the JWT
+    client.postgrest = MagicMock()
+    client.postgrest.auth = MagicMock()
     return client
 
 

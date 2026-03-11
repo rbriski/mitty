@@ -103,29 +103,33 @@ class TestCORSMiddleware:
 class TestSupabaseLifecycle:
     """Supabase client is created during lifespan when configured."""
 
-    def test_supabase_client_is_none_without_config(self, client: TestClient) -> None:
+    def test_supabase_clients_none_without_config(self, client: TestClient) -> None:
+        assert client.app.state.supabase_admin is None
         assert client.app.state.supabase_client is None
 
-    def test_supabase_client_created_with_config(
+    def test_supabase_clients_created_with_config(
         self, monkeypatch: pytest.MonkeyPatch, _mock_env: None
     ) -> None:
         monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "srv-role-key")
+        monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key")
 
-        mock_client = AsyncMock()
+        admin_client = AsyncMock()
+        data_client = AsyncMock()
         with patch(
             "mitty.api._supabase.create_supabase_client",
             new_callable=AsyncMock,
-            return_value=mock_client,
+            side_effect=[admin_client, data_client],
         ) as mock_create:
             from mitty.api.app import create_app
 
             app = create_app()
             with TestClient(app) as tc:
-                mock_create.assert_called_once_with(
-                    "https://test.supabase.co", "srv-role-key"
-                )
-                assert tc.app.state.supabase_client is mock_client
+                assert mock_create.call_count == 2
+                mock_create.assert_any_call("https://test.supabase.co", "srv-role-key")
+                mock_create.assert_any_call("https://test.supabase.co", "anon-key")
+                assert tc.app.state.supabase_admin is admin_client
+                assert tc.app.state.supabase_client is data_client
 
 
 class TestRequestLogging:

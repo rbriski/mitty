@@ -20,3 +20,15 @@ infra/*.tfstate
 infra/*.tfstate.backup
 infra/*.tfvars
 !infra/terraform.tfvars.example
+work-mitty-eza.3/
+work-mitty-eza.6/
+work-mitty-1wb.2/
+work-mitty-1wb.13/
+work-mitty-1wb.5/
+work-mitty-1wb.9/
+work-mitty-1wb.10/
+work-mitty-1wb.6/
+work-mitty-1wb.7/
+work-mitty-1wb.8/
+work-mitty-1wb.12/
+work-mitty-1wb.14/

@@ -1,13 +1,18 @@
 """CRUD router for student_signals (daily check-ins).
 
-Every query filters by the authenticated user's ID to enforce isolation.
+User isolation is enforced by RLS (via the user JWT set on the client)
+and belt-and-suspenders user_id filters in queries.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from supabase import AsyncClient
 
 from mitty.api.auth import get_current_user
+from mitty.api.dependencies import get_user_client
 from mitty.api.schemas import (
     ListResponse,
     StudentSignalCreate,
@@ -17,23 +22,17 @@ from mitty.api.schemas import (
 
 router = APIRouter(prefix="/student-signals", tags=["student_signals"])
 
-
-def _get_client(request: Request):  # noqa: ANN202
-    """Return the Supabase async client from app state."""
-    client = getattr(request.app.state, "supabase_client", None)
-    if client is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    return client
+CurrentUser = Annotated[dict, Depends(get_current_user)]
+UserClient = Annotated[AsyncClient, Depends(get_user_client)]
 
 
 @router.post("/", response_model=StudentSignalResponse, status_code=201)
 async def create_signal(
     data: StudentSignalCreate,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudentSignalResponse:
     """Create a new student signal. user_id is injected from auth."""
-    client = _get_client(request)
     row = data.model_dump(exclude_none=True, mode="json")
     row["user_id"] = current_user["user_id"]
     result = await client.table("student_signals").insert(row).execute()
@@ -42,13 +41,12 @@ async def create_signal(
 
 @router.get("/", response_model=ListResponse[StudentSignalResponse])
 async def list_signals(
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
     offset: int = Query(default=0, ge=0),  # noqa: B008
     limit: int = Query(default=20, ge=1, le=100),  # noqa: B008
 ) -> ListResponse[StudentSignalResponse]:
     """List signals for the authenticated user (paginated)."""
-    client = _get_client(request)
     query = (
         client.table("student_signals")
         .select("*", count="exact")
@@ -67,11 +65,10 @@ async def list_signals(
 @router.get("/{signal_id}", response_model=StudentSignalResponse)
 async def get_signal(
     signal_id: int,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudentSignalResponse:
     """Get a single signal by ID (scoped to the authenticated user)."""
-    client = _get_client(request)
     result = (
         await client.table("student_signals")
         .select("*")
@@ -92,11 +89,10 @@ async def get_signal(
 async def update_signal(
     signal_id: int,
     data: StudentSignalUpdate,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudentSignalResponse:
     """Update a signal (scoped to the authenticated user)."""
-    client = _get_client(request)
     updates = data.model_dump(exclude_unset=True, mode="json")
     if not updates:
         raise HTTPException(
@@ -121,11 +117,10 @@ async def update_signal(
 @router.delete("/{signal_id}", status_code=204)
 async def delete_signal(
     signal_id: int,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> None:
     """Delete a signal (scoped to the authenticated user)."""
-    client = _get_client(request)
     result = (
         await client.table("student_signals")
         .delete()

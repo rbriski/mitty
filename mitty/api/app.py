@@ -42,18 +42,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Manage application lifecycle — Supabase client setup and teardown."""
     settings = load_settings()
 
+    # Service-role client — used ONLY for auth.get_user() token validation.
+    # Bypasses RLS by design; never used for data queries.
     if settings.supabase_url and settings.supabase_service_role_key:
         from mitty.api._supabase import create_supabase_client
 
         key = settings.supabase_service_role_key.get_secret_value()
-        client = await create_supabase_client(settings.supabase_url, key)
-        app.state.supabase_client = client
-        logger.info("Supabase client initialised")
+        app.state.supabase_admin = await create_supabase_client(
+            settings.supabase_url, key
+        )
+        logger.info("Supabase admin client initialised (auth only)")
+    else:
+        app.state.supabase_admin = None
+        logger.warning("Supabase admin client not configured (auth will fail)")
+
+    # Anon-key client — used for all data queries.
+    # Respects RLS; user JWT is set per-request via postgrest.auth().
+    if settings.supabase_url and settings.supabase_anon_key:
+        from mitty.api._supabase import create_supabase_client
+
+        anon = settings.supabase_anon_key.get_secret_value()
+        app.state.supabase_client = await create_supabase_client(
+            settings.supabase_url, anon
+        )
+        logger.info("Supabase data client initialised (anon key, RLS enforced)")
     else:
         app.state.supabase_client = None
         logger.warning(
-            "Supabase client not configured "
-            "(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required)"
+            "Supabase data client not configured (SUPABASE_ANON_KEY required)"
         )
 
     yield
