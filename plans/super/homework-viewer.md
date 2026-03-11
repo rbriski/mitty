@@ -2,7 +2,7 @@
 
 ## Meta
 - **Ticket:** tickets/homework-viewer.md
-- **Phase:** detailing
+- **Phase:** devolved
 - **Branch:** feature/homework-viewer
 - **Created:** 2026-03-10
 - **Sessions:** 1
@@ -298,4 +298,18 @@ No blockers from architecture review. Remaining concerns resolved below.
 ---
 
 ## Beads Manifest
-*(Populated on devolve)*
+
+- **Epic:** `mitty-eza` — Homework Viewer — Upcoming Assignments by Class
+- **Branch:** `feature/homework-viewer`
+- **PR:** https://github.com/rbriski/mitty/pull/4
+
+| Bead | Story | Depends On |
+|------|-------|------------|
+| `mitty-eza.1` | US-001: Alpine.js state + view toggling + fetch methods | — |
+| `mitty-eza.2` | US-002: Badge counts on grade cards | .1 |
+| `mitty-eza.3` | US-003: Class detail view — header + back nav | .1 |
+| `mitty-eza.4` | US-004: Assignment list — overdue/this week/later | .3 |
+| `mitty-eza.5` | US-005: Submission status indicators | .4 |
+| `mitty-eza.6` | US-006: Empty state "All caught up!" | .4 |
+| `mitty-eza.7` | US-007: Quality Gate | .1-.6 |
+| `mitty-eza.8` | US-008: Patterns & Memory | .7 |
