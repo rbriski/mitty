@@ -20,6 +20,12 @@ async def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
+@router.get("/study-plan", response_class=HTMLResponse)
+async def study_plan(request: Request) -> HTMLResponse:
+    """Render the study plan page for today."""
+    return templates.TemplateResponse("study_plan.html", {"request": request})
+
+
 @router.get("/class/{course_id}", response_class=HTMLResponse)
 async def class_detail(request: Request, course_id: int) -> HTMLResponse:
     """Render the class detail page for a specific course."""
