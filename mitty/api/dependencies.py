@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import Request  # noqa: TCH002 - FastAPI needs runtime type for DI
+from fastapi import (  # noqa: TCH002 - FastAPI needs runtime type for DI
+    HTTPException,
+    Request,
+)
 
 if TYPE_CHECKING:
     from supabase import AsyncClient
@@ -18,6 +21,5 @@ async def get_supabase_client(request: Request) -> AsyncClient:
     """
     client: AsyncClient | None = request.app.state.supabase_client
     if client is None:
-        msg = "Supabase client is not configured"
-        raise RuntimeError(msg)
+        raise HTTPException(status_code=503, detail="Database unavailable")
     return client

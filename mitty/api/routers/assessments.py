@@ -46,7 +46,7 @@ async def get_assessment(
         await client.table("assessments")
         .select("*")
         .eq("id", assessment_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not result.data:
@@ -84,6 +84,8 @@ async def update_assessment(
 ) -> AssessmentResponse:
     """Update an existing assessment."""
     payload = data.model_dump(mode="json", exclude_unset=True)
+    if not payload:
+        raise HTTPException(status_code=400, detail="No fields to update")
     result = (
         await client.table("assessments")
         .update(payload)

@@ -25,5 +25,8 @@ class TestGetSupabaseClient:
         request = MagicMock()
         request.app.state.supabase_client = None
 
-        with pytest.raises(RuntimeError, match="not configured"):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
             await get_supabase_client(request)
+        assert exc_info.value.status_code == 503

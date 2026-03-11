@@ -95,7 +95,7 @@ class TestGetResourceChunk:
         mock_supabase_client.table.return_value = mock_table
         mock_table.select.return_value = mock_table
         mock_table.eq.return_value = mock_table
-        mock_table.single.return_value = mock_table
+        mock_table.maybe_single.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=SAMPLE_CHUNK))
 
         response = client.get("/resource-chunks/1", headers=authenticated_headers)
@@ -113,7 +113,7 @@ class TestGetResourceChunk:
         mock_supabase_client.table.return_value = mock_table
         mock_table.select.return_value = mock_table
         mock_table.eq.return_value = mock_table
-        mock_table.single.return_value = mock_table
+        mock_table.maybe_single.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=None))
 
         response = client.get("/resource-chunks/999", headers=authenticated_headers)

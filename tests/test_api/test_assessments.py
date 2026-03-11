@@ -99,7 +99,7 @@ class TestGetAssessment:
         mock_supabase_client.table.return_value = mock_table
         mock_table.select.return_value = mock_table
         mock_table.eq.return_value = mock_table
-        mock_table.single.return_value = mock_table
+        mock_table.maybe_single.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=SAMPLE_ASSESSMENT))
 
         response = client.get("/assessments/1", headers=authenticated_headers)
@@ -117,7 +117,7 @@ class TestGetAssessment:
         mock_supabase_client.table.return_value = mock_table
         mock_table.select.return_value = mock_table
         mock_table.eq.return_value = mock_table
-        mock_table.single.return_value = mock_table
+        mock_table.maybe_single.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=None))
 
         response = client.get("/assessments/999", headers=authenticated_headers)

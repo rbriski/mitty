@@ -46,7 +46,7 @@ async def get_resource(
         await client.table("resources")
         .select("*")
         .eq("id", resource_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not result.data:
@@ -84,6 +84,8 @@ async def update_resource(
 ) -> ResourceResponse:
     """Update an existing resource."""
     payload = data.model_dump(mode="json", exclude_unset=True)
+    if not payload:
+        raise HTTPException(status_code=400, detail="No fields to update")
     result = (
         await client.table("resources").update(payload).eq("id", resource_id).execute()
     )

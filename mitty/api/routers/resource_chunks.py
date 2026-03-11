@@ -48,7 +48,7 @@ async def get_resource_chunk(
         await client.table("resource_chunks")
         .select("*")
         .eq("id", chunk_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not result.data:
@@ -89,6 +89,8 @@ async def update_resource_chunk(
 ) -> ResourceChunkResponse:
     """Update an existing resource chunk."""
     payload = data.model_dump(mode="json", exclude_unset=True)
+    if not payload:
+        raise HTTPException(status_code=400, detail="No fields to update")
     result = (
         await client.table("resource_chunks")
         .update(payload)

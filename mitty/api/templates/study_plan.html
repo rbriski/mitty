@@ -196,7 +196,7 @@
           }
 
           const resp = await fetch(
-            '/api/v1/study-plans?date_from=' + this.todayISO + '&date_to=' + this.todayISO + '&limit=1',
+            '/study-plans?date_from=' + this.todayISO + '&date_to=' + this.todayISO + '&limit=1',
             { headers: { 'Authorization': 'Bearer ' + token } }
           );
 
@@ -216,7 +216,7 @@
 
           // Fetch blocks for this plan
           const blocksResp = await fetch(
-            '/api/v1/study-blocks?plan_id=' + this.plan.id,
+            '/study-blocks?plan_id=' + this.plan.id,
             { headers: { 'Authorization': 'Bearer ' + token } }
           );
 

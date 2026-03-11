@@ -31,7 +31,7 @@ async def create_mastery_state(
     client: SupaClient,
 ) -> MasteryStateResponse:
     """Create or upsert a mastery state (user_id injected from auth)."""
-    row = data.model_dump(exclude_none=True)
+    row = data.model_dump(exclude_none=True, mode="json")
     row["user_id"] = current_user["user_id"]
     result = (
         await client.table("mastery_states")
@@ -93,7 +93,7 @@ async def update_mastery_state(
     client: SupaClient,
 ) -> MasteryStateResponse:
     """Update a mastery state by ID (filtered by user)."""
-    updates = data.model_dump(exclude_none=True)
+    updates = data.model_dump(exclude_unset=True, mode="json")
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     result = (

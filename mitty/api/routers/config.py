@@ -35,7 +35,7 @@ async def update_config(
     client: SupaClient,
 ) -> AppConfigResponse:
     """Update the app config singleton (auth required)."""
-    updates = data.model_dump(exclude_none=True)
+    updates = data.model_dump(exclude_unset=True)
     if not updates:
         # Nothing to update, just return current
         result = (

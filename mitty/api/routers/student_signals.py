@@ -97,7 +97,7 @@ async def update_signal(
 ) -> StudentSignalResponse:
     """Update a signal (scoped to the authenticated user)."""
     client = _get_client(request)
-    updates = data.model_dump(exclude_none=True, mode="json")
+    updates = data.model_dump(exclude_unset=True, mode="json")
     if not updates:
         raise HTTPException(
             status_code=400,

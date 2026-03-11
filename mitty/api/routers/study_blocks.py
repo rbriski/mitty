@@ -138,7 +138,7 @@ async def update_block(
     """Update a block (ownership verified via plan join)."""
     client = _get_client(request)
     await _verify_block_ownership(client, block_id, current_user["user_id"])
-    updates = data.model_dump(exclude_none=True, mode="json")
+    updates = data.model_dump(exclude_unset=True, mode="json")
     if not updates:
         raise HTTPException(
             status_code=400,
