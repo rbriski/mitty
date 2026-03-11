@@ -1,6 +1,4 @@
 {$DOMAIN} {
     tls {$ACME_EMAIL}
-    root * /srv/web
-    file_server
-    try_files {path} /index.html
+    reverse_proxy web:8000
 }

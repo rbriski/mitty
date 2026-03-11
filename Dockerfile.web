@@ -1,0 +1,32 @@
+# ---- builder ----
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+
+WORKDIR /app
+
+# Install dependencies first (layer cache)
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project
+
+# Copy application code and install project
+COPY mitty/ mitty/
+RUN uv sync --locked --no-dev
+
+# ---- runtime ----
+FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+
+# Copy virtual-env and app from builder
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/mitty /app/mitty
+
+# Put venv on PATH
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Run as non-root
+RUN useradd --create-home appuser
+USER appuser
+
+EXPOSE 8000
+
+CMD ["uvicorn", "mitty.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
