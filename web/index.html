@@ -312,6 +312,15 @@
         <!-- Assignment list -->
         <div x-show="!assignmentsLoading && !assignmentsError">
 
+          <!-- Empty state -->
+          <div x-show="assignments.length === 0 && overdueAssignments.length === 0" class="text-center py-16">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-50 mb-4">
+              <span class="text-3xl">✓</span>
+            </div>
+            <h3 class="text-lg font-semibold text-gray-900 mb-1">All caught up!</h3>
+            <p class="text-sm text-gray-500">No upcoming or overdue assignments for this class.</p>
+          </div>
+
           <!-- Overdue -->
           <div x-show="overdueAssignments.length > 0" class="mb-6">
             <h3 class="text-sm font-medium text-red-600 uppercase tracking-wide mb-3">Overdue</h3>
