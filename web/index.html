@@ -323,7 +323,16 @@
                       <div class="text-xs text-gray-400 w-16 flex-shrink-0">
                         <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
                       </div>
-                      <span class="text-sm text-gray-900 truncate" x-text="a.name"></span>
+                      <div class="min-w-0">
+                        <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                            <span x-text="assignmentStatus(a).icon"></span>
+                            <span x-text="assignmentStatus(a).label"></span>
+                          </span>
+                          <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div class="flex items-center gap-3 flex-shrink-0 ml-3">
@@ -348,7 +357,16 @@
                       <div class="text-xs text-gray-400 w-16 flex-shrink-0">
                         <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
                       </div>
-                      <span class="text-sm text-gray-900 truncate" x-text="a.name"></span>
+                      <div class="min-w-0">
+                        <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                            <span x-text="assignmentStatus(a).icon"></span>
+                            <span x-text="assignmentStatus(a).label"></span>
+                          </span>
+                          <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div class="flex items-center gap-3 flex-shrink-0 ml-3">
@@ -373,7 +391,16 @@
                       <div class="text-xs text-gray-400 w-16 flex-shrink-0">
                         <span x-text="new Date(a.due_at).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' })"></span>
                       </div>
-                      <span class="text-sm text-gray-900 truncate" x-text="a.name"></span>
+                      <div class="min-w-0">
+                        <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                            <span x-text="assignmentStatus(a).icon"></span>
+                            <span x-text="assignmentStatus(a).label"></span>
+                          </span>
+                          <span x-show="assignmentStatus(a).late" class="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-medium">Late</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div class="flex items-center gap-3 flex-shrink-0 ml-3">
@@ -733,6 +760,27 @@
         if (score >= 70) return 'bg-yellow-500';
         if (score >= 60) return 'bg-orange-500';
         return 'bg-red-500';
+      },
+
+      assignmentStatus(a) {
+        const sub = a.submissions?.[0];
+        if (!sub) return { icon: '○', label: 'Unknown', colorClass: 'text-gray-400', late: false };
+
+        let status;
+        if (sub.workflow_state === 'graded') {
+          const scoreText = sub.score != null && a.points_possible != null
+            ? sub.score + '/' + a.points_possible
+            : sub.grade || 'Graded';
+          status = { icon: '✓', label: 'Graded: ' + scoreText, colorClass: 'text-emerald-600' };
+        } else if (sub.workflow_state === 'submitted' || sub.workflow_state === 'pending_review') {
+          status = { icon: '●', label: 'Submitted', colorClass: 'text-blue-500' };
+        } else if (sub.missing) {
+          status = { icon: '⚠', label: 'Missing', colorClass: 'text-red-500' };
+        } else {
+          status = { icon: '○', label: 'Not submitted', colorClass: 'text-gray-400' };
+        }
+
+        return { ...status, late: sub.late };
       },
     };
   }
