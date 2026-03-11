@@ -226,11 +226,16 @@
         <h2 class="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">Class Details</h2>
         <div class="grid gap-4 sm:grid-cols-2">
           <template x-for="item in grades" :key="item.course_id">
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
+            <div @click="selectClass(item)" class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow cursor-pointer">
               <div class="flex items-start justify-between mb-3">
                 <div class="flex-1 min-w-0 mr-3">
                   <h2 class="font-semibold text-gray-900 truncate" x-text="item.course_name"></h2>
                   <p class="text-xs text-gray-400 mt-0.5" x-text="item.course_code"></p>
+                  <span
+                    x-show="assignmentCounts[item.course_id]"
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 mt-1"
+                    x-text="assignmentCounts[item.course_id] + ' due'"
+                  ></span>
                 </div>
                 <div
                   class="flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg"
