@@ -271,8 +271,48 @@
 
       </div><!-- /Dashboard View -->
 
-      <!-- Class Detail View (US-003 will add content here) -->
-      <div x-show="currentView === 'classDetail'">
+      <!-- Class Detail View -->
+      <div x-show="currentView === 'classDetail'" class="max-w-4xl mx-auto">
+
+        <!-- Back button -->
+        <button @click="goBack()" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-6 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
+          Back to Grades
+        </button>
+
+        <!-- Class header card -->
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+          <div class="flex items-start justify-between">
+            <div class="flex-1 min-w-0 mr-4">
+              <h1 class="text-xl font-bold text-gray-900" x-text="selectedClass?.course_name"></h1>
+              <p class="text-sm text-gray-400 mt-1" x-text="selectedClass?.course_code"></p>
+            </div>
+            <div class="flex items-center gap-3 flex-shrink-0">
+              <span class="text-lg font-medium text-gray-700" x-text="selectedClass?.current_score != null ? selectedClass.current_score.toFixed(1) + '%' : 'N/A'"></span>
+              <div class="w-14 h-14 rounded-xl flex items-center justify-center font-bold text-xl"
+                   :class="gradeColor(selectedClass?.current_score)"
+                   x-text="selectedClass?.current_grade || '\u2014'"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Loading state -->
+        <div x-show="assignmentsLoading" class="text-center py-12">
+          <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+          <p class="text-sm text-gray-500 mt-3">Loading assignments...</p>
+        </div>
+
+        <!-- Error state -->
+        <div x-show="assignmentsError && !assignmentsLoading" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
+          <p class="text-sm text-red-700" x-text="assignmentsError"></p>
+        </div>
+
+        <!-- Assignment list placeholder (US-004 will add content here) -->
+        <div x-show="!assignmentsLoading && !assignmentsError">
+        </div>
+
       </div>
 
       <!-- Last Updated -->
