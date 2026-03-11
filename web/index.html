@@ -655,7 +655,7 @@
             const dueAt = new Date(a.due_at);
             const submission = (Array.isArray(a.submissions) ? a.submissions[0] : a.submissions) || {};
 
-            if (dueAt < now && (submission.workflow_state === 'unsubmitted' || submission.missing)) {
+            if (dueAt < now && submission.score == null && (submission.workflow_state === 'unsubmitted' || submission.missing)) {
               overdue.push(a);
             } else if (dueAt >= now && dueAt <= twoWeeksFromNow) {
               a._section = dueAt <= weekFromNow ? 'thisWeek' : 'later';
