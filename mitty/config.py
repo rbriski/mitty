@@ -29,7 +29,6 @@ class Settings(BaseModel):
         max_concurrent: Maximum concurrent HTTP requests (semaphore size).
         supabase_url: Supabase project URL (optional).
         supabase_key: Supabase anon/service key (optional, secret).
-        database_url: PostgreSQL connection string (optional, secret).
     """
 
     canvas_base_url: str = "https://mitty.instructure.com"
@@ -43,7 +42,6 @@ class Settings(BaseModel):
     max_concurrent: int = 3
     supabase_url: str | None = None
     supabase_key: SecretStr | None = None
-    database_url: SecretStr | None = None
 
 
 def load_settings() -> Settings:
@@ -84,9 +82,6 @@ def load_settings() -> Settings:
 
     if supabase_key := os.environ.get("SUPABASE_KEY"):
         overrides["supabase_key"] = supabase_key
-
-    if database_url := os.environ.get("DATABASE_URL"):
-        overrides["database_url"] = database_url
 
     return Settings(**overrides)
 
