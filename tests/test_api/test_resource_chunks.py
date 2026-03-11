@@ -58,7 +58,7 @@ class TestCreateResourceChunk:
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[SAMPLE_CHUNK]))
 
         response = client.post(
-            "/api/v1/resource-chunks/",
+            "/resource-chunks/",
             json={
                 "resource_id": 5,
                 "chunk_index": 0,
@@ -73,7 +73,7 @@ class TestCreateResourceChunk:
 
     def test_create_requires_auth(self, client: TestClient) -> None:
         response = client.post(
-            "/api/v1/resource-chunks/",
+            "/resource-chunks/",
             json={
                 "resource_id": 5,
                 "chunk_index": 0,
@@ -98,9 +98,7 @@ class TestGetResourceChunk:
         mock_table.single.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=SAMPLE_CHUNK))
 
-        response = client.get(
-            "/api/v1/resource-chunks/1", headers=authenticated_headers
-        )
+        response = client.get("/resource-chunks/1", headers=authenticated_headers)
 
         assert response.status_code == 200
         assert response.json()["id"] == 1
@@ -118,14 +116,12 @@ class TestGetResourceChunk:
         mock_table.single.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=None))
 
-        response = client.get(
-            "/api/v1/resource-chunks/999", headers=authenticated_headers
-        )
+        response = client.get("/resource-chunks/999", headers=authenticated_headers)
 
         assert response.status_code == 404
 
     def test_get_requires_auth(self, client: TestClient) -> None:
-        response = client.get("/api/v1/resource-chunks/1")
+        response = client.get("/resource-chunks/1")
         assert response.status_code == 401
 
 
@@ -146,7 +142,7 @@ class TestListResourceChunks:
         )
 
         response = client.get(
-            "/api/v1/resource-chunks/?resource_id=5",
+            "/resource-chunks/?resource_id=5",
             headers=authenticated_headers,
         )
 
@@ -161,11 +157,11 @@ class TestListResourceChunks:
         authenticated_headers: dict[str, str],
     ) -> None:
         """resource_id is a required query param."""
-        response = client.get("/api/v1/resource-chunks/", headers=authenticated_headers)
+        response = client.get("/resource-chunks/", headers=authenticated_headers)
         assert response.status_code == 422
 
     def test_list_requires_auth(self, client: TestClient) -> None:
-        response = client.get("/api/v1/resource-chunks/?resource_id=5")
+        response = client.get("/resource-chunks/?resource_id=5")
         assert response.status_code == 401
 
 
@@ -184,7 +180,7 @@ class TestUpdateResourceChunk:
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[updated]))
 
         response = client.put(
-            "/api/v1/resource-chunks/1",
+            "/resource-chunks/1",
             json={"content_text": "Updated content."},
             headers=authenticated_headers,
         )
@@ -205,7 +201,7 @@ class TestUpdateResourceChunk:
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[]))
 
         response = client.put(
-            "/api/v1/resource-chunks/999",
+            "/resource-chunks/999",
             json={"content_text": "Updated."},
             headers=authenticated_headers,
         )
@@ -214,7 +210,7 @@ class TestUpdateResourceChunk:
 
     def test_update_requires_auth(self, client: TestClient) -> None:
         response = client.put(
-            "/api/v1/resource-chunks/1",
+            "/resource-chunks/1",
             json={"content_text": "Updated."},
         )
         assert response.status_code == 401
@@ -233,9 +229,7 @@ class TestDeleteResourceChunk:
         mock_table.eq.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[SAMPLE_CHUNK]))
 
-        response = client.delete(
-            "/api/v1/resource-chunks/1", headers=authenticated_headers
-        )
+        response = client.delete("/resource-chunks/1", headers=authenticated_headers)
 
         assert response.status_code == 204
 
@@ -251,12 +245,10 @@ class TestDeleteResourceChunk:
         mock_table.eq.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[]))
 
-        response = client.delete(
-            "/api/v1/resource-chunks/999", headers=authenticated_headers
-        )
+        response = client.delete("/resource-chunks/999", headers=authenticated_headers)
 
         assert response.status_code == 404
 
     def test_delete_requires_auth(self, client: TestClient) -> None:
-        response = client.delete("/api/v1/resource-chunks/1")
+        response = client.delete("/resource-chunks/1")
         assert response.status_code == 401

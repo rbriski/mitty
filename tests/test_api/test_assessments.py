@@ -64,7 +64,7 @@ class TestCreateAssessment:
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[SAMPLE_ASSESSMENT]))
 
         response = client.post(
-            "/api/v1/assessments/",
+            "/assessments/",
             json={
                 "course_id": 10,
                 "name": "Midterm Exam",
@@ -78,7 +78,7 @@ class TestCreateAssessment:
 
     def test_create_requires_auth(self, client: TestClient) -> None:
         response = client.post(
-            "/api/v1/assessments/",
+            "/assessments/",
             json={
                 "course_id": 10,
                 "name": "Midterm Exam",
@@ -102,7 +102,7 @@ class TestGetAssessment:
         mock_table.single.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=SAMPLE_ASSESSMENT))
 
-        response = client.get("/api/v1/assessments/1", headers=authenticated_headers)
+        response = client.get("/assessments/1", headers=authenticated_headers)
 
         assert response.status_code == 200
         assert response.json()["id"] == 1
@@ -120,12 +120,12 @@ class TestGetAssessment:
         mock_table.single.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=None))
 
-        response = client.get("/api/v1/assessments/999", headers=authenticated_headers)
+        response = client.get("/assessments/999", headers=authenticated_headers)
 
         assert response.status_code == 404
 
     def test_get_requires_auth(self, client: TestClient) -> None:
-        response = client.get("/api/v1/assessments/1")
+        response = client.get("/assessments/1")
         assert response.status_code == 401
 
 
@@ -144,7 +144,7 @@ class TestListAssessments:
             return_value=MagicMock(data=[SAMPLE_ASSESSMENT], count=1)
         )
 
-        response = client.get("/api/v1/assessments/", headers=authenticated_headers)
+        response = client.get("/assessments/", headers=authenticated_headers)
 
         assert response.status_code == 200
         body = response.json()
@@ -169,7 +169,7 @@ class TestListAssessments:
         )
 
         response = client.get(
-            "/api/v1/assessments/?course_id=10",
+            "/assessments/?course_id=10",
             headers=authenticated_headers,
         )
 
@@ -177,7 +177,7 @@ class TestListAssessments:
         mock_table.eq.assert_called_with("course_id", 10)
 
     def test_list_requires_auth(self, client: TestClient) -> None:
-        response = client.get("/api/v1/assessments/")
+        response = client.get("/assessments/")
         assert response.status_code == 401
 
 
@@ -196,7 +196,7 @@ class TestUpdateAssessment:
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[updated]))
 
         response = client.put(
-            "/api/v1/assessments/1",
+            "/assessments/1",
             json={"name": "Final Exam"},
             headers=authenticated_headers,
         )
@@ -217,7 +217,7 @@ class TestUpdateAssessment:
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[]))
 
         response = client.put(
-            "/api/v1/assessments/999",
+            "/assessments/999",
             json={"name": "Final Exam"},
             headers=authenticated_headers,
         )
@@ -225,7 +225,7 @@ class TestUpdateAssessment:
         assert response.status_code == 404
 
     def test_update_requires_auth(self, client: TestClient) -> None:
-        response = client.put("/api/v1/assessments/1", json={"name": "Final Exam"})
+        response = client.put("/assessments/1", json={"name": "Final Exam"})
         assert response.status_code == 401
 
 
@@ -242,7 +242,7 @@ class TestDeleteAssessment:
         mock_table.eq.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[SAMPLE_ASSESSMENT]))
 
-        response = client.delete("/api/v1/assessments/1", headers=authenticated_headers)
+        response = client.delete("/assessments/1", headers=authenticated_headers)
 
         assert response.status_code == 204
 
@@ -258,12 +258,10 @@ class TestDeleteAssessment:
         mock_table.eq.return_value = mock_table
         mock_table.execute = AsyncMock(return_value=MagicMock(data=[]))
 
-        response = client.delete(
-            "/api/v1/assessments/999", headers=authenticated_headers
-        )
+        response = client.delete("/assessments/999", headers=authenticated_headers)
 
         assert response.status_code == 404
 
     def test_delete_requires_auth(self, client: TestClient) -> None:
-        response = client.delete("/api/v1/assessments/1")
+        response = client.delete("/assessments/1")
         assert response.status_code == 401
