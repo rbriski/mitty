@@ -636,6 +636,7 @@
             .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, workflow_state, late, missing)')
             .eq('course_id', courseId)
             .not('due_at', 'is', null)
+            .gt('points_possible', 0)
             .order('due_at', { ascending: true });
 
           if (error) {
@@ -691,6 +692,7 @@
             .select('id, course_id, submissions!inner(workflow_state)')
             .in('course_id', courseIds)
             .not('due_at', 'is', null)
+            .gt('points_possible', 0)
             .gte('due_at', now)
             .lte('due_at', weekLater)
             .eq('submissions.workflow_state', 'unsubmitted');
