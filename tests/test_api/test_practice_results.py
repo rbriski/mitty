@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from mitty.api.auth import get_current_user
-from mitty.api.dependencies import get_supabase_client
+from mitty.api.dependencies import get_user_client
 from mitty.api.routers.practice_results import router
 
 USER_ID = "12345678-1234-5678-1234-567812345678"
@@ -48,7 +48,7 @@ def app(mock_client: MagicMock) -> FastAPI:
         return mock_client
 
     app.dependency_overrides[get_current_user] = _user
-    app.dependency_overrides[get_supabase_client] = _client
+    app.dependency_overrides[get_user_client] = _client
     return app
 
 

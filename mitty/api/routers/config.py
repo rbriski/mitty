@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated
 from fastapi import APIRouter, Depends
 
 from mitty.api.auth import get_current_user
-from mitty.api.dependencies import get_supabase_client
+from mitty.api.dependencies import get_supabase_client, get_user_client
 from mitty.api.schemas import AppConfigResponse, AppConfigUpdate
 
 if TYPE_CHECKING:
@@ -16,12 +16,13 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/config", tags=["config"])
 
 CurrentUser = Annotated[dict, Depends(get_current_user)]
-SupaClient = Annotated["AsyncClient", Depends(get_supabase_client)]
+AnonClient = Annotated["AsyncClient", Depends(get_supabase_client)]
+UserClient = Annotated["AsyncClient", Depends(get_user_client)]
 
 
 @router.get("/", response_model=AppConfigResponse)
 async def get_config(
-    client: SupaClient,
+    client: AnonClient,
 ) -> AppConfigResponse:
     """Read the app config singleton (public, no auth required)."""
     result = await client.table("app_config").select("*").eq("id", 1).single().execute()
@@ -32,7 +33,7 @@ async def get_config(
 async def update_config(
     data: AppConfigUpdate,
     current_user: CurrentUser,
-    client: SupaClient,
+    client: UserClient,
 ) -> AppConfigResponse:
     """Update the app config singleton (auth required)."""
     updates = data.model_dump(exclude_unset=True)

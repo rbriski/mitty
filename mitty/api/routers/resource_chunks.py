@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import AsyncClient
 
 from mitty.api.auth import get_current_user
-from mitty.api.dependencies import get_supabase_client
+from mitty.api.dependencies import get_user_client
 from mitty.api.schemas import (
     ListResponse,
     ResourceChunkCreate,
@@ -19,7 +19,7 @@ from mitty.api.schemas import (
 router = APIRouter(prefix="/resource-chunks", tags=["resource_chunks"])
 
 CurrentUser = Annotated[dict, Depends(get_current_user)]
-SupabaseClient = Annotated[AsyncClient, Depends(get_supabase_client)]
+SupabaseClient = Annotated[AsyncClient, Depends(get_user_client)]
 
 
 @router.post("/", response_model=ResourceChunkResponse, status_code=201)

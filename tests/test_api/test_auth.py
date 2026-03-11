@@ -14,7 +14,7 @@ from mitty.api.auth import get_current_user
 def _create_test_app(supabase_client: AsyncMock | None) -> FastAPI:
     """Build a minimal FastAPI app with a protected endpoint."""
     app = FastAPI()
-    app.state.supabase_client = supabase_client
+    app.state.supabase_admin = supabase_client
 
     @app.get("/protected")
     async def protected(user: dict = Depends(get_current_user)):  # noqa: B008

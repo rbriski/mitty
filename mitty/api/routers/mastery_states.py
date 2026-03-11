@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from mitty.api.auth import get_current_user
-from mitty.api.dependencies import get_supabase_client
+from mitty.api.dependencies import get_user_client
 from mitty.api.schemas import (
     ListResponse,
     MasteryStateCreate,
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 router = APIRouter(prefix="/mastery-states", tags=["mastery_states"])
 
 CurrentUser = Annotated[dict, Depends(get_current_user)]
-SupaClient = Annotated["AsyncClient", Depends(get_supabase_client)]
+SupaClient = Annotated["AsyncClient", Depends(get_user_client)]
 
 
 @router.post("/", response_model=MasteryStateResponse, status_code=201)

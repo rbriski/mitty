@@ -1,6 +1,6 @@
 """CRUD router for study_plans.
 
-Every query filters by the authenticated user's ID to enforce isolation.
+User isolation enforced by RLS + belt-and-suspenders user_id filters.
 """
 
 from __future__ import annotations
@@ -8,10 +8,13 @@ from __future__ import annotations
 from datetime import (
     date,  # noqa: TCH003 — must be available at runtime for FastAPI/Pydantic
 )
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
+from supabase import AsyncClient
 
 from mitty.api.auth import get_current_user
+from mitty.api.dependencies import get_user_client
 from mitty.api.schemas import (
     ListResponse,
     StudyPlanCreate,
@@ -21,23 +24,17 @@ from mitty.api.schemas import (
 
 router = APIRouter(prefix="/study-plans", tags=["study_plans"])
 
-
-def _get_client(request: Request):  # noqa: ANN202
-    """Return the Supabase async client from app state."""
-    client = getattr(request.app.state, "supabase_client", None)
-    if client is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    return client
+CurrentUser = Annotated[dict, Depends(get_current_user)]
+UserClient = Annotated[AsyncClient, Depends(get_user_client)]
 
 
 @router.post("/", response_model=StudyPlanResponse, status_code=201)
 async def create_plan(
     data: StudyPlanCreate,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudyPlanResponse:
     """Create a new study plan. user_id is injected from auth."""
-    client = _get_client(request)
     row = data.model_dump(exclude_none=True, mode="json")
     row["user_id"] = current_user["user_id"]
     result = await client.table("study_plans").insert(row).execute()
@@ -46,15 +43,14 @@ async def create_plan(
 
 @router.get("/", response_model=ListResponse[StudyPlanResponse])
 async def list_plans(
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
     offset: int = Query(default=0, ge=0),  # noqa: B008
     limit: int = Query(default=20, ge=1, le=100),  # noqa: B008
     date_from: date | None = Query(default=None),  # noqa: B008
     date_to: date | None = Query(default=None),  # noqa: B008
 ) -> ListResponse[StudyPlanResponse]:
     """List plans for the authenticated user (paginated, optional date filter)."""
-    client = _get_client(request)
     query = (
         client.table("study_plans")
         .select("*", count="exact")
@@ -77,11 +73,10 @@ async def list_plans(
 @router.get("/{plan_id}", response_model=StudyPlanResponse)
 async def get_plan(
     plan_id: int,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudyPlanResponse:
     """Get a single plan by ID (scoped to the authenticated user)."""
-    client = _get_client(request)
     result = (
         await client.table("study_plans")
         .select("*")
@@ -102,11 +97,10 @@ async def get_plan(
 async def update_plan(
     plan_id: int,
     data: StudyPlanUpdate,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudyPlanResponse:
     """Update a plan (scoped to the authenticated user)."""
-    client = _get_client(request)
     updates = data.model_dump(exclude_unset=True, mode="json")
     if not updates:
         raise HTTPException(
@@ -131,11 +125,10 @@ async def update_plan(
 @router.delete("/{plan_id}", status_code=204)
 async def delete_plan(
     plan_id: int,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> None:
     """Delete a plan (scoped to the authenticated user)."""
-    client = _get_client(request)
     result = (
         await client.table("study_plans")
         .delete()

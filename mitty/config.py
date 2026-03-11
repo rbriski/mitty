@@ -45,6 +45,7 @@ class Settings(BaseModel):
     max_concurrent: int = 3
     supabase_url: str | None = None
     supabase_key: SecretStr | None = None
+    supabase_anon_key: SecretStr | None = None
     supabase_service_role_key: SecretStr | None = None
     allowed_origins: str = ""
     fastapi_debug: bool = False
@@ -88,6 +89,9 @@ def load_settings() -> Settings:
 
     if supabase_key := os.environ.get("SUPABASE_KEY"):
         overrides["supabase_key"] = supabase_key
+
+    if anon_key := os.environ.get("SUPABASE_ANON_KEY"):
+        overrides["supabase_anon_key"] = anon_key
 
     if service_role_key := os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
         overrides["supabase_service_role_key"] = service_role_key

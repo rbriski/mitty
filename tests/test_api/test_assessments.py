@@ -47,6 +47,7 @@ def client(
     # Ensure .table() is sync (Supabase client's .table() is not async)
     mock_supabase_client.table = MagicMock()
     with TestClient(app) as tc:
+        app.state.supabase_admin = mock_supabase_client
         app.state.supabase_client = mock_supabase_client
         yield tc
 

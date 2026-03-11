@@ -196,7 +196,7 @@
           }
 
           const resp = await fetch(
-            '/study-plans?date_from=' + this.todayISO + '&date_to=' + this.todayISO + '&limit=1',
+            '/study-plans/?date_from=' + this.todayISO + '&date_to=' + this.todayISO + '&limit=1',
             { headers: { 'Authorization': 'Bearer ' + token } }
           );
 

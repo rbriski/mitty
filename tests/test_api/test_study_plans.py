@@ -26,6 +26,7 @@ SAMPLE_PLAN = {
 
 def _make_app(supabase_client: AsyncMock, user_id: str = USER_A_ID) -> FastAPI:
     app = FastAPI()
+    app.state.supabase_admin = supabase_client
     app.state.supabase_client = supabase_client
 
     mock_user = MagicMock()

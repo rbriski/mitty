@@ -30,6 +30,7 @@ SAMPLE_SIGNAL = {
 def _make_app(supabase_client: AsyncMock, user_id: str = USER_A_ID) -> FastAPI:
     """Build a test app with the student_signals router and a mocked auth user."""
     app = FastAPI()
+    app.state.supabase_admin = supabase_client
     app.state.supabase_client = supabase_client
 
     mock_user = MagicMock()

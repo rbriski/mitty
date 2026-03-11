@@ -1,14 +1,18 @@
 """CRUD router for study_blocks.
 
 Ownership is verified via plan_id join — every block's plan must belong
-to the authenticated user.
+to the authenticated user.  RLS provides defense-in-depth.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from supabase import AsyncClient
 
 from mitty.api.auth import get_current_user
+from mitty.api.dependencies import get_user_client
 from mitty.api.schemas import (
     ListResponse,
     StudyBlockCreate,
@@ -18,13 +22,8 @@ from mitty.api.schemas import (
 
 router = APIRouter(prefix="/study-blocks", tags=["study_blocks"])
 
-
-def _get_client(request: Request):  # noqa: ANN202
-    """Return the Supabase async client from app state."""
-    client = getattr(request.app.state, "supabase_client", None)
-    if client is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    return client
+CurrentUser = Annotated[dict, Depends(get_current_user)]
+UserClient = Annotated[AsyncClient, Depends(get_user_client)]
 
 
 async def _verify_plan_ownership(
@@ -76,11 +75,10 @@ async def _verify_block_ownership(
 @router.post("/", response_model=StudyBlockResponse, status_code=201)
 async def create_block(
     data: StudyBlockCreate,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudyBlockResponse:
     """Create a new study block. Plan ownership is verified first."""
-    client = _get_client(request)
     await _verify_plan_ownership(client, data.plan_id, current_user["user_id"])
     row = data.model_dump(exclude_none=True, mode="json")
     result = await client.table("study_blocks").insert(row).execute()
@@ -89,14 +87,13 @@ async def create_block(
 
 @router.get("/", response_model=ListResponse[StudyBlockResponse])
 async def list_blocks(
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
     plan_id: int = Query(..., description="Required: filter by plan ID"),  # noqa: B008
     offset: int = Query(default=0, ge=0),  # noqa: B008
     limit: int = Query(default=20, ge=1, le=100),  # noqa: B008
 ) -> ListResponse[StudyBlockResponse]:
     """List blocks for a plan (plan ownership verified)."""
-    client = _get_client(request)
     await _verify_plan_ownership(client, plan_id, current_user["user_id"])
     result = (
         await client.table("study_blocks")
@@ -117,11 +114,10 @@ async def list_blocks(
 @router.get("/{block_id}", response_model=StudyBlockResponse)
 async def get_block(
     block_id: int,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudyBlockResponse:
     """Get a single block (ownership verified via plan join)."""
-    client = _get_client(request)
     row = await _verify_block_ownership(client, block_id, current_user["user_id"])
     # Remove the nested join data before validating
     row.pop("study_plans", None)
@@ -132,11 +128,10 @@ async def get_block(
 async def update_block(
     block_id: int,
     data: StudyBlockUpdate,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> StudyBlockResponse:
     """Update a block (ownership verified via plan join)."""
-    client = _get_client(request)
     await _verify_block_ownership(client, block_id, current_user["user_id"])
     updates = data.model_dump(exclude_unset=True, mode="json")
     if not updates:
@@ -158,10 +153,9 @@ async def update_block(
 @router.delete("/{block_id}", status_code=204)
 async def delete_block(
     block_id: int,
-    request: Request,
-    current_user: dict[str, str] = Depends(get_current_user),  # noqa: B008
+    current_user: CurrentUser,
+    client: UserClient,
 ) -> None:
     """Delete a block (ownership verified via plan join)."""
-    client = _get_client(request)
     await _verify_block_ownership(client, block_id, current_user["user_id"])
     await client.table("study_blocks").delete().eq("id", block_id).execute()
