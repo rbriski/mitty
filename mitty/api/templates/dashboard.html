@@ -461,16 +461,44 @@
   const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
 
-  // Privilege thresholds: [minPoints, privileges unlocked]
-  const PRIVILEGE_LEVELS = [
-    { min: 12, name: 'All Privileges', privileges: ['Phone', 'Car', 'Snapchat', 'Homework in Bedroom'] },
-    { min: 11, name: '5A 1B',          privileges: ['Phone', 'Car', 'Snapchat'] },
-    { min: 10, name: 'Almost There',   privileges: ['Phone', 'Car'] },
-    { min: 8,  name: 'Getting There',  privileges: ['Phone'] },
-    { min: 0,  name: 'Locked',         privileges: [] },
-  ];
+  // Default privilege config — used as fallback if /config fetch fails
+  const DEFAULT_PRIVILEGE_THRESHOLDS = [8, 10, 11, 12];
+  const DEFAULT_PRIVILEGE_NAMES = ['Phone', 'Car', 'Snapchat', 'Homework in Bedroom'];
+  const DEFAULT_TERM_NAME = '2025-2026 Second Semester';
 
-  const ALL_PRIVILEGES = ['Phone', 'Car', 'Snapchat', 'Homework in Bedroom'];
+  /**
+   * Build PRIVILEGE_LEVELS from thresholds and names arrays.
+   * thresholds: sorted ascending list of point values, e.g. [8, 10, 11, 12]
+   * names: privilege names unlocked at each threshold, e.g. ['Phone', 'Car', 'Snapchat', 'Homework in Bedroom']
+   */
+  function buildPrivilegeLevels(thresholds, names) {
+    // Each threshold index unlocks that privilege plus all previous ones
+    const levels = [];
+    const n = thresholds.length;
+    // Highest threshold first — "All Privileges"
+    for (let i = n - 1; i >= 0; i--) {
+      const unlockedNames = names.slice(0, i + 1);
+      let label;
+      if (i === n - 1) label = 'All Privileges';
+      else label = unlockedNames.length + ' of ' + n + ' unlocked';
+      levels.push({ min: thresholds[i], name: label, privileges: unlockedNames });
+    }
+    // Base level — nothing unlocked
+    levels.push({ min: 0, name: 'Locked', privileges: [] });
+    return levels;
+  }
+
+  function buildMilestones(thresholds, names) {
+    return thresholds.map((pts, i) => ({
+      points: pts,
+      label: i === 0 ? names[i] : '+ ' + names[i],
+    }));
+  }
+
+  // Initialize with defaults; will be replaced by config fetch
+  let PRIVILEGE_LEVELS = buildPrivilegeLevels(DEFAULT_PRIVILEGE_THRESHOLDS, DEFAULT_PRIVILEGE_NAMES);
+  let ALL_PRIVILEGES = [...DEFAULT_PRIVILEGE_NAMES];
+  let CURRENT_TERM_NAME = DEFAULT_TERM_NAME;
 
   function gradeToPoints(letterGrade) {
     if (!letterGrade) return 0;
@@ -509,12 +537,7 @@
       totalPoints: 0,
       maxPoints: 0,
       privileges: [],
-      milestones: [
-        { points: 8, label: 'Phone' },
-        { points: 10, label: '+ Car' },
-        { points: 11, label: '+ Snapchat' },
-        { points: 12, label: '+ Bedroom' },
-      ],
+      milestones: buildMilestones(DEFAULT_PRIVILEGE_THRESHOLDS, DEFAULT_PRIVILEGE_NAMES),
       nextLevelInfo: '',
       termName: '',
       loading: false,
@@ -522,6 +545,9 @@
       lastUpdated: '',
 
       async init() {
+        // Fetch app config (public endpoint, no auth needed)
+        await this.loadConfig();
+
         const { data: { session } } = await supabase.auth.getSession();
         this.session = session;
 
@@ -531,6 +557,26 @@
         });
 
         if (this.session) this.fetchGrades();
+      },
+
+      async loadConfig() {
+        try {
+          const resp = await fetch('/config/');
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          const cfg = await resp.json();
+
+          // Apply config values with fallback to defaults
+          const thresholds = cfg.privilege_thresholds || DEFAULT_PRIVILEGE_THRESHOLDS;
+          const names = cfg.privilege_names || DEFAULT_PRIVILEGE_NAMES;
+
+          PRIVILEGE_LEVELS = buildPrivilegeLevels(thresholds, names);
+          ALL_PRIVILEGES = [...names];
+          CURRENT_TERM_NAME = cfg.current_term_name || DEFAULT_TERM_NAME;
+          this.milestones = buildMilestones(thresholds, names);
+        } catch (err) {
+          console.warn('Config fetch failed, using defaults:', err.message);
+          // Defaults already set at module level — no action needed
+        }
       },
 
       async signIn() {
@@ -590,7 +636,7 @@
           .filter(e => e.courses
             && e.courses.workflow_state === 'available'
             && e.current_score != null
-            && e.courses.term_name === '2025-2026 Second Semester'
+            && e.courses.term_name === CURRENT_TERM_NAME
           )
           .map(e => {
             const points = gradeToPoints(e.current_grade);
@@ -758,9 +804,10 @@
         }
       },
 
-      // Scale the bar so 0-7 takes ~15% and 8-12 spans to 95% (leaving room for labels)
+      // Scale the bar so below lowest threshold takes ~15% and up to max spans to 95%
       scaledPercent(points) {
-        const low = 7, high = 12;
+        const t = this.milestones.map(m => m.points);
+        const low = (t[0] || 8) - 1, high = t[t.length - 1] || 12;
         const lowPct = 15, highPct = 95;
         if (points <= low) return (points / low) * lowPct;
         return lowPct + ((points - low) / (high - low)) * (highPct - lowPct);
@@ -771,25 +818,43 @@
         return level ? level.name : 'Locked';
       },
 
+      // Color helpers use dynamic thresholds from config
+      _thresholdIndex(points) {
+        // Returns how many thresholds the score meets (0 = none, length = all)
+        const t = this.milestones.map(m => m.points);
+        let met = 0;
+        for (const threshold of t) { if (points >= threshold) met++; }
+        return met;
+      },
+
       scoreColor(points) {
-        if (points >= 12) return 'text-emerald-600';
-        if (points >= 10) return 'text-blue-600';
-        if (points >= 8) return 'text-yellow-600';
-        return 'text-red-600';
+        const COLORS = ['text-red-600', 'text-yellow-600', 'text-blue-600', 'text-emerald-600'];
+        const met = this._thresholdIndex(points);
+        const t = this.milestones.length;
+        if (met >= t) return COLORS[3];
+        if (met >= t - 1) return COLORS[2];
+        if (met >= t - 2) return COLORS[1];
+        return COLORS[0];
       },
 
       scoreBarColor(points) {
-        if (points >= 12) return 'bg-emerald-500';
-        if (points >= 10) return 'bg-blue-500';
-        if (points >= 8) return 'bg-yellow-500';
-        return 'bg-red-400';
+        const COLORS = ['bg-red-400', 'bg-yellow-500', 'bg-blue-500', 'bg-emerald-500'];
+        const met = this._thresholdIndex(points);
+        const t = this.milestones.length;
+        if (met >= t) return COLORS[3];
+        if (met >= t - 1) return COLORS[2];
+        if (met >= t - 2) return COLORS[1];
+        return COLORS[0];
       },
 
       levelBadgeColor(points) {
-        if (points >= 12) return 'bg-emerald-100 text-emerald-700';
-        if (points >= 10) return 'bg-blue-100 text-blue-700';
-        if (points >= 8) return 'bg-yellow-100 text-yellow-700';
-        return 'bg-red-100 text-red-700';
+        const COLORS = ['bg-red-100 text-red-700', 'bg-yellow-100 text-yellow-700', 'bg-blue-100 text-blue-700', 'bg-emerald-100 text-emerald-700'];
+        const met = this._thresholdIndex(points);
+        const t = this.milestones.length;
+        if (met >= t) return COLORS[3];
+        if (met >= t - 1) return COLORS[2];
+        if (met >= t - 2) return COLORS[1];
+        return COLORS[0];
       },
 
       pointsColor(points) {
