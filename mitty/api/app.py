@@ -19,7 +19,16 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from mitty.api.middleware import RequestLoggingMiddleware
-from mitty.api.routers import config, health, mastery_states, pages, practice_results, student_signals, study_blocks, study_plans
+from mitty.api.routers import (
+    config,
+    health,
+    mastery_states,
+    pages,
+    practice_results,
+    student_signals,
+    study_blocks,
+    study_plans,
+)
 from mitty.config import load_settings
 
 logger = logging.getLogger("mitty.api")
