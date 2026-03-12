@@ -20,13 +20,16 @@ SAMPLE_RESULT = {
     "study_block_id": 5,
     "course_id": 10,
     "concept": "Quadratics",
-    "practice_type": "quiz",
+    "practice_type": "multiple_choice",
     "question_text": "Solve x^2 + 2x + 1 = 0",
     "student_answer": "x = -1",
     "correct_answer": "x = -1",
     "is_correct": True,
     "confidence_before": 3.0,
     "time_spent_seconds": 120,
+    "score": 1.0,
+    "feedback": "Correct!",
+    "misconceptions_detected": None,
     "created_at": "2025-01-01T00:00:00",
 }
 
@@ -92,7 +95,7 @@ class TestCreatePracticeResult:
             json={
                 "user_id": USER_ID,
                 "course_id": 10,
-                "practice_type": "quiz",
+                "practice_type": "multiple_choice",
                 "question_text": "Solve x^2 + 2x + 1 = 0",
             },
         )
@@ -100,7 +103,7 @@ class TestCreatePracticeResult:
         assert response.status_code == 201
         body = response.json()
         assert body["user_id"] == USER_ID
-        assert body["practice_type"] == "quiz"
+        assert body["practice_type"] == "multiple_choice"
 
     def test_create_injects_user_id(
         self, client: TestClient, mock_client: MagicMock
@@ -113,7 +116,7 @@ class TestCreatePracticeResult:
             json={
                 "user_id": USER_ID,
                 "course_id": 10,
-                "practice_type": "quiz",
+                "practice_type": "multiple_choice",
                 "question_text": "test",
             },
         )

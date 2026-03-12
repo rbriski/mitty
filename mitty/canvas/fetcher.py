@@ -397,7 +397,7 @@ async def fetch_all(
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for course, result in zip(courses, results, strict=True):
-        if isinstance(result, (KeyboardInterrupt, SystemExit)):
+        if isinstance(result, KeyboardInterrupt | SystemExit):
             raise result
         if isinstance(result, BaseException):
             error_msg = (
