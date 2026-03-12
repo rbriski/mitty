@@ -189,6 +189,28 @@
             ></p>
           </div>
 
+          {# Due Today #}
+          <div x-show="todayAssignments.length > 0" class="mt-4 bg-red-50 rounded-xl shadow-sm border border-red-200 p-4">
+            <h3 class="text-xs font-medium text-red-700 uppercase tracking-wide mb-2">Due Today</h3>
+            <div class="space-y-2">
+              <template x-for="a in todayAssignments" :key="a.id">
+                <a :href="a.html_url" target="_blank" rel="noopener" class="flex items-center justify-between hover:bg-red-100 rounded-lg px-2 py-1.5 -mx-2 transition-colors">
+                  <div class="flex-1 min-w-0">
+                    <span class="text-sm text-gray-900 truncate block" x-text="a.name"></span>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-gray-500" x-text="a.course_name"></span>
+                      <span class="text-xs" :class="assignmentStatus(a).colorClass">
+                        <span x-text="assignmentStatus(a).icon"></span>
+                        <span x-text="assignmentStatus(a).label"></span>
+                      </span>
+                    </div>
+                  </div>
+                  <span class="text-xs text-gray-400 flex-shrink-0 ml-2" x-text="a.points_possible + ' pts'"></span>
+                </a>
+              </template>
+            </div>
+          </div>
+
           {# Due Tomorrow #}
           <div x-show="tomorrowAssignments.length > 0" class="mt-4 bg-amber-50 rounded-xl shadow-sm border border-amber-200 p-4">
             <h3 class="text-xs font-medium text-amber-700 uppercase tracking-wide mb-2">Due Tomorrow</h3>
@@ -522,6 +544,7 @@
       assignments: [],
       overdueAssignments: [],
       assignmentCounts: {},
+      todayAssignments: [],
       tomorrowAssignments: [],
       assignmentsLoading: false,
       assignmentsError: '',
@@ -703,7 +726,7 @@
         try {
           const { data, error } = await supabase
             .from('assignments')
-            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, workflow_state, late, missing)')
+            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, submitted_at, workflow_state, late, missing)')
             .eq('course_id', courseId)
             .not('due_at', 'is', null)
             .gt('points_possible', 0)
@@ -725,7 +748,10 @@
             const dueAt = new Date(a.due_at);
             const submission = (Array.isArray(a.submissions) ? a.submissions[0] : a.submissions) || {};
 
-            if (dueAt < now && submission.score == null && (submission.workflow_state === 'unsubmitted' || submission.missing)) {
+            const isSubmitted = submission.score != null || submission.submitted_at != null
+              || submission.workflow_state === 'graded' || submission.workflow_state === 'submitted'
+              || submission.workflow_state === 'pending_review';
+            if (dueAt < now && !isSubmitted && (submission.workflow_state === 'unsubmitted' || submission.missing)) {
               overdue.push(a);
             } else if (dueAt >= now && dueAt <= twoWeeksFromNow) {
               a._section = dueAt <= weekFromNow ? 'thisWeek' : 'later';
@@ -779,7 +805,32 @@
 
           this.assignmentCounts = counts;
 
-          // Fetch tomorrow's assignments (all, not just unsubmitted)
+          // Fetch today's assignments
+          const today = new Date();
+          const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
+          const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
+
+          const { data: todayData } = await supabase
+            .from('assignments')
+            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, submitted_at, workflow_state, late, missing)')
+            .in('course_id', courseIds)
+            .not('due_at', 'is', null)
+            .gt('points_possible', 0)
+            .gte('due_at', todayStart)
+            .lt('due_at', todayEnd)
+            .order('due_at', { ascending: true });
+
+          this.todayAssignments = (todayData || []).filter(a => {
+            const sub = Array.isArray(a.submissions) ? a.submissions[0] : a.submissions;
+            return !sub || (sub.score == null && sub.submitted_at == null
+              && sub.workflow_state !== 'graded' && sub.workflow_state !== 'submitted'
+              && sub.workflow_state !== 'pending_review');
+          }).map(a => {
+            const course = this.grades.find(g => g.course_id === a.course_id);
+            return { ...a, course_name: course?.course_name || '' };
+          });
+
+          // Fetch tomorrow's assignments
           const tomorrow = new Date();
           tomorrow.setDate(tomorrow.getDate() + 1);
           const tStart = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate()).toISOString();
@@ -787,7 +838,7 @@
 
           const { data: tomorrowData } = await supabase
             .from('assignments')
-            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, workflow_state, late, missing)')
+            .select('id, name, due_at, points_possible, html_url, course_id, submissions!inner(score, grade, submitted_at, workflow_state, late, missing)')
             .in('course_id', courseIds)
             .not('due_at', 'is', null)
             .gt('points_possible', 0)
@@ -795,7 +846,12 @@
             .lt('due_at', tEnd)
             .order('due_at', { ascending: true });
 
-          this.tomorrowAssignments = (tomorrowData || []).map(a => {
+          this.tomorrowAssignments = (tomorrowData || []).filter(a => {
+            const sub = Array.isArray(a.submissions) ? a.submissions[0] : a.submissions;
+            return !sub || (sub.score == null && sub.submitted_at == null
+              && sub.workflow_state !== 'graded' && sub.workflow_state !== 'submitted'
+              && sub.workflow_state !== 'pending_review');
+          }).map(a => {
             const course = this.grades.find(g => g.course_id === a.course_id);
             return { ...a, course_name: course?.course_name || '' };
           });
@@ -886,12 +942,12 @@
         if (!sub) return { icon: '\u25CB', label: 'Unknown', colorClass: 'text-gray-400', late: false };
 
         let status;
-        if (sub.workflow_state === 'graded') {
+        if (sub.workflow_state === 'graded' || sub.score != null) {
           const scoreText = sub.score != null && a.points_possible != null
             ? sub.score + '/' + a.points_possible
             : sub.grade || 'Graded';
           status = { icon: '\u2713', label: 'Graded: ' + scoreText, colorClass: 'text-emerald-600' };
-        } else if (sub.workflow_state === 'submitted' || sub.workflow_state === 'pending_review') {
+        } else if (sub.workflow_state === 'submitted' || sub.workflow_state === 'pending_review' || sub.submitted_at != null) {
           status = { icon: '\u25CF', label: 'Submitted', colorClass: 'text-blue-500' };
         } else if (sub.missing) {
           status = { icon: '\u26A0', label: 'Missing', colorClass: 'text-red-500' };

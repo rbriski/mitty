@@ -585,12 +585,32 @@
           const today = new Date();
           today.setHours(0, 0, 0, 0);
 
-          this.upcomingAssessments = allAssessments
-            .filter(a => {
-              if (!a.scheduled_date) return false;
-              const d = new Date(a.scheduled_date);
-              return d >= today && d <= weekLater;
-            })
+          // Filter to upcoming, then exclude already-scored assessments
+          const upcoming = allAssessments.filter(a => {
+            if (!a.scheduled_date) return false;
+            const d = new Date(a.scheduled_date);
+            return d >= today && d <= weekLater;
+          });
+
+          // Check submissions for linked assignments to filter out scored ones
+          const assignmentIds = upcoming
+            .map(a => a.canvas_assignment_id)
+            .filter(id => id != null);
+          let scoredIds = new Set();
+          if (assignmentIds.length > 0) {
+            const { data: subs } = await supabase
+              .from('submissions')
+              .select('assignment_id, score, workflow_state, submitted_at')
+              .in('assignment_id', assignmentIds);
+            scoredIds = new Set(
+              (subs || [])
+                .filter(s => s.score != null || s.workflow_state === 'graded')
+                .map(s => s.assignment_id)
+            );
+          }
+
+          this.upcomingAssessments = upcoming
+            .filter(a => !scoredIds.has(a.canvas_assignment_id))
             .map(a => {
               const d = new Date(a.scheduled_date);
               const diffMs = d.getTime() - today.getTime();
