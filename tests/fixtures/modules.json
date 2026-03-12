@@ -1,0 +1,32 @@
+[
+  {
+    "id": 3001,
+    "name": "Unit 1: Introduction to Rhetoric",
+    "position": 1,
+    "unlock_at": null,
+    "items_count": 5,
+    "items_url": "https://mitty.instructure.com/api/v1/courses/12345/modules/3001/items",
+    "state": "completed",
+    "workflow_state": "active"
+  },
+  {
+    "id": 3002,
+    "name": "Unit 2: Argument & Persuasion",
+    "position": 2,
+    "unlock_at": "2026-03-01T00:00:00Z",
+    "items_count": 8,
+    "items_url": "https://mitty.instructure.com/api/v1/courses/12345/modules/3002/items",
+    "state": "started",
+    "workflow_state": "active"
+  },
+  {
+    "id": 3003,
+    "name": "Unit 3: Synthesis & Research",
+    "position": 3,
+    "unlock_at": "2026-04-01T00:00:00Z",
+    "items_count": 0,
+    "items_url": "https://mitty.instructure.com/api/v1/courses/12345/modules/3003/items",
+    "state": "locked",
+    "workflow_state": "active"
+  }
+]

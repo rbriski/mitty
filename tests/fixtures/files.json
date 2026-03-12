@@ -1,0 +1,38 @@
+[
+  {
+    "id": 9001,
+    "display_name": "Unit1_Study_Guide.pdf",
+    "content_type": "application/pdf",
+    "size": 245760,
+    "url": "https://mitty.instructure.com/files/9001/download",
+    "folder_id": 4001,
+    "uuid": "abc123",
+    "created_at": "2026-01-10T12:00:00Z",
+    "modified_at": "2026-01-10T12:00:00Z",
+    "thumbnail_url": null
+  },
+  {
+    "id": 9002,
+    "display_name": "lecture_notes_week3.docx",
+    "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "size": 51200,
+    "url": "https://mitty.instructure.com/files/9002/download",
+    "folder_id": 4001,
+    "uuid": "def456",
+    "created_at": "2026-02-15T08:00:00Z",
+    "modified_at": "2026-02-15T08:00:00Z",
+    "thumbnail_url": null
+  },
+  {
+    "id": 9003,
+    "display_name": "sample_essay.txt",
+    "content_type": "text/plain",
+    "size": 0,
+    "url": "",
+    "folder_id": null,
+    "uuid": "ghi789",
+    "created_at": "2026-03-01T10:00:00Z",
+    "modified_at": "2026-03-01T10:00:00Z",
+    "thumbnail_url": null
+  }
+]
