@@ -14,6 +14,7 @@ from mitty.models import (
     Course,
     Enrollment,
     FileMetadata,
+    Module,
     ModuleItem,
     Page,
     Quiz,
@@ -1063,27 +1064,39 @@ class TestInsertGradeSnapshots:
 # ------------------------------------------------------------------ #
 
 # Patch targets for store_all tests.
-_STORE_ALL_PATCHES = {
+_STORE_ALL_PATCHES: dict[str, str] = {
     "upsert_courses": "mitty.storage.upsert_courses",
     "upsert_enrollments": "mitty.storage.upsert_enrollments",
     "upsert_assignments": "mitty.storage.upsert_assignments",
     "upsert_submissions": "mitty.storage.upsert_submissions",
     "insert_grade_snapshots": "mitty.storage.insert_grade_snapshots",
+    "upsert_quizzes_as_assessments": "mitty.storage.upsert_quizzes_as_assessments",
+    "upsert_module_items_as_resources": (
+        "mitty.storage.upsert_module_items_as_resources"
+    ),
+    "upsert_pages_as_resources": "mitty.storage.upsert_pages_as_resources",
+    "upsert_files_as_resources": "mitty.storage.upsert_files_as_resources",
+    "upsert_calendar_events_as_assessments": (
+        "mitty.storage.upsert_calendar_events_as_assessments"
+    ),
+    "is_assessment_event": "mitty.canvas.classify.is_assessment_event",
 }
+
+
+def _store_all_patches():
+    """Create a context-manager-ready dict of patches for all store_all deps."""
+    mocks = {}
+    for name, target in _STORE_ALL_PATCHES.items():
+        mocks[name] = patch(target, new_callable=AsyncMock)
+    return mocks
 
 
 class TestStoreAll:
     """store_all orchestrates all upserts in FK-safe order."""
 
-    async def test_calls_all_upserts_in_order(self) -> None:
-        """Full success path: all 5 functions called in correct FK order."""
+    async def test_calls_core_upserts_in_order(self) -> None:
+        """Core Phase 1 functions called in correct FK order."""
         call_order: list[str] = []
-
-        async def _track(name: str) -> AsyncMock:
-            async def _side_effect(*_args: object, **_kwargs: object) -> None:
-                call_order.append(name)
-
-            return _side_effect
 
         client = AsyncMock()
         courses = [Course(id=1, name="AP English", course_code="ENG")]
@@ -1120,6 +1133,30 @@ class TestStoreAll:
                     "insert_grade_snapshots"
                 ),
             ) as mock_snapshots,
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["is_assessment_event"],
+                return_value=False,
+            ),
         ):
             await store_all(
                 client,
@@ -1130,7 +1167,7 @@ class TestStoreAll:
                 },
             )
 
-        # Verify FK-safe order
+        # Verify FK-safe order for core steps
         assert call_order == [
             "upsert_courses",
             "upsert_enrollments",
@@ -1145,6 +1182,184 @@ class TestStoreAll:
         mock_assignments.assert_awaited_once_with(client, assignments)
         mock_submissions.assert_awaited_once_with(client, assignments)
         mock_snapshots.assert_awaited_once_with(client, enrollments)
+
+    async def test_phase2_quizzes_stored_per_course(self) -> None:
+        """Quizzes are upserted as assessments for each course."""
+        client = AsyncMock()
+        quizzes = {
+            "1": [Quiz(id=50, title="Quiz 1")],
+            "2": [Quiz(id=60, title="Quiz 2")],
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ) as mock_quizzes,
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(client, {"quizzes": quizzes})
+
+        assert mock_quizzes.await_count == 2
+        mock_quizzes.assert_any_await(client, quizzes["1"], 1)
+        mock_quizzes.assert_any_await(client, quizzes["2"], 2)
+
+    async def test_phase2_module_items_stored_per_module(self) -> None:
+        """Module items are upserted per-module with the module name."""
+        client = AsyncMock()
+        mod = Module(id=30, name="Unit 1")
+        items = [ModuleItem(id=300, module_id=30, title="Page", type="Page")]
+        modules_data = {
+            "1": {
+                "modules": [mod],
+                "module_items": {30: items},
+            },
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ) as mock_mod_items,
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(client, {"modules": modules_data})
+
+        mock_mod_items.assert_awaited_once_with(client, items, 1, "Unit 1")
+
+    async def test_phase2_pages_and_files_stored_per_course(self) -> None:
+        """Pages and files are upserted per-course."""
+        client = AsyncMock()
+        page = Page(page_id=80, title="Syllabus", url="syllabus")
+        file = FileMetadata(id=90, display_name="guide.pdf")
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ) as mock_pages,
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ) as mock_files,
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(
+                client,
+                {
+                    "pages": {"1": [page]},
+                    "files": {"1": [file]},
+                },
+            )
+
+        mock_pages.assert_awaited_once_with(client, [page], 1)
+        mock_files.assert_awaited_once_with(client, [file], 1)
+
+    async def test_phase2_calendar_events_filtered_by_classifier(self) -> None:
+        """Only assessment-classified calendar events are stored."""
+        client = AsyncMock()
+        exam_event = CalendarEvent(id=70, title="Midterm Exam", context_code="course_1")
+        study_event = CalendarEvent(
+            id=71, title="Study Session", context_code="course_1"
+        )
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ) as mock_cal,
+            patch(
+                _STORE_ALL_PATCHES["is_assessment_event"],
+                side_effect=lambda t: "exam" in t.lower(),
+            ),
+        ):
+            await store_all(
+                client,
+                {"calendar_events": [exam_event, study_event]},
+            )
+
+        # Only the exam event should be passed
+        mock_cal.assert_awaited_once_with(client, [exam_event])
 
     async def test_failure_mid_sequence_raises_storage_error(self) -> None:
         """If a middle step fails, StorageError propagates."""
@@ -1172,6 +1387,27 @@ class TestStoreAll:
                 _STORE_ALL_PATCHES["insert_grade_snapshots"],
                 new_callable=AsyncMock,
             ) as mock_snapshots,
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
         ):
             with pytest.raises(StorageError, match="upsert assignments"):
                 await store_all(
@@ -1214,16 +1450,39 @@ class TestStoreAll:
                 _STORE_ALL_PATCHES["insert_grade_snapshots"],
                 new_callable=AsyncMock,
             ) as mock_snapshots,
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ) as mock_cal,
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
         ):
             # Completely empty dict
             await store_all(client, {})
 
-            # All functions still called (with empty data)
+            # Core functions still called (with empty data)
             mock_courses.assert_awaited_once_with(client, [])
             mock_enrollments.assert_awaited_once_with(client, [])
             mock_assignments.assert_awaited_once_with(client, {})
             mock_submissions.assert_awaited_once_with(client, {})
             mock_snapshots.assert_awaited_once_with(client, [])
+            # Calendar events called with empty filtered list
+            mock_cal.assert_awaited_once_with(client, [])
 
     async def test_ignores_errors_key(self) -> None:
         """The 'errors' key from fetch_all output is ignored."""
@@ -1250,6 +1509,27 @@ class TestStoreAll:
                 _STORE_ALL_PATCHES["insert_grade_snapshots"],
                 new_callable=AsyncMock,
             ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
         ):
             courses = [Course(id=1, name="Test", course_code="T")]
             await store_all(
