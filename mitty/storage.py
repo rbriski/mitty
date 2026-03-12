@@ -651,6 +651,67 @@ async def upsert_pages_as_resources(
 
 
 # ------------------------------------------------------------------ #
+#  Chunking: auto-chunk resources with content_text
+# ------------------------------------------------------------------ #
+
+
+async def chunk_and_store_resources(
+    client: AsyncClient,
+    canvas_item_ids: list[int],
+) -> None:
+    """Chunk and store text for resources identified by canvas_item_id.
+
+    For each *canvas_item_id*, looks up the resource row, and if it has
+    non-empty ``content_text``, runs the async chunking pipeline and
+    replaces any existing chunks via :func:`insert_resource_chunks`.
+
+    Resources without ``content_text`` (empty or ``None``) are skipped.
+
+    Args:
+        client: Async Supabase client.
+        canvas_item_ids: List of ``canvas_item_id`` values whose
+            resources should be chunked.
+
+    Raises:
+        StorageError: If a Supabase query or chunk insert fails.
+    """
+    from mitty.chunking import achunk_text
+
+    if not canvas_item_ids:
+        return
+
+    # Fetch resources matching the given canvas_item_ids.
+    try:
+        response = await (
+            client.table("resources")
+            .select("id,canvas_item_id,content_text")
+            .in_("canvas_item_id", canvas_item_ids)
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to query resources for chunking: {exc}"
+        raise StorageError(msg) from exc
+
+    chunked_count = 0
+    for row in response.data:
+        content = row.get("content_text")
+        if not content or not content.strip():
+            continue
+
+        resource_id = row["id"]
+        chunks = await achunk_text(content)
+        if chunks:
+            await insert_resource_chunks(client, resource_id, chunks)
+            chunked_count += 1
+
+    logger.info(
+        "Chunked %d resources (of %d candidates)",
+        chunked_count,
+        len(canvas_item_ids),
+    )
+
+
+# ------------------------------------------------------------------ #
 #  Files → Resources
 # ------------------------------------------------------------------ #
 
@@ -861,11 +922,28 @@ async def store_all(
                 raise StorageError(msg) from exc
 
     # Phase 2: pages as resources (per-course)
+    page_canvas_item_ids: list[int] = []
     for course_id_str, page_list in pages.items():
         step_name = f"upsert_pages_as_resources[{course_id_str}]"
         logger.info("store_all: starting %s", step_name)
         try:
             await upsert_pages_as_resources(client, page_list, int(course_id_str))
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+        # Collect canvas_item_ids for pages that have content
+        for page in page_list:
+            if page.body and page.body.strip():
+                page_canvas_item_ids.append(9_000_000 + page.page_id)
+
+    # Phase 2: chunk resources with content_text
+    if page_canvas_item_ids:
+        step_name = "chunk_and_store_resources"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await chunk_and_store_resources(client, page_canvas_item_ids)
         except StorageError:
             raise
         except Exception as exc:
