@@ -341,7 +341,7 @@ class TestAssessmentsTable:
         assert "assessments" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("assessments").columns) == 14
+        assert len(_table("assessments").columns) == 15
 
     def test_primary_key(self) -> None:
         pk_cols = [c.name for c in _table("assessments").primary_key]

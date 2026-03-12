@@ -9,6 +9,7 @@ import pytest
 
 from mitty.models import (
     Assignment,
+    CalendarEvent,
     Course,
     Enrollment,
     ModuleItem,
@@ -24,6 +25,7 @@ from mitty.storage import (
     insert_grade_snapshots,
     store_all,
     upsert_assignments,
+    upsert_calendar_events_as_assessments,
     upsert_courses,
     upsert_enrollments,
     upsert_module_items_as_resources,
@@ -1539,3 +1541,107 @@ class TestUpsertPagesAsResources:
         assert len(rows) == 2
         ids = {r["canvas_item_id"] for r in rows}
         assert ids == {9_000_000 + 8001, 9_000_000 + 8002}
+
+
+# ------------------------------------------------------------------ #
+#  Calendar Events → Assessments
+# ------------------------------------------------------------------ #
+
+
+def _make_calendar_event(
+    event_id: int,
+    title: str,
+    context_code: str = "course_12345",
+    start_at: str | None = "2026-04-10T13:00:00Z",
+) -> CalendarEvent:
+    """Create a CalendarEvent instance for testing."""
+    return CalendarEvent(
+        id=event_id,
+        title=title,
+        context_code=context_code,
+        start_at=start_at,
+    )
+
+
+class TestUpsertCalendarEventsAsAssessments:
+    """upsert_calendar_events_as_assessments stores events as assessments."""
+
+    async def test_upsert_calendar_assessments_sets_auto_created(self) -> None:
+        """Assessment rows have source='calendar_event' and auto_created=True."""
+        client = _mock_client()
+        events = [_make_calendar_event(7001, "Chapter 5 Quiz")]
+
+        await upsert_calendar_events_as_assessments(client, events)
+
+        client.table.assert_called_with("assessments")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["canvas_event_id"] == 7001
+        assert row["name"] == "Chapter 5 Quiz"
+        assert row["course_id"] == 12345
+        assert row["source"] == "calendar_event"
+        assert row["auto_created"] is True
+        assert row["assessment_type"] == "calendar_event"
+        assert row["scheduled_date"] is not None
+
+        # Conflict target is canvas_event_id
+        upsert_kwargs = client.table.return_value.upsert.call_args[1]
+        assert upsert_kwargs["on_conflict"] == "canvas_event_id"
+
+    async def test_upsert_calendar_assessments_idempotent(self) -> None:
+        """Calling twice with the same events produces the same rows."""
+        client = _mock_client()
+        events = [
+            _make_calendar_event(7001, "Quiz A"),
+            _make_calendar_event(7003, "Midterm Exam"),
+        ]
+
+        await upsert_calendar_events_as_assessments(client, events)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        event_ids = {r["canvas_event_id"] for r in rows}
+        assert event_ids == {7001, 7003}
+
+        # Second call produces identical event_ids (idempotent upsert)
+        client2 = _mock_client()
+        await upsert_calendar_events_as_assessments(client2, events)
+        rows2 = client2.table.return_value.upsert.call_args[0][0]
+        assert {r["canvas_event_id"] for r in rows2} == event_ids
+
+    async def test_skips_non_course_context(self) -> None:
+        """Events without course_ context codes are skipped."""
+        client = _mock_client()
+        events = [_make_calendar_event(7002, "Break", context_code="user_42")]
+
+        await upsert_calendar_events_as_assessments(client, events)
+
+        # No rows to upsert, so table().upsert() should NOT be called
+        client.table.return_value.upsert.assert_not_called()
+
+    async def test_empty_list_is_noop(self) -> None:
+        client = _mock_client()
+
+        await upsert_calendar_events_as_assessments(client, [])
+
+        client.table.assert_not_called()
+
+    async def test_null_start_at_stored_as_none(self) -> None:
+        client = _mock_client()
+        events = [_make_calendar_event(7004, "Test", start_at=None)]
+
+        await upsert_calendar_events_as_assessments(client, events)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["scheduled_date"] is None
+
+    async def test_raises_storage_error_on_failure(self) -> None:
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=RuntimeError("DB error"),
+        )
+        events = [_make_calendar_event(7001, "Quiz")]
+
+        with pytest.raises(StorageError, match="calendar events"):
+            await upsert_calendar_events_as_assessments(client, events)

@@ -14,7 +14,15 @@ from typing import TYPE_CHECKING
 from supabase import AsyncClient, acreate_client
 
 if TYPE_CHECKING:
-    from mitty.models import Assignment, Course, Enrollment, ModuleItem, Page, Quiz
+    from mitty.models import (
+        Assignment,
+        CalendarEvent,
+        Course,
+        Enrollment,
+        ModuleItem,
+        Page,
+        Quiz,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +324,85 @@ async def upsert_quizzes_as_assessments(
         raise StorageError(msg) from exc
 
     logger.info("Upserted %d quizzes as assessments", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Calendar Events → Assessments
+# ------------------------------------------------------------------ #
+
+
+async def upsert_calendar_events_as_assessments(
+    client: AsyncClient,
+    events: list[CalendarEvent],
+) -> None:
+    """Batch upsert classified calendar events as assessment rows.
+
+    Each :class:`~mitty.models.CalendarEvent` is mapped to an ``assessments``
+    row with ``source='calendar_event'`` and ``auto_created=True``.  The
+    ``canvas_event_id`` column is used for idempotent upserts.
+
+    The course ID is extracted from the event's ``context_code`` field
+    (e.g. ``"course_12345"`` -> ``12345``).
+
+    Args:
+        client: Async Supabase client.
+        events: List of CalendarEvent models that have already been
+            classified as assessment-worthy.
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not events:
+        return
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for event in events:
+        # Extract course_id from context_code like "course_12345"
+        course_id: int | None = None
+        if event.context_code.startswith("course_"):
+            try:
+                course_id = int(event.context_code.removeprefix("course_"))
+            except ValueError:
+                logger.warning(
+                    "Cannot parse course_id from context_code=%r, skipping event %d",
+                    event.context_code,
+                    event.id,
+                )
+                continue
+
+        if course_id is None:
+            logger.debug("Skipping event %d — no course context_code", event.id)
+            continue
+
+        row: dict = {
+            "course_id": course_id,
+            "name": event.title,
+            "assessment_type": "calendar_event",
+            "scheduled_date": (event.start_at.isoformat() if event.start_at else None),
+            "description": event.description,
+            "canvas_event_id": event.id,
+            "auto_created": True,
+            "source": "calendar_event",
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+
+    if not rows:
+        return
+
+    try:
+        await (
+            client.table("assessments")
+            .upsert(rows, on_conflict="canvas_event_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert calendar events as assessments: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d calendar events as assessments", len(rows))
 
 
 # ------------------------------------------------------------------ #
