@@ -240,6 +240,7 @@ def _build_opportunities(
     enrollment_lookup: dict[int, dict[str, Any]],
     course_names: dict[int, str],
     grade_snapshots: list[dict[str, Any]],
+    now: datetime,
 ) -> list[StudyOpportunity]:
     """Convert raw Supabase rows into StudyOpportunity objects."""
     opportunities: list[StudyOpportunity] = []
@@ -263,11 +264,17 @@ def _build_opportunities(
         _seen_courses[cid] = count + 1
 
     # Homework opportunities from assignments + submissions.
-    # Skip assignments that are already graded/scored.
+    # Skip assignments that are already graded/scored, from non-academic
+    # courses (no grade), or stale overdue items (> 7 days past due).
     for asn in assignments:
         course_id = asn["course_id"]
-        course_name = course_names.get(course_id, f"Course {course_id}")
         enrollment = enrollment_lookup.get(course_id, {})
+
+        # Skip non-academic courses (clubs, etc.) — no grade means not graded.
+        if enrollment.get("current_score") is None:
+            continue
+
+        course_name = course_names.get(course_id, f"Course {course_id}")
         sub = submissions_by_assignment.get(asn["id"], {})
 
         # Already graded or scored — nothing to study for.
@@ -285,6 +292,12 @@ def _build_opportunities(
             if due_at.tzinfo is None:
                 due_at = due_at.replace(tzinfo=UTC)
 
+        # Skip stale overdue items — more than 7 days past due is not actionable.
+        if due_at is not None:
+            days_overdue = (now - due_at).total_seconds() / 86400
+            if days_overdue > 7:
+                continue
+
         opportunities.append(
             StudyOpportunity(
                 opportunity_type="homework",
@@ -300,11 +313,16 @@ def _build_opportunities(
             )
         )
 
-    # Assessment opportunities.
+    # Assessment opportunities — only from academic courses, skip past assessments.
     for assess in assessments:
         course_id = assess["course_id"]
-        course_name = course_names.get(course_id, f"Course {course_id}")
         enrollment = enrollment_lookup.get(course_id, {})
+
+        # Skip non-academic courses.
+        if enrollment.get("current_score") is None:
+            continue
+
+        course_name = course_names.get(course_id, f"Course {course_id}")
 
         scheduled_raw = assess.get("scheduled_date")
         scheduled_at: datetime | None = None
@@ -315,6 +333,17 @@ def _build_opportunities(
                 scheduled_at = scheduled_raw
             if scheduled_at.tzinfo is None:
                 scheduled_at = scheduled_at.replace(tzinfo=UTC)
+
+        # Skip past assessments — can't study for a test that already happened.
+        if scheduled_at is not None and scheduled_at < now:
+            continue
+
+        # Skip assessments whose linked assignment is already graded/scored.
+        linked_asn_id = assess.get("canvas_assignment_id")
+        if linked_asn_id is not None:
+            sub = submissions_by_assignment.get(linked_asn_id, {})
+            if sub.get("score") is not None or sub.get("workflow_state") == "graded":
+                continue
 
         opportunities.append(
             StudyOpportunity(
@@ -469,6 +498,7 @@ async def generate_plan(
     enrollment_lookup = _build_course_lookup(enrollments_data)
 
     # 6. Build opportunities.
+    now = datetime.now(UTC)
     opportunities = _build_opportunities(
         assignments_data,
         submissions_by_assignment,
@@ -476,6 +506,7 @@ async def generate_plan(
         enrollment_lookup,
         course_names,
         grade_snapshots,
+        now,
     )
     logger.debug("Built %d study opportunities", len(opportunities))
 
@@ -489,7 +520,6 @@ async def generate_plan(
         energy_level=signal_row.get("energy_level", 3),
         stress_level=signal_row.get("stress_level", 3),
     )
-    now = datetime.now(UTC)
     scored = score_opportunities(opportunities, signal, now)
     logger.debug(
         "Scored %d opportunities: top=%s",

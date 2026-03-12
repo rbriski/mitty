@@ -319,18 +319,17 @@ def _fill_study_blocks(
         return remaining
 
     factor = _energy_factor(energy)
-    used_courses: set[str] = set()
+    seen_courses: set[str | None] = set()
 
     for item in scored:
         if remaining < MIN_BLOCK_MINUTES:
             break
 
         opp = item.opportunity
-        # Avoid duplicate course blocks in the same session
-        key = f"{opp.course_name}:{opp.name}"
-        if key in used_courses:
+        # One content block per course — ensures diversity across subjects
+        if opp.course_name in seen_courses:
             continue
-        used_courses.add(key)
+        seen_courses.add(opp.course_name)
 
         # Determine block type and duration
         if opp.opportunity_type == "assessment":
