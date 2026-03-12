@@ -13,10 +13,10 @@ from mitty.chunking import Chunk, achunk_text, chunk_text
 # ------------------------------------------------------------------ #
 
 
-@pytest.mark.parametrize("text", ["", "   ", "\n\t  ", None])
-def test_chunk_text_empty_input(text: str | None) -> None:
+@pytest.mark.parametrize("text", ["", "   ", "\n\t  "])
+def test_chunk_text_empty_input(text: str) -> None:
     """Empty or whitespace-only text returns an empty list."""
-    result = chunk_text(text or "", target_tokens=500, overlap_tokens=50)
+    result = chunk_text(text, target_tokens=500, overlap_tokens=50)
     assert result == []
 
 

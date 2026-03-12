@@ -605,7 +605,7 @@ async def upsert_pages_as_resources(
     ``source_url`` pointing to the page on Canvas.
 
     Deduplication uses the ``canvas_item_id`` column (unique), set to
-    the page's ``page_id`` with a ``9_000_000`` offset to avoid collisions
+    the page's ``page_id`` with a ``1_000_000_000`` offset to avoid collisions
     with module-item IDs.
 
     Args:
@@ -630,7 +630,7 @@ async def upsert_pages_as_resources(
             "resource_type": "canvas_page",
             "source_url": source_url,
             "content_text": page.body,
-            "canvas_item_id": 9_000_000 + page.page_id,
+            "canvas_item_id": 1_000_000_000 + page.page_id,
             "sort_order": 0,
             "created_at": now,
             "updated_at": now,
@@ -823,6 +823,12 @@ async def insert_resource_chunks(
     try:
         await client.table("resource_chunks").insert(rows).execute()
     except Exception as exc:
+        logger.critical(
+            "Chunks deleted but insert failed for resource %d — "
+            "re-run ingestion to recover: %s",
+            resource_id,
+            exc,
+        )
         msg = f"Failed to insert resource chunks for resource {resource_id}: {exc}"
         raise StorageError(msg) from exc
 
@@ -936,7 +942,7 @@ async def store_all(
         # Collect canvas_item_ids for pages that have content
         for page in page_list:
             if page.body and page.body.strip():
-                page_canvas_item_ids.append(9_000_000 + page.page_id)
+                page_canvas_item_ids.append(1_000_000_000 + page.page_id)
 
     # Phase 2: chunk resources with content_text
     if page_canvas_item_ids:
@@ -963,7 +969,10 @@ async def store_all(
             raise StorageError(msg) from exc
 
     # Phase 2: calendar events as assessments (global, filtered)
-    assessment_events = [e for e in calendar_events if is_assessment_event(e.title)]
+    if not calendar_events:
+        assessment_events = []
+    else:
+        assessment_events = [e for e in calendar_events if is_assessment_event(e.title)]
     step_name = "upsert_calendar_events_as_assessments"
     logger.info("store_all: starting %s", step_name)
     try:

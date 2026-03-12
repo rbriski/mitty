@@ -25,7 +25,7 @@ class Course(BaseModel):
 
     id: int
     name: str
-    course_code: str
+    course_code: str = ""
     term: Term | None = None
     workflow_state: str = ""
 

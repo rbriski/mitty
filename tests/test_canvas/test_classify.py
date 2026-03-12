@@ -16,10 +16,12 @@ class TestClassifyEventMatchesTestKeywords:
             "Chapter 5 Quiz",
             "Midterm Exam: AP English",
             "Final Exam Review",
+            "Final Test — Math",
+            "Final Assessment due Friday",
             "Unit 3 Test",
             "QUIZ on vocabulary",
             "midterm review session",
-            "Final Project Exam",
+            "Final Exam",
             "Math test tomorrow",
         ],
     )
@@ -39,6 +41,9 @@ class TestClassifyEventIgnoresNonAcademic:
             "Field Trip to Museum",
             "Homecoming Dance",
             "testing framework setup",  # 'testing' != 'test' (word boundary)
+            "Final Grades Posted",
+            "Final Day of Classes",
+            "Final Project Due",
             "",
         ],
     )

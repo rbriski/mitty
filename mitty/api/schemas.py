@@ -62,7 +62,7 @@ class AppConfigUpdate(BaseModel):
 # Assessment
 # ---------------------------------------------------------------------------
 
-AssessmentType = Literal["test", "quiz", "essay", "lab", "project"]
+AssessmentType = Literal["test", "quiz", "essay", "lab", "project", "calendar_event"]
 
 
 class AssessmentCreate(BaseModel):

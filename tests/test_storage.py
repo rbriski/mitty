@@ -1803,7 +1803,7 @@ class TestUpsertPagesAsResources:
         assert row["source_url"] == (
             "https://mitty.instructure.com/courses/12345/pages/course-syllabus"
         )
-        assert row["canvas_item_id"] == 9_000_000 + 8001
+        assert row["canvas_item_id"] == 1_000_000_000 + 8001
         assert "updated_at" in row
         assert "created_at" in row
 
@@ -1858,7 +1858,7 @@ class TestUpsertPagesAsResources:
         rows = client.table.return_value.upsert.call_args[0][0]
         assert len(rows) == 2
         ids = {r["canvas_item_id"] for r in rows}
-        assert ids == {9_000_000 + 8001, 9_000_000 + 8002}
+        assert ids == {1_000_000_000 + 8001, 1_000_000_000 + 8002}
 
 
 # ------------------------------------------------------------------ #
@@ -2371,8 +2371,8 @@ class TestStoreAllChunking:
         ):
             await store_all(client, {"pages": pages})
 
-        # Only the page with content should be passed (canvas_item_id = 9_000_000 + 80)
-        mock_chunk.assert_awaited_once_with(client, [9_000_080])
+        # Only page with content should be passed (canvas_item_id = 1B + 80)
+        mock_chunk.assert_awaited_once_with(client, [1_000_000_080])
 
     async def test_pages_without_content_skip_chunking(self) -> None:
         """Pages without body content do not trigger chunking."""
@@ -2504,4 +2504,4 @@ class TestStoreAllChunking:
 
         mock_chunk.assert_awaited_once()
         canvas_ids = mock_chunk.call_args[0][1]
-        assert sorted(canvas_ids) == [9_000_080, 9_000_090]
+        assert sorted(canvas_ids) == [1_000_000_080, 1_000_000_090]
