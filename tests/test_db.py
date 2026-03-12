@@ -341,7 +341,7 @@ class TestAssessmentsTable:
         assert "assessments" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("assessments").columns) == 11
+        assert len(_table("assessments").columns) == 15
 
     def test_primary_key(self) -> None:
         pk_cols = [c.name for c in _table("assessments").primary_key]
@@ -362,6 +362,9 @@ class TestAssessmentsTable:
         assert isinstance(t.c.unit_or_topic.type, sa.String)
         assert isinstance(t.c.description.type, sa.String)
         assert isinstance(t.c.canvas_assignment_id.type, sa.Integer)
+        assert isinstance(t.c.canvas_quiz_id.type, sa.Integer)
+        assert isinstance(t.c.auto_created.type, sa.Boolean)
+        assert isinstance(t.c.source.type, sa.String)
         assert isinstance(t.c.created_at.type, sa.DateTime)
         assert isinstance(t.c.updated_at.type, sa.DateTime)
 
@@ -376,6 +379,9 @@ class TestAssessmentsTable:
         assert t.c.unit_or_topic.nullable is True
         assert t.c.description.nullable is True
         assert t.c.canvas_assignment_id.nullable is True
+        assert t.c.canvas_quiz_id.nullable is True
+        assert t.c.auto_created.nullable is False
+        assert t.c.source.nullable is True
         assert t.c.created_at.nullable is False
         assert t.c.updated_at.nullable is False
 
@@ -397,6 +403,10 @@ class TestAssessmentsTable:
         idx_cols = _index_column_sets(_table("assessments"))
         assert ("scheduled_date",) in idx_cols
 
+    def test_canvas_quiz_id_index(self) -> None:
+        idx_cols = _index_column_sets(_table("assessments"))
+        assert ("canvas_quiz_id",) in idx_cols
+
 
 # ---------------------------------------------------------------------------
 # resources
@@ -410,7 +420,7 @@ class TestResourcesTable:
         assert "resources" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("resources").columns) == 9
+        assert len(_table("resources").columns) == 13
 
     def test_primary_key(self) -> None:
         pk_cols = [c.name for c in _table("resources").primary_key]
@@ -429,6 +439,10 @@ class TestResourcesTable:
         assert isinstance(t.c.source_url.type, sa.String)
         assert isinstance(t.c.canvas_module_id.type, sa.Integer)
         assert isinstance(t.c.sort_order.type, sa.Integer)
+        assert isinstance(t.c.content_text.type, sa.Text)
+        assert isinstance(t.c.canvas_item_id.type, sa.Integer)
+        assert isinstance(t.c.module_name.type, sa.String)
+        assert isinstance(t.c.module_position.type, sa.Integer)
         assert isinstance(t.c.created_at.type, sa.DateTime)
         assert isinstance(t.c.updated_at.type, sa.DateTime)
 
@@ -441,6 +455,10 @@ class TestResourcesTable:
         assert t.c.source_url.nullable is True
         assert t.c.canvas_module_id.nullable is True
         assert t.c.sort_order.nullable is False
+        assert t.c.content_text.nullable is True
+        assert t.c.canvas_item_id.nullable is True
+        assert t.c.module_name.nullable is True
+        assert t.c.module_position.nullable is True
         assert t.c.created_at.nullable is False
         assert t.c.updated_at.nullable is False
 
@@ -452,6 +470,10 @@ class TestResourcesTable:
     def test_course_type_index(self) -> None:
         idx_cols = _index_column_sets(_table("resources"))
         assert ("course_id", "resource_type") in idx_cols
+
+    def test_canvas_item_id_index(self) -> None:
+        idx_cols = _index_column_sets(_table("resources"))
+        assert ("canvas_item_id",) in idx_cols
 
 
 # ---------------------------------------------------------------------------

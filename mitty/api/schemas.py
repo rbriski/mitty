@@ -62,7 +62,7 @@ class AppConfigUpdate(BaseModel):
 # Assessment
 # ---------------------------------------------------------------------------
 
-AssessmentType = Literal["test", "quiz", "essay", "lab", "project"]
+AssessmentType = Literal["test", "quiz", "essay", "lab", "project", "calendar_event"]
 
 
 class AssessmentCreate(BaseModel):
@@ -78,6 +78,9 @@ class AssessmentCreate(BaseModel):
     unit_or_topic: str | None = None
     description: str | None = Field(default=None, max_length=2000)
     canvas_assignment_id: int | None = None
+    canvas_quiz_id: int | None = None
+    auto_created: bool = False
+    source: str | None = None
 
 
 class AssessmentUpdate(BaseModel):
@@ -90,6 +93,9 @@ class AssessmentUpdate(BaseModel):
     unit_or_topic: str | None = None
     description: str | None = Field(default=None, max_length=2000)
     canvas_assignment_id: int | None = None
+    canvas_quiz_id: int | None = None
+    auto_created: bool | None = None
+    source: str | None = None
 
 
 class AssessmentResponse(BaseModel):
@@ -106,6 +112,9 @@ class AssessmentResponse(BaseModel):
     unit_or_topic: str | None
     description: str | None
     canvas_assignment_id: int | None
+    canvas_quiz_id: int | None = None
+    auto_created: bool = False
+    source: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -130,6 +139,10 @@ class ResourceCreate(BaseModel):
     source_url: str | None = None
     canvas_module_id: int | None = None
     sort_order: int = 0
+    content_text: str | None = None
+    canvas_item_id: int | None = None
+    module_name: str | None = None
+    module_position: int | None = None
 
 
 class ResourceUpdate(BaseModel):
@@ -140,6 +153,10 @@ class ResourceUpdate(BaseModel):
     source_url: str | None = None
     canvas_module_id: int | None = None
     sort_order: int | None = None
+    content_text: str | None = None
+    canvas_item_id: int | None = None
+    module_name: str | None = None
+    module_position: int | None = None
 
 
 class ResourceResponse(BaseModel):
@@ -154,6 +171,10 @@ class ResourceResponse(BaseModel):
     source_url: str | None
     canvas_module_id: int | None
     sort_order: int
+    content_text: str | None = None
+    canvas_item_id: int | None = None
+    module_name: str | None = None
+    module_position: int | None = None
     created_at: datetime
     updated_at: datetime
 

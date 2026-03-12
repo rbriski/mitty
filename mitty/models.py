@@ -25,7 +25,7 @@ class Course(BaseModel):
 
     id: int
     name: str
-    course_code: str
+    course_code: str = ""
     term: Term | None = None
     workflow_state: str = ""
 
@@ -81,3 +81,84 @@ class Enrollment(BaseModel):
     type: str
     enrollment_state: str = ""
     grades: dict | None = None
+
+
+class Quiz(BaseModel):
+    """Canvas quiz."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    title: str
+    quiz_type: str = ""
+    due_at: datetime | None = None
+    points_possible: float | None = None
+    time_limit: int | None = None
+    assignment_id: int | None = None
+    description: str | None = None
+
+
+class Module(BaseModel):
+    """Canvas course module."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str
+    position: int = 0
+    unlock_at: datetime | None = None
+    items_count: int = 0
+
+
+class ModuleItem(BaseModel):
+    """Canvas module item (a single entry within a module)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    module_id: int
+    title: str
+    type: str
+    content_id: int | None = None
+    position: int = 0
+    page_url: str | None = None
+    external_url: str | None = None
+
+
+class Page(BaseModel):
+    """Canvas wiki page."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    page_id: int
+    title: str
+    body: str | None = None
+    url: str = ""
+    published: bool = True
+
+
+class FileMetadata(BaseModel):
+    """Canvas file metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    display_name: str
+    content_type: str = ""
+    size: int = 0
+    url: str = ""
+    folder_id: int | None = None
+
+
+class CalendarEvent(BaseModel):
+    """Canvas calendar event."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    title: str
+    description: str | None = None
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    context_type: str = ""
+    context_code: str = ""

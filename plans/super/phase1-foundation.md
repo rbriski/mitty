@@ -686,6 +686,8 @@ US-016 (Patterns & Memory)
 
 | Field | Value |
 |-------|-------|
-| Epic ID | |
-| Task IDs | |
+| Epic ID | mitty-1wb |
+| Task IDs | mitty-1wb.1 through mitty-1wb.16 |
 | Worktree | ../worktrees/mitty/phase1-foundation |
+| Branch | feature/phase1-foundation |
+| PR | https://github.com/rbriski/mitty/pull/5 |

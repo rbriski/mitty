@@ -70,6 +70,110 @@ class TestStudyPlanPage:
         assert "studyPlanApp()" in response.text
 
 
+class TestAssessmentsManagePage:
+    """GET /assessments/manage returns the assessment management HTML page."""
+
+    def test_returns_html(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "Manage Assessments" in response.text
+
+    def test_contains_create_button(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert "New Assessment" in response.text
+
+    def test_contains_course_filter(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert "course-filter" in response.text
+        assert "All courses" in response.text
+
+    def test_contains_auth_gate(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert "Please sign in to manage assessments" in response.text
+
+    def test_contains_assessments_app_script(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert "assessmentsApp()" in response.text
+
+    def test_contains_back_to_dashboard_link(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert 'href="/"' in response.text
+        assert "Back to Dashboard" in response.text
+
+    def test_contains_assessment_types(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert "'test'" in response.text
+        assert "'quiz'" in response.text
+        assert "'essay'" in response.text
+        assert "'lab'" in response.text
+        assert "'project'" in response.text
+
+    def test_contains_auto_created_badge(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert "auto_created" in response.text
+        assert "auto</span>" in response.text
+
+    def test_contains_delete_confirmation(self, client: TestClient) -> None:
+        response = client.get("/assessments/manage")
+
+        assert "Delete Assessment" in response.text
+        assert "cannot be undone" in response.text
+
+
+class TestResourcesManagePage:
+    """GET /resources/manage returns the resource management HTML page."""
+
+    def test_returns_html(self, client: TestClient) -> None:
+        response = client.get("/resources/manage")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "Manage Resources" in response.text
+
+    def test_contains_sign_in_prompt(self, client: TestClient) -> None:
+        response = client.get("/resources/manage")
+
+        assert "Please sign in to manage resources." in response.text
+
+    def test_contains_back_to_dashboard_link(self, client: TestClient) -> None:
+        response = client.get("/resources/manage")
+
+        assert 'href="/"' in response.text
+        assert "Back to Dashboard" in response.text
+
+    def test_contains_resources_app_script(self, client: TestClient) -> None:
+        response = client.get("/resources/manage")
+
+        assert "resourcesApp()" in response.text
+
+    def test_contains_create_form(self, client: TestClient) -> None:
+        response = client.get("/resources/manage")
+
+        assert "Create Resource" in response.text
+
+    def test_contains_filter_controls(self, client: TestClient) -> None:
+        response = client.get("/resources/manage")
+
+        assert "All courses" in response.text
+        assert "All types" in response.text
+
+    def test_contains_resource_type_options(self, client: TestClient) -> None:
+        response = client.get("/resources/manage")
+
+        assert "textbook_chapter" in response.text
+        assert "canvas_page" in response.text
+        assert "video" in response.text
+
+
 class TestClassDetailPage:
     """GET /class/{course_id} returns the class detail HTML page."""
 

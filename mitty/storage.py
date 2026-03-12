@@ -14,7 +14,17 @@ from typing import TYPE_CHECKING
 from supabase import AsyncClient, acreate_client
 
 if TYPE_CHECKING:
-    from mitty.models import Assignment, Course, Enrollment
+    from mitty.chunking import Chunk
+    from mitty.models import (
+        Assignment,
+        CalendarEvent,
+        Course,
+        Enrollment,
+        FileMetadata,
+        ModuleItem,
+        Page,
+        Quiz,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +266,148 @@ async def upsert_enrollments(
 
 
 # ------------------------------------------------------------------ #
+#  Quizzes → Assessments
+# ------------------------------------------------------------------ #
+
+
+async def upsert_quizzes_as_assessments(
+    client: AsyncClient,
+    quizzes: list[Quiz],
+    course_id: int,
+) -> None:
+    """Batch upsert quizzes as assessment rows.
+
+    Each :class:`~mitty.models.Quiz` is mapped to an ``assessments`` row
+    with ``assessment_type='quiz'``, ``source='canvas_quiz'``, and
+    ``canvas_quiz_id`` set to the quiz's Canvas ID.  If the quiz has an
+    ``assignment_id``, ``canvas_assignment_id`` is set for cross-linking.
+
+    Upserts on ``canvas_quiz_id`` for idempotent re-sync.
+
+    Args:
+        client: Async Supabase client.
+        quizzes: List of Quiz models to upsert.
+        course_id: The Canvas course ID these quizzes belong to.
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not quizzes:
+        return
+
+    now = _now_iso()
+    rows = []
+    for quiz in quizzes:
+        row: dict = {
+            "course_id": course_id,
+            "name": quiz.title,
+            "assessment_type": "quiz",
+            "scheduled_date": (quiz.due_at.isoformat() if quiz.due_at else None),
+            "weight": quiz.points_possible,
+            "description": quiz.description,
+            "canvas_quiz_id": quiz.id,
+            "auto_created": True,
+            "source": "canvas_quiz",
+            "created_at": now,
+            "updated_at": now,
+        }
+        if quiz.assignment_id is not None:
+            row["canvas_assignment_id"] = quiz.assignment_id
+        rows.append(row)
+
+    try:
+        await (
+            client.table("assessments")
+            .upsert(rows, on_conflict="canvas_quiz_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert quizzes as assessments: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d quizzes as assessments", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Calendar Events → Assessments
+# ------------------------------------------------------------------ #
+
+
+async def upsert_calendar_events_as_assessments(
+    client: AsyncClient,
+    events: list[CalendarEvent],
+) -> None:
+    """Batch upsert classified calendar events as assessment rows.
+
+    Each :class:`~mitty.models.CalendarEvent` is mapped to an ``assessments``
+    row with ``source='calendar_event'`` and ``auto_created=True``.  The
+    ``canvas_event_id`` column is used for idempotent upserts.
+
+    The course ID is extracted from the event's ``context_code`` field
+    (e.g. ``"course_12345"`` -> ``12345``).
+
+    Args:
+        client: Async Supabase client.
+        events: List of CalendarEvent models that have already been
+            classified as assessment-worthy.
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not events:
+        return
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for event in events:
+        # Extract course_id from context_code like "course_12345"
+        course_id: int | None = None
+        if event.context_code.startswith("course_"):
+            try:
+                course_id = int(event.context_code.removeprefix("course_"))
+            except ValueError:
+                logger.warning(
+                    "Cannot parse course_id from context_code=%r, skipping event %d",
+                    event.context_code,
+                    event.id,
+                )
+                continue
+
+        if course_id is None:
+            logger.debug("Skipping event %d — no course context_code", event.id)
+            continue
+
+        row: dict = {
+            "course_id": course_id,
+            "name": event.title,
+            "assessment_type": "calendar_event",
+            "scheduled_date": (event.start_at.isoformat() if event.start_at else None),
+            "description": event.description,
+            "canvas_event_id": event.id,
+            "auto_created": True,
+            "source": "calendar_event",
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+
+    if not rows:
+        return
+
+    try:
+        await (
+            client.table("assessments")
+            .upsert(rows, on_conflict="canvas_event_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert calendar events as assessments: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d calendar events as assessments", len(rows))
+
+
+# ------------------------------------------------------------------ #
 #  Grade Snapshots
 # ------------------------------------------------------------------ #
 
@@ -362,6 +514,328 @@ async def insert_grade_snapshots(
 
 
 # ------------------------------------------------------------------ #
+#  Module Items → Resources
+# ------------------------------------------------------------------ #
+
+# Map Canvas module item types to our resource_type values.
+_ITEM_TYPE_MAP: dict[str, str] = {
+    "Page": "canvas_page",
+    "File": "file",
+    "ExternalUrl": "link",
+    "Assignment": "link",
+}
+
+
+async def upsert_module_items_as_resources(
+    client: AsyncClient,
+    items: list[ModuleItem],
+    course_id: int,
+    module_name: str,
+) -> None:
+    """Upsert module items as resource rows.
+
+    Each :class:`~mitty.models.ModuleItem` is mapped to a resource row with
+    the appropriate ``resource_type`` derived from the item's Canvas type.
+    Items whose type is not in the mapping (e.g. ``SubHeader``) are skipped.
+
+    Args:
+        client: Async Supabase client.
+        items: List of ModuleItem models to upsert.
+        course_id: The Canvas course ID these items belong to.
+        module_name: The human-readable name of the parent module
+            (denormalized into each row).
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    rows: list[dict] = []
+    now = _now_iso()
+    for item in items:
+        resource_type = _ITEM_TYPE_MAP.get(item.type)
+        if resource_type is None:
+            continue
+
+        row: dict = {
+            "course_id": course_id,
+            "title": item.title,
+            "resource_type": resource_type,
+            "source_url": item.external_url or item.page_url,
+            "canvas_module_id": item.module_id,
+            "canvas_item_id": item.id,
+            "module_name": module_name,
+            "module_position": item.position,
+            "sort_order": item.position,
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+
+    if not rows:
+        return
+
+    try:
+        await (
+            client.table("resources")
+            .upsert(rows, on_conflict="canvas_item_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert module items as resources: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d module item resources", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Pages → Resources
+# ------------------------------------------------------------------ #
+
+
+async def upsert_pages_as_resources(
+    client: AsyncClient,
+    pages: list[Page],
+    course_id: int,
+    *,
+    canvas_base_url: str = "https://mitty.instructure.com",
+) -> None:
+    """Upsert Canvas wiki pages as resource rows.
+
+    Each page is mapped to a resource with ``resource_type='canvas_page'``,
+    ``content_text`` set to the (already stripped) plain-text body, and
+    ``source_url`` pointing to the page on Canvas.
+
+    Deduplication uses the ``canvas_item_id`` column (unique), set to
+    the page's ``page_id`` with a ``1_000_000_000`` offset to avoid collisions
+    with module-item IDs.
+
+    Args:
+        client: Async Supabase client.
+        pages: List of Page models (bodies should already be plain text).
+        course_id: The Canvas course ID these pages belong to.
+        canvas_base_url: Root URL for building source links.
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not pages:
+        return
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for page in pages:
+        source_url = f"{canvas_base_url}/courses/{course_id}/pages/{page.url}"
+        row: dict = {
+            "course_id": course_id,
+            "title": page.title,
+            "resource_type": "canvas_page",
+            "source_url": source_url,
+            "content_text": page.body,
+            "canvas_item_id": 1_000_000_000 + page.page_id,
+            "sort_order": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+
+    try:
+        await (
+            client.table("resources")
+            .upsert(rows, on_conflict="canvas_item_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert pages as resources: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d pages as resources", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Chunking: auto-chunk resources with content_text
+# ------------------------------------------------------------------ #
+
+
+async def chunk_and_store_resources(
+    client: AsyncClient,
+    canvas_item_ids: list[int],
+) -> None:
+    """Chunk and store text for resources identified by canvas_item_id.
+
+    For each *canvas_item_id*, looks up the resource row, and if it has
+    non-empty ``content_text``, runs the async chunking pipeline and
+    replaces any existing chunks via :func:`insert_resource_chunks`.
+
+    Resources without ``content_text`` (empty or ``None``) are skipped.
+
+    Args:
+        client: Async Supabase client.
+        canvas_item_ids: List of ``canvas_item_id`` values whose
+            resources should be chunked.
+
+    Raises:
+        StorageError: If a Supabase query or chunk insert fails.
+    """
+    from mitty.chunking import achunk_text
+
+    if not canvas_item_ids:
+        return
+
+    # Fetch resources matching the given canvas_item_ids.
+    try:
+        response = await (
+            client.table("resources")
+            .select("id,canvas_item_id,content_text")
+            .in_("canvas_item_id", canvas_item_ids)
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to query resources for chunking: {exc}"
+        raise StorageError(msg) from exc
+
+    chunked_count = 0
+    for row in response.data:
+        content = row.get("content_text")
+        if not content or not content.strip():
+            continue
+
+        resource_id = row["id"]
+        chunks = await achunk_text(content)
+        if chunks:
+            await insert_resource_chunks(client, resource_id, chunks)
+            chunked_count += 1
+
+    logger.info(
+        "Chunked %d resources (of %d candidates)",
+        chunked_count,
+        len(canvas_item_ids),
+    )
+
+
+# ------------------------------------------------------------------ #
+#  Files → Resources
+# ------------------------------------------------------------------ #
+
+
+async def upsert_files_as_resources(
+    client: AsyncClient,
+    files: list[FileMetadata],
+    course_id: int,
+) -> None:
+    """Upsert Canvas file metadata as resource rows.
+
+    Each file is mapped to a resource with ``resource_type='file'``,
+    ``source_url`` set to the file's download URL, and ``title`` set
+    to ``display_name``.  No file content is downloaded or stored.
+
+    Deduplication uses the ``canvas_item_id`` column, set to the
+    file's Canvas ID.
+
+    Args:
+        client: Async Supabase client.
+        files: List of FileMetadata models to upsert.
+        course_id: The Canvas course ID these files belong to.
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not files:
+        return
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for file in files:
+        row: dict = {
+            "course_id": course_id,
+            "title": file.display_name,
+            "resource_type": "file",
+            "source_url": file.url or None,
+            "canvas_item_id": file.id,
+            "sort_order": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+
+    try:
+        await (
+            client.table("resources")
+            .upsert(rows, on_conflict="canvas_item_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert files as resources: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d files as resources", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Resource Chunks
+# ------------------------------------------------------------------ #
+
+
+async def insert_resource_chunks(
+    client: AsyncClient,
+    resource_id: int,
+    chunks: list[Chunk],
+) -> None:
+    """Insert chunked text rows for a resource.
+
+    Deletes any existing chunks for the given *resource_id* first
+    (full replace strategy), then inserts the new chunks.
+
+    Args:
+        client: Async Supabase client.
+        resource_id: The ID of the parent resource.
+        chunks: List of :class:`~mitty.chunking.Chunk` objects to store.
+
+    Raises:
+        StorageError: If the Supabase delete or insert fails.
+    """
+    if not chunks:
+        return
+
+    # Delete existing chunks for this resource (idempotent re-chunk).
+    try:
+        await (
+            client.table("resource_chunks")
+            .delete()
+            .eq("resource_id", resource_id)
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to delete existing chunks for resource {resource_id}: {exc}"
+        raise StorageError(msg) from exc
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for chunk in chunks:
+        rows.append(
+            {
+                "resource_id": resource_id,
+                "chunk_index": chunk.chunk_index,
+                "content_text": chunk.content_text,
+                "token_count": chunk.token_count,
+                "created_at": now,
+            }
+        )
+
+    try:
+        await client.table("resource_chunks").insert(rows).execute()
+    except Exception as exc:
+        logger.critical(
+            "Chunks deleted but insert failed for resource %d — "
+            "re-run ingestion to recover: %s",
+            resource_id,
+            exc,
+        )
+        msg = f"Failed to insert resource chunks for resource {resource_id}: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Inserted %d chunks for resource %d", len(rows), resource_id)
+
+
+# ------------------------------------------------------------------ #
 #  Orchestrator
 # ------------------------------------------------------------------ #
 
@@ -373,21 +847,37 @@ async def store_all(
     """Persist all scraped data to Supabase in FK-safe order.
 
     Calls upsert/insert functions sequentially in dependency order:
-    courses -> enrollments -> assignments -> submissions -> grade_snapshots.
+
+    1. courses (parent for everything)
+    2. enrollments
+    3. assignments -> submissions
+    4. grade_snapshots
+    5. quizzes -> assessments
+    6. module_items -> resources
+    7. pages -> resources
+    8. files -> resources
+    9. calendar_events -> assessments (filtered by classifier)
 
     Args:
         client: Async Supabase client.
-        data: Dict with keys "courses", "assignments", "enrollments"
-              (same shape as ``fetch_all()`` output).
+        data: Dict with keys matching ``fetch_all()`` output shape.
 
     Raises:
         StorageError: If any upsert/insert step fails.
     """
+    from mitty.canvas.classify import is_assessment_event
+
     courses = data.get("courses", [])
     assignments = data.get("assignments", {})
     enrollments = data.get("enrollments", [])
+    quizzes = data.get("quizzes", {})
+    modules_data = data.get("modules", {})
+    pages = data.get("pages", {})
+    files = data.get("files", {})
+    calendar_events = data.get("calendar_events", [])
 
-    steps = [
+    # Phase 1: existing core data
+    steps: list[tuple[str, object, list]] = [
         ("upsert_courses", upsert_courses, [client, courses]),
         ("upsert_enrollments", upsert_enrollments, [client, enrollments]),
         ("upsert_assignments", upsert_assignments, [client, assignments]),
@@ -404,3 +894,91 @@ async def store_all(
         except Exception as exc:
             msg = f"store_all failed at step '{step_name}': {exc}"
             raise StorageError(msg) from exc
+
+    # Phase 2: quizzes as assessments (per-course)
+    for course_id_str, quiz_list in quizzes.items():
+        step_name = f"upsert_quizzes_as_assessments[{course_id_str}]"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await upsert_quizzes_as_assessments(client, quiz_list, int(course_id_str))
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+
+    # Phase 2: module items as resources (per-course, per-module)
+    for course_id_str, mod_data in modules_data.items():
+        course_modules = mod_data.get("modules", [])
+        module_items = mod_data.get("module_items", {})
+        for mod in course_modules:
+            items = module_items.get(mod.id, [])
+            if not items:
+                continue
+            step_name = f"upsert_module_items_as_resources[{course_id_str}/{mod.id}]"
+            logger.info("store_all: starting %s", step_name)
+            try:
+                await upsert_module_items_as_resources(
+                    client, items, int(course_id_str), mod.name
+                )
+            except StorageError:
+                raise
+            except Exception as exc:
+                msg = f"store_all failed at step '{step_name}': {exc}"
+                raise StorageError(msg) from exc
+
+    # Phase 2: pages as resources (per-course)
+    page_canvas_item_ids: list[int] = []
+    for course_id_str, page_list in pages.items():
+        step_name = f"upsert_pages_as_resources[{course_id_str}]"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await upsert_pages_as_resources(client, page_list, int(course_id_str))
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+        # Collect canvas_item_ids for pages that have content
+        for page in page_list:
+            if page.body and page.body.strip():
+                page_canvas_item_ids.append(1_000_000_000 + page.page_id)
+
+    # Phase 2: chunk resources with content_text
+    if page_canvas_item_ids:
+        step_name = "chunk_and_store_resources"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await chunk_and_store_resources(client, page_canvas_item_ids)
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+
+    # Phase 2: files as resources (per-course)
+    for course_id_str, file_list in files.items():
+        step_name = f"upsert_files_as_resources[{course_id_str}]"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await upsert_files_as_resources(client, file_list, int(course_id_str))
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+
+    # Phase 2: calendar events as assessments (global, filtered)
+    if not calendar_events:
+        assessment_events = []
+    else:
+        assessment_events = [e for e in calendar_events if is_assessment_event(e.title)]
+    step_name = "upsert_calendar_events_as_assessments"
+    logger.info("store_all: starting %s", step_name)
+    try:
+        await upsert_calendar_events_as_assessments(client, assessment_events)
+    except StorageError:
+        raise
+    except Exception as exc:
+        msg = f"store_all failed at step '{step_name}': {exc}"
+        raise StorageError(msg) from exc

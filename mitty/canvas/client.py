@@ -158,7 +158,9 @@ class CanvasClient:
                     f"Canvas authentication failed: "
                     f"{status} {response.reason_phrase} for {path}"
                 )
-                logger.warning(msg)
+                # 403 is common for courses where the student lacks access
+                # (files, quizzes, etc.) — log at debug, not warning.
+                logger.debug(msg)
                 raise CanvasAuthError(msg)
 
             # Retryable: 429 or 5xx
@@ -183,9 +185,11 @@ class CanvasClient:
                 logger.warning(msg)
                 raise CanvasAPIError(msg)
 
-            # Other 4xx -- never retry
+            # Other 4xx -- never retry.  404 is common for disabled features
+            # (quizzes, pages) — log at debug, not warning.
             msg = f"Canvas API error: {status} {response.reason_phrase} for {path}"
-            logger.warning(msg)
+            log_level = logging.DEBUG if status == 404 else logging.WARNING
+            logger.log(log_level, msg)
             raise CanvasAPIError(msg)
 
         # Should be unreachable, but satisfy type checkers

@@ -9,9 +9,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from mitty.models import Assignment, Course, Enrollment
+from bs4 import BeautifulSoup
+
+from mitty.canvas.client import CanvasAPIError, CanvasAuthError
+from mitty.models import (
+    Assignment,
+    CalendarEvent,
+    Course,
+    Enrollment,
+    FileMetadata,
+    Module,
+    ModuleItem,
+    Page,
+    Quiz,
+)
 
 if TYPE_CHECKING:
     from mitty.canvas.client import CanvasClient
@@ -87,18 +100,214 @@ async def fetch_enrollments(client: CanvasClient) -> list[Enrollment]:
     return [Enrollment.model_validate(item) for item in raw]
 
 
+async def fetch_quizzes(
+    client: CanvasClient,
+    course_id: int,
+) -> list[Quiz]:
+    """Fetch all quizzes for a given course.
+
+    Calls ``GET /api/v1/courses/:id/quizzes?per_page=100``
+    and parses each item into a :class:`~mitty.models.Quiz`.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``Quiz`` model instances.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/quizzes",
+        {"per_page": "100"},
+    )
+    return [Quiz.model_validate(item) for item in raw]
+
+
+async def fetch_modules(
+    client: CanvasClient,
+    course_id: int,
+) -> list[Module]:
+    """Fetch all modules for a given course.
+
+    Calls ``GET /api/v1/courses/:id/modules?include[]=items&per_page=100``
+    and parses each item into a :class:`~mitty.models.Module`.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``Module`` model instances.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/modules",
+        {"include[]": "items", "per_page": "100"},
+    )
+    return [Module.model_validate(item) for item in raw]
+
+
+async def fetch_module_items(
+    client: CanvasClient,
+    course_id: int,
+    module_id: int,
+) -> list[ModuleItem]:
+    """Fetch all items within a specific module.
+
+    Calls ``GET /api/v1/courses/:course_id/modules/:module_id/items?per_page=100``
+    and parses each item into a :class:`~mitty.models.ModuleItem`.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+        module_id: The Canvas module ID.
+
+    Returns:
+        A list of validated ``ModuleItem`` model instances.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/modules/{module_id}/items",
+        {"per_page": "100"},
+    )
+    return [ModuleItem.model_validate(item) for item in raw]
+
+
+def strip_html(html: str) -> str:
+    """Strip HTML to plain text, removing scripts and style tags.
+
+    Uses BeautifulSoup to decompose ``<script>`` and ``<style>`` elements
+    before extracting visible text with newline separators.
+
+    Args:
+        html: Raw HTML string.
+
+    Returns:
+        Plain text with tags, scripts, and styles removed.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)
+
+
+async def fetch_files(
+    client: CanvasClient,
+    course_id: int,
+) -> list[FileMetadata]:
+    """Fetch all file metadata for a given course.
+
+    Calls ``GET /api/v1/courses/:id/files?per_page=100``
+    and parses each item into a :class:`~mitty.models.FileMetadata`.
+    No file content is downloaded.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``FileMetadata`` model instances.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/files",
+        {"per_page": "100"},
+    )
+    return [FileMetadata.model_validate(item) for item in raw]
+
+
+async def fetch_pages(
+    client: CanvasClient,
+    course_id: int,
+) -> list[Page]:
+    """Fetch all wiki pages for a given course, including HTML bodies.
+
+    Calls ``GET /api/v1/courses/:id/pages?include[]=body&per_page=100``
+    and parses each item into a :class:`~mitty.models.Page`.  The HTML body
+    is stripped to plain text via :func:`strip_html` and stored back on the
+    ``Page.body`` field.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``Page`` model instances with plain-text bodies.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/pages",
+        {"include[]": "body", "per_page": "100"},
+    )
+    pages: list[Page] = []
+    for item in raw:
+        page = Page.model_validate(item)
+        if page.body:
+            page = page.model_copy(update={"body": strip_html(page.body)})
+        pages.append(page)
+    return pages
+
+
+async def fetch_calendar_events(
+    client: CanvasClient,
+    course_ids: list[int],
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[CalendarEvent]:
+    """Fetch calendar events for the given courses.
+
+    Calls ``GET /api/v1/calendar_events`` with ``context_codes[]`` set to
+    ``course_<id>`` for each course ID and optional date range filtering.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_ids: List of Canvas course IDs to fetch events for.
+        start_date: Optional ISO-8601 start date filter.
+        end_date: Optional ISO-8601 end date filter.
+
+    Returns:
+        A list of validated ``CalendarEvent`` model instances.
+    """
+    if not course_ids:
+        return []
+
+    params: dict[str, str] = {
+        "per_page": "100",
+    }
+    if start_date:
+        params["start_date"] = start_date
+    if end_date:
+        params["end_date"] = end_date
+
+    # Canvas expects multiple context_codes[] params; we pass a list and
+    # let get_paginated handle list-valued params (or send them one by one).
+    context_codes = [f"course_{cid}" for cid in course_ids]
+
+    all_events: list[CalendarEvent] = []
+    for code in context_codes:
+        raw = await client.get_paginated(
+            "/api/v1/calendar_events",
+            {**params, "context_codes[]": code},
+        )
+        all_events.extend(CalendarEvent.model_validate(item) for item in raw)
+
+    logger.info(
+        "Fetched %d calendar events for %d courses", len(all_events), len(course_ids)
+    )
+    return all_events
+
+
 async def fetch_all(
     client: CanvasClient,
     settings: Settings,
 ) -> dict:
-    """Fetch courses, enrollments, and all per-course assignments concurrently.
+    """Fetch courses, enrollments, and all per-course data concurrently.
 
     Courses and enrollments are fetched in parallel first.  Then each
-    course's assignments are fetched concurrently, bounded by
-    ``settings.max_concurrent`` to avoid overwhelming the Canvas API.
+    course's assignments, quizzes, modules (with items), pages, and files
+    are fetched concurrently, bounded by ``settings.max_concurrent`` to
+    avoid overwhelming the Canvas API.  Calendar events are fetched once
+    globally across all courses.
 
-    If fetching assignments for a particular course fails, the error is
-    logged and appended to the ``errors`` list in the result dict.  Other
+    If fetching data for a particular course fails, the error is logged
+    and appended to the ``errors`` list in the result dict.  Other
     courses are unaffected.
 
     Args:
@@ -107,8 +316,12 @@ async def fetch_all(
 
     Returns:
         A dict with keys ``courses``, ``assignments``, ``enrollments``,
-        and ``errors``.  The ``assignments`` value is a dict mapping
-        ``str(course_id)`` to a list of ``Assignment`` models.
+        ``quizzes``, ``modules``, ``pages``, ``files``,
+        ``calendar_events``, and ``errors``.
+
+        Per-course data (assignments, quizzes, modules, pages, files) is
+        keyed by ``str(course_id)``.  The ``modules`` value contains
+        dicts with ``"modules"`` and ``"module_items"`` sub-keys.
     """
     courses, enrollments = await asyncio.gather(
         fetch_courses(client),
@@ -117,31 +330,111 @@ async def fetch_all(
 
     errors: list[str] = []
     assignments: dict[str, list[Assignment]] = {}
+    quizzes: dict[str, list[Quiz]] = {}
+    modules: dict[str, dict] = {}
+    pages: dict[str, list[Page]] = {}
+    files: dict[str, list[FileMetadata]] = {}
     semaphore = asyncio.Semaphore(settings.max_concurrent)
 
-    async def _fetch_course_assignments(course: Course) -> tuple[int, list[Assignment]]:
-        async with semaphore:
-            result = await fetch_assignments(client, course.id)
-            return course.id, result
+    async def _fetch_or_empty(coro: Any, label: str, course: Course) -> Any:
+        """Run a fetch coroutine, returning [] on 404/403 (feature disabled)."""
+        try:
+            return await coro
+        except (CanvasAPIError, CanvasAuthError) as exc:
+            exc_str = str(exc)
+            if "404" in exc_str or "403" in exc_str:
+                logger.debug(
+                    "Skipping %s for course %d (%s): %s",
+                    label,
+                    course.id,
+                    course.name,
+                    exc,
+                )
+                return []
+            raise
 
-    tasks = [_fetch_course_assignments(c) for c in courses]
+    async def _fetch_course_data(course: Course) -> dict:
+        """Fetch all data types for a single course under the semaphore."""
+        async with semaphore:
+            course_assignments = await _fetch_or_empty(
+                fetch_assignments(client, course.id), "assignments", course
+            )
+            course_quizzes = await _fetch_or_empty(
+                fetch_quizzes(client, course.id), "quizzes", course
+            )
+            course_modules = await _fetch_or_empty(
+                fetch_modules(client, course.id), "modules", course
+            )
+
+            # Fetch items for each module
+            all_module_items: dict[int, list[ModuleItem]] = {}
+            for mod in course_modules:
+                items = await _fetch_or_empty(
+                    fetch_module_items(client, course.id, mod.id),
+                    f"module_items[{mod.id}]",
+                    course,
+                )
+                all_module_items[mod.id] = items
+
+            course_pages = await _fetch_or_empty(
+                fetch_pages(client, course.id), "pages", course
+            )
+            course_files = await _fetch_or_empty(
+                fetch_files(client, course.id), "files", course
+            )
+
+            return {
+                "course_id": course.id,
+                "assignments": course_assignments,
+                "quizzes": course_quizzes,
+                "modules": course_modules,
+                "module_items": all_module_items,
+                "pages": course_pages,
+                "files": course_files,
+            }
+
+    tasks = [_fetch_course_data(c) for c in courses]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for course, result in zip(courses, results, strict=True):
+        if isinstance(result, (KeyboardInterrupt, SystemExit)):
+            raise result
         if isinstance(result, BaseException):
             error_msg = (
-                f"Failed to fetch assignments for course "
-                f"{course.id} ({course.name}): {result}"
+                f"Failed to fetch data for course {course.id} ({course.name}): {result}"
             )
             logger.warning(error_msg)
             errors.append(error_msg)
         else:
-            course_id, assignment_list = result
-            assignments[str(course_id)] = assignment_list
+            cid = str(result["course_id"])
+            assignments[cid] = result["assignments"]
+            quizzes[cid] = result["quizzes"]
+            modules[cid] = {
+                "modules": result["modules"],
+                "module_items": result["module_items"],
+            }
+            pages[cid] = result["pages"]
+            files[cid] = result["files"]
+
+    # Calendar events: fetch once globally for all courses
+    course_ids = [c.id for c in courses]
+    calendar_events: list[CalendarEvent] = []
+    if course_ids:
+        try:
+            calendar_events = await fetch_calendar_events(client, course_ids)
+        except Exception as exc:
+            error_msg = f"Failed to fetch calendar events: {exc}"
+            logger.warning(error_msg)
+            errors.append(error_msg)
 
     return {
         "courses": courses,
         "assignments": assignments,
         "enrollments": enrollments,
+        "quizzes": quizzes,
+        "modules": modules,
+        "pages": pages,
+        "files": files,
+        "calendar_events": calendar_events,
         "errors": errors,
     }

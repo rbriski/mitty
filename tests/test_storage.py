@@ -7,16 +7,36 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mitty.models import Assignment, Course, Enrollment, Submission, Term
+from mitty.chunking import Chunk
+from mitty.models import (
+    Assignment,
+    CalendarEvent,
+    Course,
+    Enrollment,
+    FileMetadata,
+    Module,
+    ModuleItem,
+    Page,
+    Quiz,
+    Submission,
+    Term,
+)
 from mitty.storage import (
     StorageError,
     _get_latest_snapshots,
+    chunk_and_store_resources,
     create_storage,
     insert_grade_snapshots,
+    insert_resource_chunks,
     store_all,
     upsert_assignments,
+    upsert_calendar_events_as_assessments,
     upsert_courses,
     upsert_enrollments,
+    upsert_files_as_resources,
+    upsert_module_items_as_resources,
+    upsert_pages_as_resources,
+    upsert_quizzes_as_assessments,
     upsert_submissions,
 )
 
@@ -570,6 +590,97 @@ class TestUpsertEnrollments:
 
 
 # ------------------------------------------------------------------ #
+#  upsert_quizzes_as_assessments
+# ------------------------------------------------------------------ #
+
+
+class TestUpsertQuizzesAsAssessments:
+    """upsert_quizzes_as_assessments maps Quiz models to assessment rows."""
+
+    async def test_upsert_quizzes_maps_to_assessments(self) -> None:
+        """Each quiz becomes an assessment row with correct fields."""
+        client = _mock_client()
+        quizzes = [
+            Quiz(
+                id=5001,
+                title="Chapter 5 Quiz",
+                quiz_type="assignment",
+                due_at=datetime(2026, 4, 10, 23, 59, 59, tzinfo=UTC),
+                points_possible=25.0,
+                time_limit=30,
+                assignment_id=67900,
+                description="<p>Quiz on chapters 4-5.</p>",
+            ),
+        ]
+
+        await upsert_quizzes_as_assessments(client, quizzes, course_id=12345)
+
+        client.table.assert_called_once_with("assessments")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["course_id"] == 12345
+        assert row["name"] == "Chapter 5 Quiz"
+        assert row["assessment_type"] == "quiz"
+        assert row["source"] == "canvas_quiz"
+        assert row["canvas_quiz_id"] == 5001
+        assert row["canvas_assignment_id"] == 67900
+        assert row["scheduled_date"] == "2026-04-10T23:59:59+00:00"
+        assert row["weight"] == 25.0
+        assert row["description"] == "<p>Quiz on chapters 4-5.</p>"
+        assert row["auto_created"] is True
+        assert "created_at" in row
+        assert "updated_at" in row
+
+    async def test_upsert_quizzes_links_assignment_id(self) -> None:
+        """Quiz with assignment_id sets canvas_assignment_id; without omits it."""
+        client = _mock_client()
+        quizzes = [
+            Quiz(id=5001, title="Linked Quiz", assignment_id=67900),
+            Quiz(id=5002, title="Unlinked Quiz", assignment_id=None),
+        ]
+
+        await upsert_quizzes_as_assessments(client, quizzes, course_id=12345)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+
+        linked = next(r for r in rows if r["canvas_quiz_id"] == 5001)
+        unlinked = next(r for r in rows if r["canvas_quiz_id"] == 5002)
+        assert linked["canvas_assignment_id"] == 67900
+        assert "canvas_assignment_id" not in unlinked
+
+    async def test_upsert_quizzes_idempotent_resync(self) -> None:
+        """Upsert uses on_conflict='canvas_quiz_id' for idempotent re-sync."""
+        client = _mock_client()
+        quizzes = [Quiz(id=5001, title="Quiz 1")]
+
+        await upsert_quizzes_as_assessments(client, quizzes, course_id=12345)
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_quiz_id"
+
+    async def test_upsert_quizzes_empty_list(self) -> None:
+        """Empty quiz list short-circuits without API calls."""
+        client = _mock_client()
+
+        await upsert_quizzes_as_assessments(client, [], course_id=12345)
+
+        client.table.assert_not_called()
+
+    async def test_upsert_quizzes_api_failure_raises_storage_error(self) -> None:
+        """Supabase failure is wrapped in StorageError."""
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db timeout")
+        )
+        quizzes = [Quiz(id=5001, title="Quiz 1")]
+
+        with pytest.raises(StorageError, match="db timeout"):
+            await upsert_quizzes_as_assessments(client, quizzes, course_id=12345)
+
+
+# ------------------------------------------------------------------ #
 #  _get_latest_snapshots
 # ------------------------------------------------------------------ #
 
@@ -954,27 +1065,40 @@ class TestInsertGradeSnapshots:
 # ------------------------------------------------------------------ #
 
 # Patch targets for store_all tests.
-_STORE_ALL_PATCHES = {
+_STORE_ALL_PATCHES: dict[str, str] = {
     "upsert_courses": "mitty.storage.upsert_courses",
     "upsert_enrollments": "mitty.storage.upsert_enrollments",
     "upsert_assignments": "mitty.storage.upsert_assignments",
     "upsert_submissions": "mitty.storage.upsert_submissions",
     "insert_grade_snapshots": "mitty.storage.insert_grade_snapshots",
+    "upsert_quizzes_as_assessments": "mitty.storage.upsert_quizzes_as_assessments",
+    "upsert_module_items_as_resources": (
+        "mitty.storage.upsert_module_items_as_resources"
+    ),
+    "upsert_pages_as_resources": "mitty.storage.upsert_pages_as_resources",
+    "upsert_files_as_resources": "mitty.storage.upsert_files_as_resources",
+    "upsert_calendar_events_as_assessments": (
+        "mitty.storage.upsert_calendar_events_as_assessments"
+    ),
+    "chunk_and_store_resources": "mitty.storage.chunk_and_store_resources",
+    "is_assessment_event": "mitty.canvas.classify.is_assessment_event",
 }
+
+
+def _store_all_patches():
+    """Create a context-manager-ready dict of patches for all store_all deps."""
+    mocks = {}
+    for name, target in _STORE_ALL_PATCHES.items():
+        mocks[name] = patch(target, new_callable=AsyncMock)
+    return mocks
 
 
 class TestStoreAll:
     """store_all orchestrates all upserts in FK-safe order."""
 
-    async def test_calls_all_upserts_in_order(self) -> None:
-        """Full success path: all 5 functions called in correct FK order."""
+    async def test_calls_core_upserts_in_order(self) -> None:
+        """Core Phase 1 functions called in correct FK order."""
         call_order: list[str] = []
-
-        async def _track(name: str) -> AsyncMock:
-            async def _side_effect(*_args: object, **_kwargs: object) -> None:
-                call_order.append(name)
-
-            return _side_effect
 
         client = AsyncMock()
         courses = [Course(id=1, name="AP English", course_code="ENG")]
@@ -1011,6 +1135,34 @@ class TestStoreAll:
                     "insert_grade_snapshots"
                 ),
             ) as mock_snapshots,
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["is_assessment_event"],
+                return_value=False,
+            ),
         ):
             await store_all(
                 client,
@@ -1021,7 +1173,7 @@ class TestStoreAll:
                 },
             )
 
-        # Verify FK-safe order
+        # Verify FK-safe order for core steps
         assert call_order == [
             "upsert_courses",
             "upsert_enrollments",
@@ -1036,6 +1188,200 @@ class TestStoreAll:
         mock_assignments.assert_awaited_once_with(client, assignments)
         mock_submissions.assert_awaited_once_with(client, assignments)
         mock_snapshots.assert_awaited_once_with(client, enrollments)
+
+    async def test_phase2_quizzes_stored_per_course(self) -> None:
+        """Quizzes are upserted as assessments for each course."""
+        client = AsyncMock()
+        quizzes = {
+            "1": [Quiz(id=50, title="Quiz 1")],
+            "2": [Quiz(id=60, title="Quiz 2")],
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ) as mock_quizzes,
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(client, {"quizzes": quizzes})
+
+        assert mock_quizzes.await_count == 2
+        mock_quizzes.assert_any_await(client, quizzes["1"], 1)
+        mock_quizzes.assert_any_await(client, quizzes["2"], 2)
+
+    async def test_phase2_module_items_stored_per_module(self) -> None:
+        """Module items are upserted per-module with the module name."""
+        client = AsyncMock()
+        mod = Module(id=30, name="Unit 1")
+        items = [ModuleItem(id=300, module_id=30, title="Page", type="Page")]
+        modules_data = {
+            "1": {
+                "modules": [mod],
+                "module_items": {30: items},
+            },
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ) as mock_mod_items,
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(client, {"modules": modules_data})
+
+        mock_mod_items.assert_awaited_once_with(client, items, 1, "Unit 1")
+
+    async def test_phase2_pages_and_files_stored_per_course(self) -> None:
+        """Pages and files are upserted per-course."""
+        client = AsyncMock()
+        page = Page(page_id=80, title="Syllabus", url="syllabus")
+        file = FileMetadata(id=90, display_name="guide.pdf")
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ) as mock_pages,
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ) as mock_files,
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(
+                client,
+                {
+                    "pages": {"1": [page]},
+                    "files": {"1": [file]},
+                },
+            )
+
+        mock_pages.assert_awaited_once_with(client, [page], 1)
+        mock_files.assert_awaited_once_with(client, [file], 1)
+
+    async def test_phase2_calendar_events_filtered_by_classifier(self) -> None:
+        """Only assessment-classified calendar events are stored."""
+        client = AsyncMock()
+        exam_event = CalendarEvent(id=70, title="Midterm Exam", context_code="course_1")
+        study_event = CalendarEvent(
+            id=71, title="Study Session", context_code="course_1"
+        )
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ) as mock_cal,
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["is_assessment_event"],
+                side_effect=lambda t: "exam" in t.lower(),
+            ),
+        ):
+            await store_all(
+                client,
+                {"calendar_events": [exam_event, study_event]},
+            )
+
+        # Only the exam event should be passed
+        mock_cal.assert_awaited_once_with(client, [exam_event])
 
     async def test_failure_mid_sequence_raises_storage_error(self) -> None:
         """If a middle step fails, StorageError propagates."""
@@ -1063,6 +1409,31 @@ class TestStoreAll:
                 _STORE_ALL_PATCHES["insert_grade_snapshots"],
                 new_callable=AsyncMock,
             ) as mock_snapshots,
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
         ):
             with pytest.raises(StorageError, match="upsert assignments"):
                 await store_all(
@@ -1105,16 +1476,43 @@ class TestStoreAll:
                 _STORE_ALL_PATCHES["insert_grade_snapshots"],
                 new_callable=AsyncMock,
             ) as mock_snapshots,
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ) as mock_cal,
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
         ):
             # Completely empty dict
             await store_all(client, {})
 
-            # All functions still called (with empty data)
+            # Core functions still called (with empty data)
             mock_courses.assert_awaited_once_with(client, [])
             mock_enrollments.assert_awaited_once_with(client, [])
             mock_assignments.assert_awaited_once_with(client, {})
             mock_submissions.assert_awaited_once_with(client, {})
             mock_snapshots.assert_awaited_once_with(client, [])
+            # Calendar events called with empty filtered list
+            mock_cal.assert_awaited_once_with(client, [])
 
     async def test_ignores_errors_key(self) -> None:
         """The 'errors' key from fetch_all output is ignored."""
@@ -1141,6 +1539,31 @@ class TestStoreAll:
                 _STORE_ALL_PATCHES["insert_grade_snapshots"],
                 new_callable=AsyncMock,
             ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
         ):
             courses = [Course(id=1, name="Test", course_code="T")]
             await store_all(
@@ -1153,3 +1576,932 @@ class TestStoreAll:
 
             # Should proceed normally, courses called with data
             mock_courses.assert_awaited_once_with(client, courses)
+
+
+# ------------------------------------------------------------------ #
+#  upsert_module_items_as_resources
+# ------------------------------------------------------------------ #
+
+
+def _make_module_item(
+    item_id: int,
+    module_id: int,
+    title: str,
+    item_type: str,
+    position: int = 1,
+    *,
+    page_url: str | None = None,
+    external_url: str | None = None,
+) -> ModuleItem:
+    """Create a ModuleItem instance for testing."""
+    return ModuleItem(
+        id=item_id,
+        module_id=module_id,
+        title=title,
+        type=item_type,
+        position=position,
+        page_url=page_url,
+        external_url=external_url,
+    )
+
+
+class TestUpsertModuleItemsAsResources:
+    """upsert_module_items_as_resources maps ModuleItems to resource rows."""
+
+    async def test_upsert_module_items_maps_types(self) -> None:
+        """Page, File, ExternalUrl, Assignment are mapped to correct types."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Intro Page", "Page", page_url="intro-page"),
+            _make_module_item(2, 100, "Rubric.pdf", "File"),
+            _make_module_item(
+                3,
+                100,
+                "External Link",
+                "ExternalUrl",
+                external_url="https://example.com",
+            ),
+            _make_module_item(4, 100, "HW 1", "Assignment"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 4
+        type_map = {r["canvas_item_id"]: r["resource_type"] for r in rows}
+        assert type_map[1] == "canvas_page"
+        assert type_map[2] == "file"
+        assert type_map[3] == "link"
+        assert type_map[4] == "link"
+
+    async def test_upsert_module_items_denormalizes_module_name(self) -> None:
+        """Each row carries the module_name from the parent module."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Intro", "Page", page_url="intro"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1: Rhetoric"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        row = rows[0]
+        assert row["module_name"] == "Unit 1: Rhetoric"
+        assert row["canvas_module_id"] == 100
+        assert row["course_id"] == 12345
+        assert row["title"] == "Intro"
+
+    async def test_upsert_module_items_idempotent(self) -> None:
+        """Upsert uses on_conflict='canvas_item_id' for idempotency."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Page", "Page", page_url="p"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_item_id"
+
+    async def test_skips_unknown_item_types(self) -> None:
+        """SubHeader and other unknown types are silently skipped."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Header", "SubHeader"),
+            _make_module_item(2, 100, "Page", "Page", page_url="p"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        assert rows[0]["canvas_item_id"] == 2
+
+    async def test_empty_items_skips_upsert(self) -> None:
+        """Empty items list does not call upsert."""
+        client = _mock_client()
+
+        await upsert_module_items_as_resources(
+            client, [], course_id=12345, module_name="Unit 1"
+        )
+
+        client.table.assert_not_called()
+
+    async def test_all_unknown_types_skips_upsert(self) -> None:
+        """If all items are SubHeaders, no upsert happens."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Header", "SubHeader"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        client.table.assert_not_called()
+
+    async def test_module_position_set_from_item(self) -> None:
+        """module_position is taken from the item's position field."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Page", "Page", position=7, page_url="p"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["module_position"] == 7
+        assert rows[0]["sort_order"] == 7
+
+    async def test_source_url_prefers_external_url(self) -> None:
+        """ExternalUrl items use external_url as source_url."""
+        client = _mock_client()
+        items = [
+            _make_module_item(
+                1,
+                100,
+                "Link",
+                "ExternalUrl",
+                external_url="https://example.com",
+            ),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["source_url"] == "https://example.com"
+
+    async def test_source_url_falls_back_to_page_url(self) -> None:
+        """Page items use page_url as source_url."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Page", "Page", page_url="my-page"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["source_url"] == "my-page"
+
+    async def test_api_failure_raises_storage_error(self) -> None:
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db error")
+        )
+        items = [
+            _make_module_item(1, 100, "Page", "Page", page_url="p"),
+        ]
+
+        with pytest.raises(StorageError, match="db error"):
+            await upsert_module_items_as_resources(
+                client, items, course_id=12345, module_name="Unit 1"
+            )
+
+
+# ------------------------------------------------------------------ #
+#  upsert_pages_as_resources
+# ------------------------------------------------------------------ #
+
+
+class TestUpsertPagesAsResources:
+    """upsert_pages_as_resources maps Page models to resource rows."""
+
+    async def test_upsert_pages_stores_plain_text(self) -> None:
+        client = _mock_client()
+        pages = [
+            Page(
+                page_id=8001,
+                title="Course Syllabus",
+                body="AP English Language\nWelcome to AP English.",
+                url="course-syllabus",
+            ),
+        ]
+
+        await upsert_pages_as_resources(client, pages, course_id=12345)
+
+        client.table.assert_called_once_with("resources")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["course_id"] == 12345
+        assert row["title"] == "Course Syllabus"
+        assert row["resource_type"] == "canvas_page"
+        assert row["content_text"] == "AP English Language\nWelcome to AP English."
+        assert row["source_url"] == (
+            "https://mitty.instructure.com/courses/12345/pages/course-syllabus"
+        )
+        assert row["canvas_item_id"] == 1_000_000_000 + 8001
+        assert "updated_at" in row
+        assert "created_at" in row
+
+    async def test_upsert_pages_null_body(self) -> None:
+        client = _mock_client()
+        pages = [
+            Page(page_id=8002, title="Empty Page", body=None, url="empty-page"),
+        ]
+
+        await upsert_pages_as_resources(client, pages, course_id=12345)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["content_text"] is None
+
+    async def test_upsert_pages_empty_list(self) -> None:
+        client = _mock_client()
+
+        await upsert_pages_as_resources(client, [], course_id=12345)
+
+        client.table.assert_not_called()
+
+    async def test_upsert_pages_on_conflict_canvas_item_id(self) -> None:
+        client = _mock_client()
+        pages = [
+            Page(page_id=8001, title="Test", url="test"),
+        ]
+
+        await upsert_pages_as_resources(client, pages, course_id=1)
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_item_id"
+
+    async def test_upsert_pages_api_failure_raises_storage_error(self) -> None:
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db error")
+        )
+        pages = [Page(page_id=8001, title="Test", url="test")]
+
+        with pytest.raises(StorageError, match="db error"):
+            await upsert_pages_as_resources(client, pages, course_id=1)
+
+    async def test_upsert_pages_multiple(self) -> None:
+        client = _mock_client()
+        pages = [
+            Page(page_id=8001, title="Page A", body="Text A", url="page-a"),
+            Page(page_id=8002, title="Page B", body="Text B", url="page-b"),
+        ]
+
+        await upsert_pages_as_resources(client, pages, course_id=42)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        ids = {r["canvas_item_id"] for r in rows}
+        assert ids == {1_000_000_000 + 8001, 1_000_000_000 + 8002}
+
+
+# ------------------------------------------------------------------ #
+#  upsert_files_as_resources
+# ------------------------------------------------------------------ #
+
+
+class TestUpsertFilesAsResources:
+    """upsert_files_as_resources maps FileMetadata models to resource rows."""
+
+    async def test_upsert_files_stores_metadata_only(self) -> None:
+        """File metadata is stored as resource rows without content."""
+        client = _mock_client()
+        files = [
+            FileMetadata(
+                id=9001,
+                display_name="Unit1_Study_Guide.pdf",
+                content_type="application/pdf",
+                size=245760,
+                url="https://mitty.instructure.com/files/9001/download",
+                folder_id=4001,
+            ),
+        ]
+
+        await upsert_files_as_resources(client, files, course_id=12345)
+
+        client.table.assert_called_once_with("resources")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["course_id"] == 12345
+        assert row["title"] == "Unit1_Study_Guide.pdf"
+        assert row["resource_type"] == "file"
+        assert row["source_url"] == "https://mitty.instructure.com/files/9001/download"
+        assert row["canvas_item_id"] == 9001
+        assert "updated_at" in row
+        assert "created_at" in row
+        # No content_text key — metadata only
+        assert "content_text" not in row
+
+    async def test_upsert_files_empty_list(self) -> None:
+        """Empty files list does not call upsert."""
+        client = _mock_client()
+
+        await upsert_files_as_resources(client, [], course_id=12345)
+
+        client.table.assert_not_called()
+
+    async def test_upsert_files_on_conflict_canvas_item_id(self) -> None:
+        """Upsert uses on_conflict='canvas_item_id' for dedup."""
+        client = _mock_client()
+        files = [
+            FileMetadata(id=9001, display_name="test.pdf"),
+        ]
+
+        await upsert_files_as_resources(client, files, course_id=1)
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_item_id"
+
+    async def test_upsert_files_empty_url_becomes_none(self) -> None:
+        """Files with empty URL string get source_url=None."""
+        client = _mock_client()
+        files = [
+            FileMetadata(id=9003, display_name="sample.txt", url=""),
+        ]
+
+        await upsert_files_as_resources(client, files, course_id=12345)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["source_url"] is None
+
+    async def test_upsert_files_multiple(self) -> None:
+        """Multiple files are batched into a single upsert."""
+        client = _mock_client()
+        files = [
+            FileMetadata(
+                id=9001,
+                display_name="file_a.pdf",
+                url="https://example.com/a",
+            ),
+            FileMetadata(
+                id=9002,
+                display_name="file_b.docx",
+                url="https://example.com/b",
+            ),
+        ]
+
+        await upsert_files_as_resources(client, files, course_id=42)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        ids = {r["canvas_item_id"] for r in rows}
+        assert ids == {9001, 9002}
+
+    async def test_upsert_files_api_failure_raises_storage_error(self) -> None:
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db error")
+        )
+        files = [FileMetadata(id=9001, display_name="test.pdf")]
+
+        with pytest.raises(StorageError, match="db error"):
+            await upsert_files_as_resources(client, files, course_id=1)
+
+
+# ------------------------------------------------------------------ #
+#  Calendar Events → Assessments
+# ------------------------------------------------------------------ #
+
+
+def _make_calendar_event(
+    event_id: int,
+    title: str,
+    context_code: str = "course_12345",
+    start_at: str | None = "2026-04-10T13:00:00Z",
+) -> CalendarEvent:
+    """Create a CalendarEvent instance for testing."""
+    return CalendarEvent(
+        id=event_id,
+        title=title,
+        context_code=context_code,
+        start_at=start_at,
+    )
+
+
+class TestUpsertCalendarEventsAsAssessments:
+    """upsert_calendar_events_as_assessments stores events as assessments."""
+
+    async def test_upsert_calendar_assessments_sets_auto_created(self) -> None:
+        """Assessment rows have source='calendar_event' and auto_created=True."""
+        client = _mock_client()
+        events = [_make_calendar_event(7001, "Chapter 5 Quiz")]
+
+        await upsert_calendar_events_as_assessments(client, events)
+
+        client.table.assert_called_with("assessments")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["canvas_event_id"] == 7001
+        assert row["name"] == "Chapter 5 Quiz"
+        assert row["course_id"] == 12345
+        assert row["source"] == "calendar_event"
+        assert row["auto_created"] is True
+        assert row["assessment_type"] == "calendar_event"
+        assert row["scheduled_date"] is not None
+
+        # Conflict target is canvas_event_id
+        upsert_kwargs = client.table.return_value.upsert.call_args[1]
+        assert upsert_kwargs["on_conflict"] == "canvas_event_id"
+
+    async def test_upsert_calendar_assessments_idempotent(self) -> None:
+        """Calling twice with the same events produces the same rows."""
+        client = _mock_client()
+        events = [
+            _make_calendar_event(7001, "Quiz A"),
+            _make_calendar_event(7003, "Midterm Exam"),
+        ]
+
+        await upsert_calendar_events_as_assessments(client, events)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        event_ids = {r["canvas_event_id"] for r in rows}
+        assert event_ids == {7001, 7003}
+
+        # Second call produces identical event_ids (idempotent upsert)
+        client2 = _mock_client()
+        await upsert_calendar_events_as_assessments(client2, events)
+        rows2 = client2.table.return_value.upsert.call_args[0][0]
+        assert {r["canvas_event_id"] for r in rows2} == event_ids
+
+    async def test_skips_non_course_context(self) -> None:
+        """Events without course_ context codes are skipped."""
+        client = _mock_client()
+        events = [_make_calendar_event(7002, "Break", context_code="user_42")]
+
+        await upsert_calendar_events_as_assessments(client, events)
+
+        # No rows to upsert, so table().upsert() should NOT be called
+        client.table.return_value.upsert.assert_not_called()
+
+    async def test_empty_list_is_noop(self) -> None:
+        client = _mock_client()
+
+        await upsert_calendar_events_as_assessments(client, [])
+
+        client.table.assert_not_called()
+
+    async def test_null_start_at_stored_as_none(self) -> None:
+        client = _mock_client()
+        events = [_make_calendar_event(7004, "Test", start_at=None)]
+
+        await upsert_calendar_events_as_assessments(client, events)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["scheduled_date"] is None
+
+    async def test_raises_storage_error_on_failure(self) -> None:
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=RuntimeError("DB error"),
+        )
+        events = [_make_calendar_event(7001, "Quiz")]
+
+        with pytest.raises(StorageError, match="calendar events"):
+            await upsert_calendar_events_as_assessments(client, events)
+
+
+# ------------------------------------------------------------------ #
+#  insert_resource_chunks
+# ------------------------------------------------------------------ #
+
+
+def _mock_chunk_client(
+    *, delete_fail: bool = False, insert_fail: bool = False
+) -> AsyncMock:
+    """Build a mock client supporting delete and insert chains for chunks."""
+    client = AsyncMock()
+    table_mock = MagicMock()
+
+    # delete chain: table().delete().eq().execute()
+    delete_builder = MagicMock()
+    eq_builder = MagicMock()
+    if delete_fail:
+        eq_builder.execute = AsyncMock(side_effect=Exception("delete failed"))
+    else:
+        eq_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+    delete_builder.eq = MagicMock(return_value=eq_builder)
+    table_mock.delete = MagicMock(return_value=delete_builder)
+
+    # insert chain: table().insert().execute()
+    insert_builder = MagicMock()
+    if insert_fail:
+        insert_builder.execute = AsyncMock(side_effect=Exception("insert failed"))
+    else:
+        insert_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+    table_mock.insert = MagicMock(return_value=insert_builder)
+
+    client.table = MagicMock(return_value=table_mock)
+    return client
+
+
+class TestInsertResourceChunks:
+    """insert_resource_chunks stores chunked text rows for a resource."""
+
+    async def test_inserts_chunks_with_correct_fields(self) -> None:
+        """Each chunk is stored with resource_id, chunk_index, content, tokens."""
+        client = _mock_chunk_client()
+        chunks = [
+            Chunk(content_text="First chunk.", chunk_index=0, token_count=3),
+            Chunk(content_text="Second chunk.", chunk_index=1, token_count=3),
+        ]
+
+        await insert_resource_chunks(client, resource_id=42, chunks=chunks)
+
+        table_mock = client.table.return_value
+        # Delete called first
+        table_mock.delete.assert_called_once()
+        table_mock.delete.return_value.eq.assert_called_once_with("resource_id", 42)
+
+        # Insert called with correct rows
+        table_mock.insert.assert_called_once()
+        rows = table_mock.insert.call_args[0][0]
+        assert len(rows) == 2
+        assert rows[0]["resource_id"] == 42
+        assert rows[0]["chunk_index"] == 0
+        assert rows[0]["content_text"] == "First chunk."
+        assert rows[0]["token_count"] == 3
+        assert "created_at" in rows[0]
+        assert rows[1]["chunk_index"] == 1
+
+    async def test_empty_chunks_skips(self) -> None:
+        """Empty chunks list does not make any API calls."""
+        client = _mock_chunk_client()
+
+        await insert_resource_chunks(client, resource_id=42, chunks=[])
+
+        client.table.assert_not_called()
+
+    async def test_delete_failure_raises_storage_error(self) -> None:
+        """Delete failure is wrapped in StorageError."""
+        client = _mock_chunk_client(delete_fail=True)
+        chunks = [Chunk(content_text="Text.", chunk_index=0, token_count=2)]
+
+        with pytest.raises(StorageError, match="delete failed"):
+            await insert_resource_chunks(client, resource_id=1, chunks=chunks)
+
+    async def test_insert_failure_raises_storage_error(self) -> None:
+        """Insert failure is wrapped in StorageError."""
+        client = _mock_chunk_client(insert_fail=True)
+        chunks = [Chunk(content_text="Text.", chunk_index=0, token_count=2)]
+
+        with pytest.raises(StorageError, match="insert failed"):
+            await insert_resource_chunks(client, resource_id=1, chunks=chunks)
+
+    async def test_deletes_existing_before_insert(self) -> None:
+        """Existing chunks for the resource are deleted before inserting new ones."""
+        client = _mock_chunk_client()
+        chunks = [Chunk(content_text="New.", chunk_index=0, token_count=1)]
+
+        await insert_resource_chunks(client, resource_id=99, chunks=chunks)
+
+        # Verify delete was called on the resource_chunks table
+        client.table.assert_called_with("resource_chunks")
+        table_mock = client.table.return_value
+        table_mock.delete.return_value.eq.assert_called_once_with("resource_id", 99)
+
+
+# ------------------------------------------------------------------ #
+#  chunk_and_store_resources
+# ------------------------------------------------------------------ #
+
+
+def _mock_chunk_query_client(
+    resource_rows: list[dict],
+    *,
+    query_fail: bool = False,
+) -> AsyncMock:
+    """Build a mock client supporting select query + delete/insert for chunks."""
+    client = AsyncMock()
+
+    # We need table() to return different mocks for "resources" vs "resource_chunks".
+    resources_table = MagicMock()
+    chunks_table = MagicMock()
+
+    # resources table: select().in_().execute()
+    select_builder = MagicMock()
+    in_builder = MagicMock()
+    if query_fail:
+        in_builder.execute = AsyncMock(side_effect=Exception("query failed"))
+    else:
+        execute_result = MagicMock()
+        execute_result.data = resource_rows
+        in_builder.execute = AsyncMock(return_value=execute_result)
+    select_builder.in_ = MagicMock(return_value=in_builder)
+    resources_table.select = MagicMock(return_value=select_builder)
+
+    # resource_chunks table: delete().eq().execute() + insert().execute()
+    delete_builder = MagicMock()
+    eq_builder = MagicMock()
+    eq_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+    delete_builder.eq = MagicMock(return_value=eq_builder)
+    chunks_table.delete = MagicMock(return_value=delete_builder)
+
+    insert_builder = MagicMock()
+    insert_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+    chunks_table.insert = MagicMock(return_value=insert_builder)
+
+    def table_dispatch(name: str) -> MagicMock:
+        if name == "resources":
+            return resources_table
+        return chunks_table
+
+    client.table = MagicMock(side_effect=table_dispatch)
+    return client
+
+
+class TestChunkAndStoreResources:
+    """chunk_and_store_resources queries resources, chunks content, stores chunks."""
+
+    async def test_chunks_resource_with_content(self) -> None:
+        """Resource with content_text gets chunked and stored."""
+        resource_rows = [
+            {"id": 42, "canvas_item_id": 9000001, "content_text": "Hello world. Foo."},
+        ]
+        client = _mock_chunk_query_client(resource_rows)
+
+        with (
+            patch(
+                "mitty.chunking.achunk_text",
+                new_callable=AsyncMock,
+                return_value=[
+                    Chunk(content_text="Hello world.", chunk_index=0, token_count=3),
+                    Chunk(content_text="Foo.", chunk_index=1, token_count=1),
+                ],
+            ) as mock_achunk,
+            patch(
+                "mitty.storage.insert_resource_chunks",
+                new_callable=AsyncMock,
+            ) as mock_insert,
+        ):
+            await chunk_and_store_resources(client, [9000001])
+
+        mock_achunk.assert_awaited_once_with("Hello world. Foo.")
+        mock_insert.assert_awaited_once()
+        args = mock_insert.call_args
+        assert args[0][0] is client
+        assert args[0][1] == 42
+        assert len(args[0][2]) == 2
+
+    async def test_skips_resource_without_content(self) -> None:
+        """Resource with empty content_text is skipped."""
+        resource_rows = [
+            {"id": 42, "canvas_item_id": 9000001, "content_text": ""},
+            {"id": 43, "canvas_item_id": 9000002, "content_text": None},
+            {"id": 44, "canvas_item_id": 9000003, "content_text": "   "},
+        ]
+        client = _mock_chunk_query_client(resource_rows)
+
+        with (
+            patch(
+                "mitty.chunking.achunk_text",
+                new_callable=AsyncMock,
+            ) as mock_achunk,
+            patch(
+                "mitty.storage.insert_resource_chunks",
+                new_callable=AsyncMock,
+            ) as mock_insert,
+        ):
+            await chunk_and_store_resources(client, [9000001, 9000002, 9000003])
+
+        mock_achunk.assert_not_awaited()
+        mock_insert.assert_not_awaited()
+
+    async def test_empty_canvas_item_ids_skips(self) -> None:
+        """Empty list of canvas_item_ids does nothing."""
+        client = AsyncMock()
+
+        await chunk_and_store_resources(client, [])
+
+        client.table.assert_not_called()
+
+    async def test_query_failure_raises_storage_error(self) -> None:
+        """Supabase query failure is wrapped in StorageError."""
+        client = _mock_chunk_query_client([], query_fail=True)
+
+        with pytest.raises(StorageError, match="query failed"):
+            await chunk_and_store_resources(client, [9000001])
+
+    async def test_multiple_resources_chunked(self) -> None:
+        """Multiple resources with content are all chunked."""
+        resource_rows = [
+            {"id": 42, "canvas_item_id": 9000001, "content_text": "Page one content."},
+            {"id": 43, "canvas_item_id": 9000002, "content_text": "Page two content."},
+        ]
+        client = _mock_chunk_query_client(resource_rows)
+
+        with (
+            patch(
+                "mitty.chunking.achunk_text",
+                new_callable=AsyncMock,
+                return_value=[
+                    Chunk(content_text="Content.", chunk_index=0, token_count=2),
+                ],
+            ) as mock_achunk,
+            patch(
+                "mitty.storage.insert_resource_chunks",
+                new_callable=AsyncMock,
+            ) as mock_insert,
+        ):
+            await chunk_and_store_resources(client, [9000001, 9000002])
+
+        assert mock_achunk.await_count == 2
+        assert mock_insert.await_count == 2
+
+
+# ------------------------------------------------------------------ #
+#  store_all: chunking integration
+# ------------------------------------------------------------------ #
+
+
+class TestStoreAllChunking:
+    """store_all auto-chunks page resources with content_text."""
+
+    async def test_pages_with_content_trigger_chunking(self) -> None:
+        """Pages with body content trigger chunk_and_store_resources."""
+        client = AsyncMock()
+        pages = {
+            "1": [
+                Page(
+                    page_id=80, title="Syllabus", url="syllabus", body="Some content."
+                ),
+                Page(page_id=81, title="Empty", url="empty", body=""),
+            ],
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ) as mock_chunk,
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(client, {"pages": pages})
+
+        # Only page with content should be passed (canvas_item_id = 1B + 80)
+        mock_chunk.assert_awaited_once_with(client, [1_000_000_080])
+
+    async def test_pages_without_content_skip_chunking(self) -> None:
+        """Pages without body content do not trigger chunking."""
+        client = AsyncMock()
+        pages = {
+            "1": [
+                Page(page_id=80, title="Empty", url="empty", body=""),
+                Page(page_id=81, title="None", url="none", body=None),
+            ],
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ) as mock_chunk,
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(client, {"pages": pages})
+
+        mock_chunk.assert_not_awaited()
+
+    async def test_no_pages_skips_chunking(self) -> None:
+        """No pages data means no chunking step."""
+        client = AsyncMock()
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ) as mock_chunk,
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(client, {})
+
+        mock_chunk.assert_not_awaited()
+
+    async def test_multiple_courses_pages_chunked(self) -> None:
+        """Pages from multiple courses all have their chunks generated."""
+        client = AsyncMock()
+        pages = {
+            "1": [Page(page_id=80, title="P1", url="p1", body="Content one.")],
+            "2": [Page(page_id=90, title="P2", url="p2", body="Content two.")],
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ) as mock_chunk,
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+        ):
+            await store_all(client, {"pages": pages})
+
+        mock_chunk.assert_awaited_once()
+        canvas_ids = mock_chunk.call_args[0][1]
+        assert sorted(canvas_ids) == [1_000_000_080, 1_000_000_090]
