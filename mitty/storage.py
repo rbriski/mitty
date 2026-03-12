@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         Assignment,
         CalendarEvent,
         Course,
+        DiscussionTopic,
         Enrollment,
         FileMetadata,
         ModuleItem,
@@ -841,6 +842,85 @@ async def upsert_files_as_resources(
 
 
 # ------------------------------------------------------------------ #
+#  Discussion Topics → Resources
+# ------------------------------------------------------------------ #
+
+# Offset for discussion topic canvas_item_id to avoid collisions with
+# module-item IDs (raw) and page IDs (1_000_000_000 offset).
+_DISCUSSION_ID_OFFSET = 2_000_000_000
+
+
+async def upsert_discussions_as_resources(
+    client: AsyncClient,
+    topics: list[DiscussionTopic],
+    course_id: int,
+    *,
+    canvas_base_url: str = "https://mitty.instructure.com",
+) -> list[int]:
+    """Upsert Canvas discussion topics as resource rows.
+
+    Each topic is mapped to a resource with ``resource_type='discussion'``,
+    ``content_text`` set to the (already stripped) plain-text message, and
+    ``source_url`` pointing to the topic on Canvas.
+
+    Deduplication uses the ``canvas_item_id`` column (unique), set to
+    the topic's ``id`` with a ``2_000_000_000`` offset to avoid collisions
+    with module-item IDs and page IDs.
+
+    Args:
+        client: Async Supabase client.
+        topics: List of DiscussionTopic models (messages should already
+            be plain text).
+        course_id: The Canvas course ID these topics belong to.
+        canvas_base_url: Root URL for building source links.
+
+    Returns:
+        List of canvas_item_ids that were upserted (for downstream chunking).
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not topics:
+        return []
+
+    now = _now_iso()
+    rows: list[dict] = []
+    canvas_item_ids: list[int] = []
+    for topic in topics:
+        source_url = (
+            topic.html_url
+            or f"{canvas_base_url}/courses/{course_id}/discussion_topics/{topic.id}"
+        )
+        canvas_item_id = _DISCUSSION_ID_OFFSET + topic.id
+        row: dict = {
+            "course_id": course_id,
+            "title": topic.title,
+            "resource_type": "discussion",
+            "source_url": source_url,
+            "content_text": topic.message,
+            "canvas_item_id": canvas_item_id,
+            "sort_order": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+        canvas_item_ids.append(canvas_item_id)
+
+    try:
+        await (
+            client.table("resources")
+            .upsert(rows, on_conflict="canvas_item_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert discussions as resources: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d discussions as resources", len(rows))
+    return canvas_item_ids
+
+
+# ------------------------------------------------------------------ #
 #  Resource Chunks
 # ------------------------------------------------------------------ #
 
@@ -927,8 +1007,10 @@ async def store_all(
     6. module_items -> resources
     7. pages -> resources
     8. files -> resources
-    9. calendar_events -> assessments (filtered by classifier)
-    10. assignments -> assessments (filtered by classifier)
+    9. discussion_topics -> resources
+    10. chunk resources with content_text (pages + discussions)
+    11. calendar_events -> assessments (filtered by classifier)
+    12. assignments -> assessments (filtered by classifier)
 
     Args:
         client: Async Supabase client.
@@ -946,6 +1028,7 @@ async def store_all(
     modules_data = data.get("modules", {})
     pages = data.get("pages", {})
     files = data.get("files", {})
+    discussion_topics = data.get("discussion_topics", {})
     calendar_events = data.get("calendar_events", [])
 
     # Phase 1: existing core data
@@ -1016,24 +1099,44 @@ async def store_all(
             if page.body and page.body.strip():
                 page_canvas_item_ids.append(1_000_000_000 + page.page_id)
 
-    # Phase 2: chunk resources with content_text
-    if page_canvas_item_ids:
-        step_name = "chunk_and_store_resources"
-        logger.info("store_all: starting %s", step_name)
-        try:
-            await chunk_and_store_resources(client, page_canvas_item_ids)
-        except StorageError:
-            raise
-        except Exception as exc:
-            msg = f"store_all failed at step '{step_name}': {exc}"
-            raise StorageError(msg) from exc
-
     # Phase 2: files as resources (per-course)
     for course_id_str, file_list in files.items():
         step_name = f"upsert_files_as_resources[{course_id_str}]"
         logger.info("store_all: starting %s", step_name)
         try:
             await upsert_files_as_resources(client, file_list, int(course_id_str))
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+
+    # Phase 4: discussion topics as resources (per-course)
+    discussion_canvas_item_ids: list[int] = []
+    for course_id_str, topic_list in discussion_topics.items():
+        step_name = f"upsert_discussions_as_resources[{course_id_str}]"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            ids = await upsert_discussions_as_resources(
+                client, topic_list, int(course_id_str)
+            )
+            # Collect IDs for topics that have content for chunking
+            for topic, cid in zip(topic_list, ids, strict=True):
+                if topic.message and topic.message.strip():
+                    discussion_canvas_item_ids.append(cid)
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+
+    # Chunk resources with content_text (pages + discussions)
+    all_chunkable_ids = page_canvas_item_ids + discussion_canvas_item_ids
+    if all_chunkable_ids:
+        step_name = "chunk_and_store_resources"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await chunk_and_store_resources(client, all_chunkable_ids)
         except StorageError:
             raise
         except Exception as exc:
