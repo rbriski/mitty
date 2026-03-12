@@ -11,6 +11,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
+# Calibration status type
+# ---------------------------------------------------------------------------
+
+CalibrationStatus = Literal[
+    "well_calibrated", "over_confident", "under_confident", "unknown"
+]
+
+# ---------------------------------------------------------------------------
 # Generic wrappers
 # ---------------------------------------------------------------------------
 
@@ -636,3 +644,30 @@ class MasteryUpdateResponse(BaseModel):
 
     study_block_id: int
     mastery_states: list[MasteryStateResult]
+
+
+# ---------------------------------------------------------------------------
+# MasteryDashboard (read-only aggregate)
+# ---------------------------------------------------------------------------
+
+
+class MasteryConceptRow(BaseModel):
+    """Aggregated mastery data for a single concept."""
+
+    concept: str
+    mastery_level: float
+    confidence_self_report: float | None
+    calibration_gap: float | None
+    calibration_status: CalibrationStatus
+    next_review_at: datetime | None
+    last_retrieval_at: datetime | None
+    retrieval_count: int
+    success_rate: float | None
+    has_resources: bool
+
+
+class MasteryDashboardResponse(BaseModel):
+    """Mastery dashboard for a single course."""
+
+    course_id: int
+    concepts: list[MasteryConceptRow]

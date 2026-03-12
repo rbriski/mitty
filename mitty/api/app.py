@@ -23,6 +23,7 @@ from mitty.api.routers import (
     assessments,
     config,
     health,
+    mastery_dashboard,
     mastery_states,
     pages,
     practice_results,
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(study_plans.router)
     app.include_router(study_blocks.router)
     app.include_router(mastery_states.router)
+    app.include_router(mastery_dashboard.router)
     app.include_router(practice_results.router)
     app.include_router(config.router)
     app.include_router(assessments.router)
