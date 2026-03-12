@@ -26,6 +26,7 @@ from mitty.api.routers import (
     mastery_states,
     pages,
     practice_results,
+    practice_sessions,
     resource_chunks,
     resources,
     student_signals,
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(assessments.router)
     app.include_router(resources.router)
     app.include_router(resource_chunks.router)
+    app.include_router(practice_sessions.router)
 
     # Standardized error handler (covers both FastAPI and Starlette HTTPException)
     @app.exception_handler(StarletteHTTPException)
