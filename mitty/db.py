@@ -192,6 +192,7 @@ assessments = sa.Table(
         sa.Integer,
         sa.ForeignKey("assignments.id"),
         nullable=True,
+        unique=True,
     ),
     sa.Column("canvas_quiz_id", sa.Integer, nullable=True, unique=True),
     sa.Column("canvas_event_id", sa.Integer, nullable=True, unique=True),
