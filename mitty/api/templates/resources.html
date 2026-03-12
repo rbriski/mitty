@@ -1,0 +1,599 @@
+{% extends "base.html" %}
+
+{% block title %}Mitty — Resources{% endblock %}
+
+{% block nav %}
+{# Hide default nav; Alpine.js controls nav visibility based on auth state #}
+{% endblock %}
+
+{% block content %}
+<div x-data="resourcesApp()" x-init="init()" x-cloak>
+
+  {# ── Nav (only when authenticated) ── #}
+  <template x-if="session">
+    <nav class="bg-white shadow-sm border-b border-gray-200 -mx-4 -mt-6 mb-6">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="flex items-center justify-between h-14">
+          <a href="/" class="text-xl font-bold text-mitty-700 hover:text-mitty-600 transition-colors">
+            Mitty
+          </a>
+          <div class="flex items-center space-x-6">
+            <a href="/"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Dashboard
+            </a>
+            <a href="/study-plan"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Study Plan
+            </a>
+            <a href="/resources/manage"
+               class="text-sm font-medium text-mitty-600 border-b-2 border-mitty-600 pb-0.5">
+              Resources
+            </a>
+            <button
+              @click="signOut()"
+              class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </template>
+
+  {# ── Not authenticated ── #}
+  <template x-if="!session">
+    <div class="text-center py-16">
+      <p class="text-gray-500 mb-4">Please sign in to manage resources.</p>
+      <a href="/" class="text-mitty-600 hover:text-mitty-700 font-medium">Go to Dashboard</a>
+    </div>
+  </template>
+
+  {# ── Authenticated Content ── #}
+  <template x-if="session">
+    <div class="max-w-5xl mx-auto py-8">
+
+      {# Back button #}
+      <a href="/" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-6 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Dashboard
+      </a>
+
+      {# Page header #}
+      <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Manage Resources</h1>
+        <button
+          @click="showCreateForm = !showCreateForm; if (showCreateForm) resetForm()"
+          class="inline-flex items-center gap-2 px-4 py-2 bg-mitty-600 text-white text-sm font-medium rounded-lg hover:bg-mitty-700 transition-colors"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+          </svg>
+          <span x-text="showCreateForm ? 'Cancel' : 'New Resource'"></span>
+        </button>
+      </div>
+
+      {# ── Create / Edit form ── #}
+      <div x-show="showCreateForm" x-transition class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-4" x-text="editingId ? 'Edit Resource' : 'Create Resource'"></h2>
+
+        <div x-show="formError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p class="text-sm text-red-700" x-text="formError"></p>
+        </div>
+
+        <form @submit.prevent="editingId ? updateResource() : createResource()">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            {# Course select #}
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Course</label>
+              <select
+                x-model="form.course_id"
+                required
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none"
+              >
+                <option value="">Select course...</option>
+                <template x-for="c in courses" :key="c.id">
+                  <option :value="c.id" x-text="c.name"></option>
+                </template>
+              </select>
+            </div>
+
+            {# Type select #}
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+              <select
+                x-model="form.resource_type"
+                required
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none"
+              >
+                <option value="">Select type...</option>
+                <template x-for="t in resourceTypes" :key="t">
+                  <option :value="t" x-text="formatType(t)"></option>
+                </template>
+              </select>
+            </div>
+          </div>
+
+          {# Title #}
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <input
+              type="text"
+              x-model="form.title"
+              required
+              placeholder="Resource title"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none"
+            />
+          </div>
+
+          {# URL #}
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">URL (optional)</label>
+            <input
+              type="url"
+              x-model="form.source_url"
+              placeholder="https://..."
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none"
+            />
+          </div>
+
+          {# Content text #}
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Content (optional)</label>
+            <textarea
+              x-model="form.content_text"
+              rows="4"
+              placeholder="Notes, excerpts, or other content..."
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none resize-y"
+            ></textarea>
+          </div>
+
+          <div class="flex justify-end gap-3">
+            <button
+              type="button"
+              @click="showCreateForm = false"
+              class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              :disabled="saving"
+              class="px-4 py-2 text-sm font-medium text-white bg-mitty-600 rounded-lg hover:bg-mitty-700 transition-colors disabled:opacity-50"
+            >
+              <span x-show="!saving" x-text="editingId ? 'Update' : 'Create'"></span>
+              <span x-show="saving">Saving...</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {# ── Filters ── #}
+      <div class="flex flex-wrap items-center gap-3 mb-6">
+        <select
+          x-model="filterCourse"
+          @change="fetchResources()"
+          class="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none"
+        >
+          <option value="">All courses</option>
+          <template x-for="c in courses" :key="c.id">
+            <option :value="c.id" x-text="c.name"></option>
+          </template>
+        </select>
+
+        <select
+          x-model="filterType"
+          @change="fetchResources()"
+          class="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none"
+        >
+          <option value="">All types</option>
+          <template x-for="t in resourceTypes" :key="t">
+            <option :value="t" x-text="formatType(t)"></option>
+          </template>
+        </select>
+      </div>
+
+      {# ── Loading state ── #}
+      <div x-show="loading" class="text-center py-12">
+        <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+        <p class="text-sm text-gray-500 mt-3">Loading resources...</p>
+      </div>
+
+      {# ── Error state ── #}
+      <div x-show="fetchError && !loading" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
+        <p class="text-sm text-red-700" x-text="fetchError"></p>
+      </div>
+
+      {# ── Empty state ── #}
+      <div x-show="!loading && !fetchError && groupedResources.length === 0" class="text-center py-16">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
+          <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+          </svg>
+        </div>
+        <h3 class="text-lg font-semibold text-gray-900 mb-1">No resources found</h3>
+        <p class="text-sm text-gray-500">Create your first resource to get started.</p>
+      </div>
+
+      {# ── Resource list grouped by course ── #}
+      <div x-show="!loading && !fetchError && groupedResources.length > 0" class="space-y-6">
+        <template x-for="group in groupedResources" :key="group.courseId">
+          <div>
+            <h2 class="text-lg font-semibold text-gray-800 mb-3" x-text="group.courseName"></h2>
+            <div class="space-y-2">
+              <template x-for="resource in group.items" :key="resource.id">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-start justify-between gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                      <h3 class="font-medium text-gray-900 truncate" x-text="resource.title"></h3>
+                      <span
+                        class="flex-shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                        :class="typeBadge(resource.resource_type)"
+                        x-text="formatType(resource.resource_type)"
+                      ></span>
+                    </div>
+                    <div class="flex items-center gap-3 text-xs text-gray-400">
+                      <span x-show="resource.module_name" x-text="resource.module_name"></span>
+                      <a
+                        x-show="resource.source_url"
+                        :href="resource.source_url"
+                        target="_blank"
+                        class="text-mitty-600 hover:text-mitty-700 hover:underline truncate max-w-xs"
+                        x-text="resource.source_url"
+                      ></a>
+                    </div>
+                    <p
+                      x-show="resource.content_text"
+                      class="text-sm text-gray-500 mt-1 line-clamp-2"
+                      x-text="resource.content_text"
+                    ></p>
+                  </div>
+                  <div class="flex items-center gap-1 flex-shrink-0">
+                    <button
+                      @click="startEdit(resource)"
+                      class="p-1.5 text-gray-400 hover:text-mitty-600 rounded-lg hover:bg-gray-50 transition-colors"
+                      title="Edit"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                      </svg>
+                    </button>
+                    <button
+                      @click="deleteResource(resource.id)"
+                      class="p-1.5 text-gray-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                      title="Delete"
+                    >
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      {# ── Delete confirmation modal ── #}
+      <div x-show="confirmDeleteId" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" x-transition>
+        <div class="bg-white rounded-xl shadow-lg p-6 max-w-sm w-full mx-4">
+          <h3 class="text-lg font-semibold text-gray-900 mb-2">Delete resource?</h3>
+          <p class="text-sm text-gray-500 mb-4">This action cannot be undone.</p>
+          <div class="flex justify-end gap-3">
+            <button
+              @click="confirmDeleteId = null"
+              class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              @click="confirmDelete()"
+              class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
+
+  function resourcesApp() {
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    return {
+      session: null,
+      loading: false,
+      saving: false,
+      fetchError: '',
+      formError: '',
+
+      resources: [],
+      courses: [],
+      showCreateForm: false,
+      editingId: null,
+      confirmDeleteId: null,
+
+      filterCourse: '',
+      filterType: '',
+
+      resourceTypes: [
+        'textbook_chapter', 'canvas_page', 'file', 'link', 'notes', 'video',
+      ],
+
+      form: {
+        course_id: '',
+        title: '',
+        resource_type: '',
+        source_url: '',
+        content_text: '',
+      },
+
+      get groupedResources() {
+        const courseMap = {};
+        let filtered = this.resources;
+
+        if (this.filterType) {
+          filtered = filtered.filter(r => r.resource_type === this.filterType);
+        }
+
+        for (const r of filtered) {
+          if (!courseMap[r.course_id]) {
+            const course = this.courses.find(c => c.id === r.course_id);
+            courseMap[r.course_id] = {
+              courseId: r.course_id,
+              courseName: course ? course.name : 'Course ' + r.course_id,
+              items: [],
+            };
+          }
+          courseMap[r.course_id].items.push(r);
+        }
+
+        return Object.values(courseMap).sort((a, b) =>
+          a.courseName.localeCompare(b.courseName)
+        );
+      },
+
+      async init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        this.session = session;
+
+        supabase.auth.onAuthStateChange((_event, session) => {
+          this.session = session;
+          if (session) this.loadData();
+        });
+
+        if (this.session) this.loadData();
+      },
+
+      async signOut() {
+        await supabase.auth.signOut();
+        this.session = null;
+        window.location.href = '/';
+      },
+
+      async loadData() {
+        await Promise.all([this.fetchCourses(), this.fetchResources()]);
+      },
+
+      async fetchCourses() {
+        try {
+          const { data, error } = await supabase
+            .from('courses')
+            .select('id, name')
+            .eq('workflow_state', 'available')
+            .order('name');
+
+          if (error) {
+            console.error('Failed to load courses:', error.message);
+            return;
+          }
+
+          this.courses = (data || []).map(c => ({
+            id: c.id,
+            name: c.name || ('Course ' + c.id),
+          }));
+        } catch (err) {
+          console.error('Failed to load courses:', err);
+        }
+      },
+
+      async fetchResources() {
+        this.loading = true;
+        this.fetchError = '';
+
+        try {
+          const token = this.session?.access_token;
+          if (!token) {
+            this.fetchError = 'Not authenticated.';
+            return;
+          }
+
+          let url = '/resources/?limit=200';
+          if (this.filterCourse) {
+            url += '&course_id=' + this.filterCourse;
+          }
+
+          const resp = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (!resp.ok) {
+            this.fetchError = 'Failed to load resources (HTTP ' + resp.status + ')';
+            return;
+          }
+
+          const result = await resp.json();
+          this.resources = result.data || [];
+        } catch (err) {
+          this.fetchError = 'Failed to load resources: ' + err.message;
+        } finally {
+          this.loading = false;
+        }
+      },
+
+      resetForm() {
+        this.form = {
+          course_id: '',
+          title: '',
+          resource_type: '',
+          source_url: '',
+          content_text: '',
+        };
+        this.editingId = null;
+        this.formError = '';
+      },
+
+      async createResource() {
+        this.saving = true;
+        this.formError = '';
+
+        try {
+          const token = this.session?.access_token;
+          const payload = {
+            course_id: parseInt(this.form.course_id),
+            title: this.form.title,
+            resource_type: this.form.resource_type,
+          };
+
+          if (this.form.source_url) payload.source_url = this.form.source_url;
+          if (this.form.content_text) payload.content_text = this.form.content_text;
+
+          const resp = await fetch('/resources/', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            this.formError = err.detail || 'Failed to create resource (HTTP ' + resp.status + ')';
+            return;
+          }
+
+          this.showCreateForm = false;
+          this.resetForm();
+          await this.fetchResources();
+        } catch (err) {
+          this.formError = 'Error: ' + err.message;
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      startEdit(resource) {
+        this.editingId = resource.id;
+        this.form = {
+          course_id: String(resource.course_id),
+          title: resource.title,
+          resource_type: resource.resource_type,
+          source_url: resource.source_url || '',
+          content_text: resource.content_text || '',
+        };
+        this.formError = '';
+        this.showCreateForm = true;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+
+      async updateResource() {
+        this.saving = true;
+        this.formError = '';
+
+        try {
+          const token = this.session?.access_token;
+          const payload = {
+            title: this.form.title,
+            resource_type: this.form.resource_type,
+          };
+
+          if (this.form.source_url) payload.source_url = this.form.source_url;
+          else payload.source_url = null;
+
+          if (this.form.content_text) payload.content_text = this.form.content_text;
+          else payload.content_text = null;
+
+          const resp = await fetch('/resources/' + this.editingId, {
+            method: 'PUT',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            this.formError = err.detail || 'Failed to update resource (HTTP ' + resp.status + ')';
+            return;
+          }
+
+          this.showCreateForm = false;
+          this.resetForm();
+          await this.fetchResources();
+        } catch (err) {
+          this.formError = 'Error: ' + err.message;
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      deleteResource(id) {
+        this.confirmDeleteId = id;
+      },
+
+      async confirmDelete() {
+        const id = this.confirmDeleteId;
+        this.confirmDeleteId = null;
+
+        try {
+          const token = this.session?.access_token;
+          const resp = await fetch('/resources/' + id, {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (!resp.ok && resp.status !== 204) {
+            this.fetchError = 'Failed to delete resource (HTTP ' + resp.status + ')';
+            return;
+          }
+
+          await this.fetchResources();
+        } catch (err) {
+          this.fetchError = 'Error deleting: ' + err.message;
+        }
+      },
+
+      formatType(t) {
+        return t ? t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : '';
+      },
+
+      typeBadge(type) {
+        const map = {
+          textbook_chapter: 'bg-blue-100 text-blue-700',
+          canvas_page: 'bg-purple-100 text-purple-700',
+          file: 'bg-gray-100 text-gray-600',
+          link: 'bg-emerald-100 text-emerald-700',
+          notes: 'bg-amber-100 text-amber-700',
+          video: 'bg-red-100 text-red-700',
+        };
+        return map[type] || 'bg-gray-100 text-gray-600';
+      },
+    };
+  }
+</script>
+{% endblock %}
