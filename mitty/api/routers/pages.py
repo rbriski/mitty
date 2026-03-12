@@ -26,6 +26,12 @@ async def study_plan(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("study_plan.html", {"request": request})
 
 
+@router.get("/assessments/manage", response_class=HTMLResponse)
+async def assessments_manage(request: Request) -> HTMLResponse:
+    """Render the assessment management page."""
+    return templates.TemplateResponse("assessments.html", {"request": request})
+
+
 @router.get("/class/{course_id}", response_class=HTMLResponse)
 async def class_detail(request: Request, course_id: int) -> HTMLResponse:
     """Render the class detail page for a specific course."""
