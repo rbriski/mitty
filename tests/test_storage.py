@@ -2609,7 +2609,7 @@ class TestUpsertAssignmentsAsAssessments:
         assert "updated_at" in test_row
 
         exam_row = next(r for r in rows if r["canvas_assignment_id"] == 101)
-        assert exam_row["assessment_type"] == "exam"
+        assert exam_row["assessment_type"] == "test"
         assert exam_row["name"] == "Midterm Exam"
 
     async def test_non_assessment_assignments_skipped(self) -> None:

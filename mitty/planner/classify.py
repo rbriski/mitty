@@ -14,11 +14,11 @@ import re
 # is not included — it only matches when paired with exam/test/assessment
 # via the main pattern below.
 _ASSESSMENT_KEYWORDS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bexam\b", re.IGNORECASE), "exam"),
+    (re.compile(r"\bexam\b", re.IGNORECASE), "test"),
     (re.compile(r"\bquiz\b", re.IGNORECASE), "quiz"),
     (re.compile(r"\btest\b", re.IGNORECASE), "test"),
-    (re.compile(r"\bmidterm\b", re.IGNORECASE), "midterm"),
-    (re.compile(r"\bassessment\b", re.IGNORECASE), "assessment"),
+    (re.compile(r"\bmidterm\b", re.IGNORECASE), "test"),
+    (re.compile(r"\bassessment\b", re.IGNORECASE), "test"),
 ]
 
 # Exclusion patterns — if any of these appear alongside a keyword the
