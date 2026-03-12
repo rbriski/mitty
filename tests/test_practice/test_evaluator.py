@@ -46,9 +46,7 @@ def _short_answer_item() -> PracticeItem:
     return PracticeItem(
         practice_type="short_answer",
         question_text="Explain the water cycle briefly.",
-        correct_answer=(
-            "Water evaporates, condenses into clouds, " "and precipitates."
-        ),
+        correct_answer=("Water evaporates, condenses into clouds, and precipitates."),
         concept="water cycle",
     )
 
@@ -58,7 +56,7 @@ def _explanation_item() -> PracticeItem:
         practice_type="explanation",
         question_text="Explain why the sky is blue.",
         correct_answer=(
-            "Rayleigh scattering causes shorter blue " "wavelengths to scatter more."
+            "Rayleigh scattering causes shorter blue wavelengths to scatter more."
         ),
         concept="optics",
     )
@@ -69,7 +67,7 @@ def _worked_example_item() -> PracticeItem:
         practice_type="worked_example",
         question_text="Solve: 3x + 5 = 20",
         correct_answer="x = 5",
-        explanation=("Subtract 5 from both sides: 3x = 15. " "Divide by 3: x = 5."),
+        explanation=("Subtract 5 from both sides: 3x = 15. Divide by 3: x = 5."),
         concept="linear equations",
     )
 
@@ -173,7 +171,7 @@ class TestFillInBlankLlmFallbackForVariation:
         llm_eval = _mock_llm_evaluation(
             is_correct=True,
             score=1.0,
-            feedback=("'Mitochondrion' is the singular form " "and is acceptable."),
+            feedback=("'Mitochondrion' is the singular form and is acceptable."),
         )
         mock_client.call_structured = AsyncMock(return_value=llm_eval)
 
@@ -203,7 +201,7 @@ class TestShortAnswerLlmPartialCredit:
         llm_eval = _mock_llm_evaluation(
             is_correct=False,
             score=0.6,
-            feedback=("You mentioned evaporation but " "missed condensation."),
+            feedback=("You mentioned evaporation but missed condensation."),
             misconceptions=["Precipitation and condensation are the same"],
         )
         mock_client.call_structured = AsyncMock(return_value=llm_eval)
@@ -245,9 +243,7 @@ class TestExplanationLlmScoringWithRubric:
         result = await evaluate_answer(
             ai_client=mock_client,
             practice_item=item,
-            student_answer=(
-                "Blue light scatters more because of " "Rayleigh scattering."
-            ),
+            student_answer=("Blue light scatters more because of Rayleigh scattering."),
         )
 
         assert result.is_correct is True
