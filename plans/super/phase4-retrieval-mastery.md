@@ -3,7 +3,7 @@
 ## Meta
 - **Ticket**: tickets/phase4-retrieval-mastery.md (local)
 - **Branch**: feature/phase4-retrieval-mastery
-- **Phase**: detailing
+- **Phase**: devolved
 - **Created**: 2026-03-12
 - **Sessions**: 1
 - **Last session**: 2026-03-12
@@ -689,8 +689,22 @@ All nullable, backward-compatible with existing Phase 3 data.
 
 ## Beads Manifest
 
-*(Phase 7 — after approval)*
-
-- **Epic ID**: TBD
-- **Task IDs**: TBD
+- **Epic ID**: mitty-5kp
 - **Worktree**: ../worktrees/mitty/phase4-retrieval-mastery
+
+| Bead | Story | Depends on |
+|------|-------|-----------|
+| mitty-5kp.1 | US-001 Schema migrations | — |
+| mitty-5kp.2 | US-002 Config + LLM client | .1 |
+| mitty-5kp.3 | US-003 Concept extraction | .2 |
+| mitty-5kp.4 | US-004 Spaced repetition scheduler | — |
+| mitty-5kp.5 | US-005 Practice generator | .1, .2 |
+| mitty-5kp.6 | US-006 Answer evaluator | .2 |
+| mitty-5kp.7 | US-007 Mastery updater | .4 |
+| mitty-5kp.8 | US-008 Discussion ingestion | .1 |
+| mitty-5kp.9 | US-009 Practice session API | .5, .6, .7 |
+| mitty-5kp.10 | US-010 Practice session UI | .9 |
+| mitty-5kp.11 | US-011 Mastery dashboard | .3, .7 |
+| mitty-5kp.12 | US-012 Planner integration | .7 |
+| mitty-5kp.13 | US-013 Quality Gate | .8, .10, .11, .12 |
+| mitty-5kp.14 | US-014 Patterns & Memory | .13 |
