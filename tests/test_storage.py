@@ -12,6 +12,7 @@ from mitty.models import (
     Course,
     Enrollment,
     ModuleItem,
+    Page,
     Quiz,
     Submission,
     Term,
@@ -26,6 +27,7 @@ from mitty.storage import (
     upsert_courses,
     upsert_enrollments,
     upsert_module_items_as_resources,
+    upsert_pages_as_resources,
     upsert_quizzes_as_assessments,
     upsert_submissions,
 )
@@ -1447,3 +1449,93 @@ class TestUpsertModuleItemsAsResources:
             await upsert_module_items_as_resources(
                 client, items, course_id=12345, module_name="Unit 1"
             )
+
+
+# ------------------------------------------------------------------ #
+#  upsert_pages_as_resources
+# ------------------------------------------------------------------ #
+
+
+class TestUpsertPagesAsResources:
+    """upsert_pages_as_resources maps Page models to resource rows."""
+
+    async def test_upsert_pages_stores_plain_text(self) -> None:
+        client = _mock_client()
+        pages = [
+            Page(
+                page_id=8001,
+                title="Course Syllabus",
+                body="AP English Language\nWelcome to AP English.",
+                url="course-syllabus",
+            ),
+        ]
+
+        await upsert_pages_as_resources(client, pages, course_id=12345)
+
+        client.table.assert_called_once_with("resources")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["course_id"] == 12345
+        assert row["title"] == "Course Syllabus"
+        assert row["resource_type"] == "canvas_page"
+        assert row["content_text"] == "AP English Language\nWelcome to AP English."
+        assert row["source_url"] == (
+            "https://mitty.instructure.com/courses/12345/pages/course-syllabus"
+        )
+        assert row["canvas_item_id"] == 9_000_000 + 8001
+        assert "updated_at" in row
+        assert "created_at" in row
+
+    async def test_upsert_pages_null_body(self) -> None:
+        client = _mock_client()
+        pages = [
+            Page(page_id=8002, title="Empty Page", body=None, url="empty-page"),
+        ]
+
+        await upsert_pages_as_resources(client, pages, course_id=12345)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["content_text"] is None
+
+    async def test_upsert_pages_empty_list(self) -> None:
+        client = _mock_client()
+
+        await upsert_pages_as_resources(client, [], course_id=12345)
+
+        client.table.assert_not_called()
+
+    async def test_upsert_pages_on_conflict_canvas_item_id(self) -> None:
+        client = _mock_client()
+        pages = [
+            Page(page_id=8001, title="Test", url="test"),
+        ]
+
+        await upsert_pages_as_resources(client, pages, course_id=1)
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_item_id"
+
+    async def test_upsert_pages_api_failure_raises_storage_error(self) -> None:
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db error")
+        )
+        pages = [Page(page_id=8001, title="Test", url="test")]
+
+        with pytest.raises(StorageError, match="db error"):
+            await upsert_pages_as_resources(client, pages, course_id=1)
+
+    async def test_upsert_pages_multiple(self) -> None:
+        client = _mock_client()
+        pages = [
+            Page(page_id=8001, title="Page A", body="Text A", url="page-a"),
+            Page(page_id=8002, title="Page B", body="Text B", url="page-b"),
+        ]
+
+        await upsert_pages_as_resources(client, pages, course_id=42)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        ids = {r["canvas_item_id"] for r in rows}
+        assert ids == {9_000_000 + 8001, 9_000_000 + 8002}

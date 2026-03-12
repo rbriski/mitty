@@ -11,7 +11,9 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from mitty.models import Assignment, Course, Enrollment, Module, ModuleItem, Quiz
+from bs4 import BeautifulSoup
+
+from mitty.models import Assignment, Course, Enrollment, Module, ModuleItem, Page, Quiz
 
 if TYPE_CHECKING:
     from mitty.canvas.client import CanvasClient
@@ -156,6 +158,55 @@ async def fetch_module_items(
         {"per_page": "100"},
     )
     return [ModuleItem.model_validate(item) for item in raw]
+
+
+def strip_html(html: str) -> str:
+    """Strip HTML to plain text, removing scripts and style tags.
+
+    Uses BeautifulSoup to decompose ``<script>`` and ``<style>`` elements
+    before extracting visible text with newline separators.
+
+    Args:
+        html: Raw HTML string.
+
+    Returns:
+        Plain text with tags, scripts, and styles removed.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)
+
+
+async def fetch_pages(
+    client: CanvasClient,
+    course_id: int,
+) -> list[Page]:
+    """Fetch all wiki pages for a given course, including HTML bodies.
+
+    Calls ``GET /api/v1/courses/:id/pages?include[]=body&per_page=100``
+    and parses each item into a :class:`~mitty.models.Page`.  The HTML body
+    is stripped to plain text via :func:`strip_html` and stored back on the
+    ``Page.body`` field.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``Page`` model instances with plain-text bodies.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/pages",
+        {"include[]": "body", "per_page": "100"},
+    )
+    pages: list[Page] = []
+    for item in raw:
+        page = Page.model_validate(item)
+        if page.body:
+            page = page.model_copy(update={"body": strip_html(page.body)})
+        pages.append(page)
+    return pages
 
 
 async def fetch_all(

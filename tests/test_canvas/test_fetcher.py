@@ -13,7 +13,9 @@ from mitty.canvas.fetcher import (
     fetch_enrollments,
     fetch_module_items,
     fetch_modules,
+    fetch_pages,
     fetch_quizzes,
+    strip_html,
 )
 from mitty.models import (
     Assignment,
@@ -21,6 +23,7 @@ from mitty.models import (
     Enrollment,
     Module,
     ModuleItem,
+    Page,
     Quiz,
     Submission,
     Term,
@@ -469,3 +472,92 @@ class TestFetchModuleItems:
             {"per_page": "100"},
         )
         assert result == []
+
+
+class TestFetchPages:
+    """fetch_pages calls get_paginated and strips HTML bodies."""
+
+    async def test_fetch_pages_parses_fixture(self) -> None:
+        raw = _load_fixture("pages.json")
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_pages(client, course_id=12345)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/12345/pages",
+            {"include[]": "body", "per_page": "100"},
+        )
+        assert len(result) == 3
+        assert all(isinstance(p, Page) for p in result)
+
+        # First page: HTML stripped to plain text
+        assert result[0].page_id == 8001
+        assert result[0].title == "Course Syllabus"
+        assert "<" not in (result[0].body or "")
+        assert "AP English Language" in (result[0].body or "")
+        assert "Welcome to AP English" in (result[0].body or "")
+
+        # Second page: null body preserved
+        assert result[1].page_id == 8002
+        assert result[1].body is None
+
+        # Third page: unpublished but still parsed
+        assert result[2].page_id == 8003
+        assert result[2].published is False
+
+    async def test_fetch_pages_empty_body(self) -> None:
+        """Pages with null body are returned with body=None."""
+        raw = [
+            {
+                "page_id": 9001,
+                "title": "Empty Page",
+                "body": None,
+                "url": "empty-page",
+                "published": True,
+            }
+        ]
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_pages(client, course_id=99)
+
+        assert len(result) == 1
+        assert result[0].body is None
+
+    async def test_empty_response_returns_empty_list(self) -> None:
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=[])
+
+        result = await fetch_pages(client, course_id=12345)
+
+        assert result == []
+
+
+class TestStripHtml:
+    """strip_html removes tags, scripts, and styles."""
+
+    def test_html_stripping_removes_scripts_and_styles(self) -> None:
+        html = (
+            "<html><head><style>body { color: red; }</style></head>"
+            "<body><script>alert('xss')</script>"
+            "<h1>Title</h1><p>Content here.</p></body></html>"
+        )
+        text = strip_html(html)
+        assert "alert" not in text
+        assert "color: red" not in text
+        assert "Title" in text
+        assert "Content here." in text
+
+    def test_preserves_plain_text_content(self) -> None:
+        html = "<p>Hello <strong>world</strong></p>"
+        text = strip_html(html)
+        assert "Hello" in text
+        assert "world" in text
+        assert "<" not in text
+
+    def test_newline_separator(self) -> None:
+        html = "<p>Line one</p><p>Line two</p>"
+        text = strip_html(html)
+        assert "Line one" in text
+        assert "Line two" in text

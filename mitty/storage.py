@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from supabase import AsyncClient, acreate_client
 
 if TYPE_CHECKING:
-    from mitty.models import Assignment, Course, Enrollment, ModuleItem, Quiz
+    from mitty.models import Assignment, Course, Enrollment, ModuleItem, Page, Quiz
 
 logger = logging.getLogger(__name__)
 
@@ -495,6 +495,70 @@ async def upsert_module_items_as_resources(
         raise StorageError(msg) from exc
 
     logger.info("Upserted %d module item resources", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Pages → Resources
+# ------------------------------------------------------------------ #
+
+
+async def upsert_pages_as_resources(
+    client: AsyncClient,
+    pages: list[Page],
+    course_id: int,
+    *,
+    canvas_base_url: str = "https://mitty.instructure.com",
+) -> None:
+    """Upsert Canvas wiki pages as resource rows.
+
+    Each page is mapped to a resource with ``resource_type='canvas_page'``,
+    ``content_text`` set to the (already stripped) plain-text body, and
+    ``source_url`` pointing to the page on Canvas.
+
+    Deduplication uses the ``canvas_item_id`` column (unique), set to
+    the page's ``page_id`` with a ``9_000_000`` offset to avoid collisions
+    with module-item IDs.
+
+    Args:
+        client: Async Supabase client.
+        pages: List of Page models (bodies should already be plain text).
+        course_id: The Canvas course ID these pages belong to.
+        canvas_base_url: Root URL for building source links.
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not pages:
+        return
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for page in pages:
+        source_url = f"{canvas_base_url}/courses/{course_id}/pages/{page.url}"
+        row: dict = {
+            "course_id": course_id,
+            "title": page.title,
+            "resource_type": "canvas_page",
+            "source_url": source_url,
+            "content_text": page.body,
+            "canvas_item_id": 9_000_000 + page.page_id,
+            "sort_order": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+
+    try:
+        await (
+            client.table("resources")
+            .upsert(rows, on_conflict="canvas_item_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert pages as resources: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d pages as resources", len(rows))
 
 
 # ------------------------------------------------------------------ #
