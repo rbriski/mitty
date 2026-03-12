@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from bs4 import BeautifulSoup
 
+from mitty.canvas.client import CanvasAPIError, CanvasAuthError
 from mitty.models import (
     Assignment,
     CalendarEvent,
@@ -335,21 +336,52 @@ async def fetch_all(
     files: dict[str, list[FileMetadata]] = {}
     semaphore = asyncio.Semaphore(settings.max_concurrent)
 
+    async def _fetch_or_empty(coro: Any, label: str, course: Course) -> Any:
+        """Run a fetch coroutine, returning [] on 404/403 (feature disabled)."""
+        try:
+            return await coro
+        except (CanvasAPIError, CanvasAuthError) as exc:
+            exc_str = str(exc)
+            if "404" in exc_str or "403" in exc_str:
+                logger.debug(
+                    "Skipping %s for course %d (%s): %s",
+                    label,
+                    course.id,
+                    course.name,
+                    exc,
+                )
+                return []
+            raise
+
     async def _fetch_course_data(course: Course) -> dict:
         """Fetch all data types for a single course under the semaphore."""
         async with semaphore:
-            course_assignments = await fetch_assignments(client, course.id)
-            course_quizzes = await fetch_quizzes(client, course.id)
-            course_modules = await fetch_modules(client, course.id)
+            course_assignments = await _fetch_or_empty(
+                fetch_assignments(client, course.id), "assignments", course
+            )
+            course_quizzes = await _fetch_or_empty(
+                fetch_quizzes(client, course.id), "quizzes", course
+            )
+            course_modules = await _fetch_or_empty(
+                fetch_modules(client, course.id), "modules", course
+            )
 
             # Fetch items for each module
             all_module_items: dict[int, list[ModuleItem]] = {}
             for mod in course_modules:
-                items = await fetch_module_items(client, course.id, mod.id)
+                items = await _fetch_or_empty(
+                    fetch_module_items(client, course.id, mod.id),
+                    f"module_items[{mod.id}]",
+                    course,
+                )
                 all_module_items[mod.id] = items
 
-            course_pages = await fetch_pages(client, course.id)
-            course_files = await fetch_files(client, course.id)
+            course_pages = await _fetch_or_empty(
+                fetch_pages(client, course.id), "pages", course
+            )
+            course_files = await _fetch_or_empty(
+                fetch_files(client, course.id), "files", course
+            )
 
             return {
                 "course_id": course.id,
