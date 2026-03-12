@@ -574,3 +574,65 @@ class PracticeResultResponse(BaseModel):
     feedback: str | None
     misconceptions_detected: list[str] | None
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Practice Session orchestration schemas
+# ---------------------------------------------------------------------------
+
+
+class PracticeGenerateResponse(BaseModel):
+    """Response from practice item generation."""
+
+    concept: str
+    course_id: int
+    items: list[PracticeItemResponse]
+    cached: bool = False
+
+
+class EvaluateRequest(BaseModel):
+    """Request to evaluate a student answer."""
+
+    practice_item_id: int
+    student_answer: str = Field(max_length=10000)
+    confidence_before: float | None = Field(default=None, ge=1.0, le=5.0)
+    study_block_id: int | None = None
+    time_spent_seconds: int | None = None
+
+
+class EvaluateResponse(BaseModel):
+    """Response from answer evaluation."""
+
+    practice_result_id: int
+    is_correct: bool
+    score: float
+    feedback: str
+    misconceptions_detected: list[str]
+
+
+class MasteryUpdateRequest(BaseModel):
+    """Request to batch-update mastery after a practice session."""
+
+    study_block_id: int
+
+
+class MasteryStateResult(BaseModel):
+    """A single mastery state in the update response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    concept: str
+    course_id: int
+    mastery_level: float
+    success_rate: float | None
+    confidence_self_report: float | None
+    retrieval_count: int
+    last_retrieval_at: datetime | None
+    next_review_at: datetime | None
+
+
+class MasteryUpdateResponse(BaseModel):
+    """Response from mastery batch-update."""
+
+    study_block_id: int
+    mastery_states: list[MasteryStateResult]
