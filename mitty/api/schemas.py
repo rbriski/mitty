@@ -307,6 +307,8 @@ class StudyPlanResponse(BaseModel):
 # StudyBlock
 # ---------------------------------------------------------------------------
 
+# Note: StudyPlanWithBlocksResponse is defined after StudyBlockResponse below.
+
 BlockType = Literal[
     "plan",
     "urgent_deliverable",
@@ -372,6 +374,12 @@ class StudyBlockResponse(BaseModel):
     status: BlockStatus
     started_at: datetime | None
     completed_at: datetime | None
+
+
+class StudyPlanWithBlocksResponse(StudyPlanResponse):
+    """Study plan with nested study blocks."""
+
+    blocks: list[StudyBlockResponse] = []
 
 
 # ---------------------------------------------------------------------------
