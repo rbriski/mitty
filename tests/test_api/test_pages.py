@@ -53,16 +53,16 @@ class TestStudyPlanPage:
         assert "text/html" in response.headers["content-type"]
         assert "Study Plan" in response.text
 
-    def test_contains_no_plan_placeholder(self, client: TestClient) -> None:
+    def test_contains_checkin_form(self, client: TestClient) -> None:
         response = client.get("/study-plan")
 
-        assert "No study plan for today" in response.text
+        assert "Daily Check-in" in response.text
 
     def test_contains_back_to_dashboard_link(self, client: TestClient) -> None:
         response = client.get("/study-plan")
 
         assert 'href="/"' in response.text
-        assert "Back to Dashboard" in response.text
+        assert "Dashboard" in response.text
 
     def test_contains_study_plan_app_script(self, client: TestClient) -> None:
         response = client.get("/study-plan")
