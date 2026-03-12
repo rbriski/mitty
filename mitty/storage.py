@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from supabase import AsyncClient, acreate_client
 
 if TYPE_CHECKING:
-    from mitty.models import Assignment, Course, Enrollment
+    from mitty.models import Assignment, Course, Enrollment, Quiz
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +253,69 @@ async def upsert_enrollments(
         raise StorageError(msg) from exc
 
     logger.info("Upserted %d enrollments", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Quizzes → Assessments
+# ------------------------------------------------------------------ #
+
+
+async def upsert_quizzes_as_assessments(
+    client: AsyncClient,
+    quizzes: list[Quiz],
+    course_id: int,
+) -> None:
+    """Batch upsert quizzes as assessment rows.
+
+    Each :class:`~mitty.models.Quiz` is mapped to an ``assessments`` row
+    with ``assessment_type='quiz'``, ``source='canvas_quiz'``, and
+    ``canvas_quiz_id`` set to the quiz's Canvas ID.  If the quiz has an
+    ``assignment_id``, ``canvas_assignment_id`` is set for cross-linking.
+
+    Upserts on ``canvas_quiz_id`` for idempotent re-sync.
+
+    Args:
+        client: Async Supabase client.
+        quizzes: List of Quiz models to upsert.
+        course_id: The Canvas course ID these quizzes belong to.
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not quizzes:
+        return
+
+    now = _now_iso()
+    rows = []
+    for quiz in quizzes:
+        row: dict = {
+            "course_id": course_id,
+            "name": quiz.title,
+            "assessment_type": "quiz",
+            "scheduled_date": (quiz.due_at.isoformat() if quiz.due_at else None),
+            "weight": quiz.points_possible,
+            "description": quiz.description,
+            "canvas_quiz_id": quiz.id,
+            "auto_created": True,
+            "source": "canvas_quiz",
+            "created_at": now,
+            "updated_at": now,
+        }
+        if quiz.assignment_id is not None:
+            row["canvas_assignment_id"] = quiz.assignment_id
+        rows.append(row)
+
+    try:
+        await (
+            client.table("assessments")
+            .upsert(rows, on_conflict="canvas_quiz_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert quizzes as assessments: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d quizzes as assessments", len(rows))
 
 
 # ------------------------------------------------------------------ #
