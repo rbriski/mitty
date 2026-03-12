@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from supabase import AsyncClient, acreate_client
 
 if TYPE_CHECKING:
-    from mitty.models import Assignment, Course, Enrollment, Quiz
+    from mitty.models import Assignment, Course, Enrollment, ModuleItem, Quiz
 
 logger = logging.getLogger(__name__)
 
@@ -422,6 +422,79 @@ async def insert_grade_snapshots(
         raise StorageError(msg) from exc
 
     logger.info("Inserted %d grade snapshots", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Module Items → Resources
+# ------------------------------------------------------------------ #
+
+# Map Canvas module item types to our resource_type values.
+_ITEM_TYPE_MAP: dict[str, str] = {
+    "Page": "canvas_page",
+    "File": "file",
+    "ExternalUrl": "link",
+    "Assignment": "link",
+}
+
+
+async def upsert_module_items_as_resources(
+    client: AsyncClient,
+    items: list[ModuleItem],
+    course_id: int,
+    module_name: str,
+) -> None:
+    """Upsert module items as resource rows.
+
+    Each :class:`~mitty.models.ModuleItem` is mapped to a resource row with
+    the appropriate ``resource_type`` derived from the item's Canvas type.
+    Items whose type is not in the mapping (e.g. ``SubHeader``) are skipped.
+
+    Args:
+        client: Async Supabase client.
+        items: List of ModuleItem models to upsert.
+        course_id: The Canvas course ID these items belong to.
+        module_name: The human-readable name of the parent module
+            (denormalized into each row).
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    rows: list[dict] = []
+    now = _now_iso()
+    for item in items:
+        resource_type = _ITEM_TYPE_MAP.get(item.type)
+        if resource_type is None:
+            continue
+
+        row: dict = {
+            "course_id": course_id,
+            "title": item.title,
+            "resource_type": resource_type,
+            "source_url": item.external_url or item.page_url,
+            "canvas_module_id": item.module_id,
+            "canvas_item_id": item.id,
+            "module_name": module_name,
+            "module_position": item.position,
+            "sort_order": item.position,
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+
+    if not rows:
+        return
+
+    try:
+        await (
+            client.table("resources")
+            .upsert(rows, on_conflict="canvas_item_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert module items as resources: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d module item resources", len(rows))
 
 
 # ------------------------------------------------------------------ #

@@ -11,9 +11,20 @@ from mitty.canvas.fetcher import (
     fetch_assignments,
     fetch_courses,
     fetch_enrollments,
+    fetch_module_items,
+    fetch_modules,
     fetch_quizzes,
 )
-from mitty.models import Assignment, Course, Enrollment, Quiz, Submission, Term
+from mitty.models import (
+    Assignment,
+    Course,
+    Enrollment,
+    Module,
+    ModuleItem,
+    Quiz,
+    Submission,
+    Term,
+)
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -356,3 +367,105 @@ class TestFetchAll:
 
         # fetch_assignments should never be called with no courses
         mock_fetch_assignments.assert_not_called()
+
+
+class TestFetchModules:
+    """fetch_modules calls get_paginated with course_id in the path."""
+
+    async def test_fetch_modules_parses_fixture(self) -> None:
+        raw = _load_fixture("modules.json")
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_modules(client, course_id=12345)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/12345/modules",
+            {"include[]": "items", "per_page": "100"},
+        )
+        assert len(result) == 3
+        assert all(isinstance(m, Module) for m in result)
+
+        # First module
+        assert result[0].id == 3001
+        assert result[0].name == "Unit 1: Introduction to Rhetoric"
+        assert result[0].position == 1
+        assert result[0].unlock_at is None
+        assert result[0].items_count == 5
+
+        # Second module with unlock_at
+        assert result[1].id == 3002
+        assert result[1].name == "Unit 2: Argument & Persuasion"
+        assert result[1].position == 2
+        assert result[1].unlock_at is not None
+        assert result[1].items_count == 8
+
+        # Third module — locked, zero items
+        assert result[2].id == 3003
+        assert result[2].items_count == 0
+
+    async def test_empty_response_returns_empty_list(self) -> None:
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=[])
+
+        result = await fetch_modules(client, course_id=99999)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/99999/modules",
+            {"include[]": "items", "per_page": "100"},
+        )
+        assert result == []
+
+
+class TestFetchModuleItems:
+    """fetch_module_items calls get_paginated with course_id and module_id."""
+
+    async def test_fetch_module_items_parses_fixture(self) -> None:
+        raw = _load_fixture("module_items.json")
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_module_items(client, course_id=12345, module_id=3001)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/12345/modules/3001/items",
+            {"per_page": "100"},
+        )
+        assert len(result) == 5
+        assert all(isinstance(item, ModuleItem) for item in result)
+
+        # Page item
+        assert result[0].id == 5001
+        assert result[0].module_id == 3001
+        assert result[0].title == "Welcome to Rhetoric"
+        assert result[0].type == "Page"
+        assert result[0].page_url == "welcome-to-rhetoric"
+        assert result[0].position == 1
+
+        # File item
+        assert result[1].type == "File"
+        assert result[1].content_id == 8002
+
+        # ExternalUrl item
+        assert result[2].type == "ExternalUrl"
+        assert result[2].external_url is not None
+        assert "purdue" in result[2].external_url
+
+        # Assignment item
+        assert result[3].type == "Assignment"
+        assert result[3].content_id == 67890
+
+        # SubHeader item
+        assert result[4].type == "SubHeader"
+
+    async def test_empty_response_returns_empty_list(self) -> None:
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=[])
+
+        result = await fetch_module_items(client, course_id=12345, module_id=3001)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/12345/modules/3001/items",
+            {"per_page": "100"},
+        )
+        assert result == []
