@@ -780,21 +780,37 @@ async def store_all(
     """Persist all scraped data to Supabase in FK-safe order.
 
     Calls upsert/insert functions sequentially in dependency order:
-    courses -> enrollments -> assignments -> submissions -> grade_snapshots.
+
+    1. courses (parent for everything)
+    2. enrollments
+    3. assignments -> submissions
+    4. grade_snapshots
+    5. quizzes -> assessments
+    6. module_items -> resources
+    7. pages -> resources
+    8. files -> resources
+    9. calendar_events -> assessments (filtered by classifier)
 
     Args:
         client: Async Supabase client.
-        data: Dict with keys "courses", "assignments", "enrollments"
-              (same shape as ``fetch_all()`` output).
+        data: Dict with keys matching ``fetch_all()`` output shape.
 
     Raises:
         StorageError: If any upsert/insert step fails.
     """
+    from mitty.canvas.classify import is_assessment_event
+
     courses = data.get("courses", [])
     assignments = data.get("assignments", {})
     enrollments = data.get("enrollments", [])
+    quizzes = data.get("quizzes", {})
+    modules_data = data.get("modules", {})
+    pages = data.get("pages", {})
+    files = data.get("files", {})
+    calendar_events = data.get("calendar_events", [])
 
-    steps = [
+    # Phase 1: existing core data
+    steps: list[tuple[str, object, list]] = [
         ("upsert_courses", upsert_courses, [client, courses]),
         ("upsert_enrollments", upsert_enrollments, [client, enrollments]),
         ("upsert_assignments", upsert_assignments, [client, assignments]),
@@ -811,3 +827,71 @@ async def store_all(
         except Exception as exc:
             msg = f"store_all failed at step '{step_name}': {exc}"
             raise StorageError(msg) from exc
+
+    # Phase 2: quizzes as assessments (per-course)
+    for course_id_str, quiz_list in quizzes.items():
+        step_name = f"upsert_quizzes_as_assessments[{course_id_str}]"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await upsert_quizzes_as_assessments(client, quiz_list, int(course_id_str))
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+
+    # Phase 2: module items as resources (per-course, per-module)
+    for course_id_str, mod_data in modules_data.items():
+        course_modules = mod_data.get("modules", [])
+        module_items = mod_data.get("module_items", {})
+        for mod in course_modules:
+            items = module_items.get(mod.id, [])
+            if not items:
+                continue
+            step_name = f"upsert_module_items_as_resources[{course_id_str}/{mod.id}]"
+            logger.info("store_all: starting %s", step_name)
+            try:
+                await upsert_module_items_as_resources(
+                    client, items, int(course_id_str), mod.name
+                )
+            except StorageError:
+                raise
+            except Exception as exc:
+                msg = f"store_all failed at step '{step_name}': {exc}"
+                raise StorageError(msg) from exc
+
+    # Phase 2: pages as resources (per-course)
+    for course_id_str, page_list in pages.items():
+        step_name = f"upsert_pages_as_resources[{course_id_str}]"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await upsert_pages_as_resources(client, page_list, int(course_id_str))
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+
+    # Phase 2: files as resources (per-course)
+    for course_id_str, file_list in files.items():
+        step_name = f"upsert_files_as_resources[{course_id_str}]"
+        logger.info("store_all: starting %s", step_name)
+        try:
+            await upsert_files_as_resources(client, file_list, int(course_id_str))
+        except StorageError:
+            raise
+        except Exception as exc:
+            msg = f"store_all failed at step '{step_name}': {exc}"
+            raise StorageError(msg) from exc
+
+    # Phase 2: calendar events as assessments (global, filtered)
+    assessment_events = [e for e in calendar_events if is_assessment_event(e.title)]
+    step_name = "upsert_calendar_events_as_assessments"
+    logger.info("store_all: starting %s", step_name)
+    try:
+        await upsert_calendar_events_as_assessments(client, assessment_events)
+    except StorageError:
+        raise
+    except Exception as exc:
+        msg = f"store_all failed at step '{step_name}': {exc}"
+        raise StorageError(msg) from exc

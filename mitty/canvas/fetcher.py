@@ -297,14 +297,16 @@ async def fetch_all(
     client: CanvasClient,
     settings: Settings,
 ) -> dict:
-    """Fetch courses, enrollments, and all per-course assignments concurrently.
+    """Fetch courses, enrollments, and all per-course data concurrently.
 
     Courses and enrollments are fetched in parallel first.  Then each
-    course's assignments are fetched concurrently, bounded by
-    ``settings.max_concurrent`` to avoid overwhelming the Canvas API.
+    course's assignments, quizzes, modules (with items), pages, and files
+    are fetched concurrently, bounded by ``settings.max_concurrent`` to
+    avoid overwhelming the Canvas API.  Calendar events are fetched once
+    globally across all courses.
 
-    If fetching assignments for a particular course fails, the error is
-    logged and appended to the ``errors`` list in the result dict.  Other
+    If fetching data for a particular course fails, the error is logged
+    and appended to the ``errors`` list in the result dict.  Other
     courses are unaffected.
 
     Args:
@@ -313,8 +315,12 @@ async def fetch_all(
 
     Returns:
         A dict with keys ``courses``, ``assignments``, ``enrollments``,
-        and ``errors``.  The ``assignments`` value is a dict mapping
-        ``str(course_id)`` to a list of ``Assignment`` models.
+        ``quizzes``, ``modules``, ``pages``, ``files``,
+        ``calendar_events``, and ``errors``.
+
+        Per-course data (assignments, quizzes, modules, pages, files) is
+        keyed by ``str(course_id)``.  The ``modules`` value contains
+        dicts with ``"modules"`` and ``"module_items"`` sub-keys.
     """
     courses, enrollments = await asyncio.gather(
         fetch_courses(client),
@@ -323,31 +329,78 @@ async def fetch_all(
 
     errors: list[str] = []
     assignments: dict[str, list[Assignment]] = {}
+    quizzes: dict[str, list[Quiz]] = {}
+    modules: dict[str, dict] = {}
+    pages: dict[str, list[Page]] = {}
+    files: dict[str, list[FileMetadata]] = {}
     semaphore = asyncio.Semaphore(settings.max_concurrent)
 
-    async def _fetch_course_assignments(course: Course) -> tuple[int, list[Assignment]]:
+    async def _fetch_course_data(course: Course) -> dict:
+        """Fetch all data types for a single course under the semaphore."""
         async with semaphore:
-            result = await fetch_assignments(client, course.id)
-            return course.id, result
+            course_assignments = await fetch_assignments(client, course.id)
+            course_quizzes = await fetch_quizzes(client, course.id)
+            course_modules = await fetch_modules(client, course.id)
 
-    tasks = [_fetch_course_assignments(c) for c in courses]
+            # Fetch items for each module
+            all_module_items: dict[int, list[ModuleItem]] = {}
+            for mod in course_modules:
+                items = await fetch_module_items(client, course.id, mod.id)
+                all_module_items[mod.id] = items
+
+            course_pages = await fetch_pages(client, course.id)
+            course_files = await fetch_files(client, course.id)
+
+            return {
+                "course_id": course.id,
+                "assignments": course_assignments,
+                "quizzes": course_quizzes,
+                "modules": course_modules,
+                "module_items": all_module_items,
+                "pages": course_pages,
+                "files": course_files,
+            }
+
+    tasks = [_fetch_course_data(c) for c in courses]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for course, result in zip(courses, results, strict=True):
         if isinstance(result, BaseException):
             error_msg = (
-                f"Failed to fetch assignments for course "
-                f"{course.id} ({course.name}): {result}"
+                f"Failed to fetch data for course {course.id} ({course.name}): {result}"
             )
             logger.warning(error_msg)
             errors.append(error_msg)
         else:
-            course_id, assignment_list = result
-            assignments[str(course_id)] = assignment_list
+            cid = str(result["course_id"])
+            assignments[cid] = result["assignments"]
+            quizzes[cid] = result["quizzes"]
+            modules[cid] = {
+                "modules": result["modules"],
+                "module_items": result["module_items"],
+            }
+            pages[cid] = result["pages"]
+            files[cid] = result["files"]
+
+    # Calendar events: fetch once globally for all courses
+    course_ids = [c.id for c in courses]
+    calendar_events: list[CalendarEvent] = []
+    if course_ids:
+        try:
+            calendar_events = await fetch_calendar_events(client, course_ids)
+        except Exception as exc:
+            error_msg = f"Failed to fetch calendar events: {exc}"
+            logger.warning(error_msg)
+            errors.append(error_msg)
 
     return {
         "courses": courses,
         "assignments": assignments,
         "enrollments": enrollments,
+        "quizzes": quizzes,
+        "modules": modules,
+        "pages": pages,
+        "files": files,
+        "calendar_events": calendar_events,
         "errors": errors,
     }
