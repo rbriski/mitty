@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from mitty.models import Assignment, Course, Enrollment
+from mitty.models import Assignment, Course, Enrollment, Module, ModuleItem
 
 if TYPE_CHECKING:
     from mitty.canvas.client import CanvasClient
@@ -85,6 +85,54 @@ async def fetch_enrollments(client: CanvasClient) -> list[Enrollment]:
         {"include[]": "current_points", "per_page": "100"},
     )
     return [Enrollment.model_validate(item) for item in raw]
+
+
+async def fetch_modules(
+    client: CanvasClient,
+    course_id: int,
+) -> list[Module]:
+    """Fetch all modules for a given course.
+
+    Calls ``GET /api/v1/courses/:id/modules?include[]=items&per_page=100``
+    and parses each item into a :class:`~mitty.models.Module`.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``Module`` model instances.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/modules",
+        {"include[]": "items", "per_page": "100"},
+    )
+    return [Module.model_validate(item) for item in raw]
+
+
+async def fetch_module_items(
+    client: CanvasClient,
+    course_id: int,
+    module_id: int,
+) -> list[ModuleItem]:
+    """Fetch all items within a specific module.
+
+    Calls ``GET /api/v1/courses/:course_id/modules/:module_id/items?per_page=100``
+    and parses each item into a :class:`~mitty.models.ModuleItem`.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+        module_id: The Canvas module ID.
+
+    Returns:
+        A list of validated ``ModuleItem`` model instances.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/modules/{module_id}/items",
+        {"per_page": "100"},
+    )
+    return [ModuleItem.model_validate(item) for item in raw]
 
 
 async def fetch_all(

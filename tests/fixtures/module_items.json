@@ -1,0 +1,57 @@
+[
+  {
+    "id": 5001,
+    "module_id": 3001,
+    "title": "Welcome to Rhetoric",
+    "type": "Page",
+    "content_id": 8001,
+    "position": 1,
+    "page_url": "welcome-to-rhetoric",
+    "external_url": null,
+    "html_url": "https://mitty.instructure.com/courses/12345/pages/welcome-to-rhetoric"
+  },
+  {
+    "id": 5002,
+    "module_id": 3001,
+    "title": "Rhetorical Analysis Rubric.pdf",
+    "type": "File",
+    "content_id": 8002,
+    "position": 2,
+    "page_url": null,
+    "external_url": null,
+    "html_url": "https://mitty.instructure.com/courses/12345/files/8002"
+  },
+  {
+    "id": 5003,
+    "module_id": 3001,
+    "title": "Purdue OWL: Rhetorical Situation",
+    "type": "ExternalUrl",
+    "content_id": null,
+    "position": 3,
+    "page_url": null,
+    "external_url": "https://owl.purdue.edu/owl/general_writing/academic_writing/rhetorical_situation.html",
+    "html_url": "https://mitty.instructure.com/courses/12345/modules/items/5003"
+  },
+  {
+    "id": 5004,
+    "module_id": 3001,
+    "title": "Essay: Rhetorical Analysis",
+    "type": "Assignment",
+    "content_id": 67890,
+    "position": 4,
+    "page_url": null,
+    "external_url": null,
+    "html_url": "https://mitty.instructure.com/courses/12345/assignments/67890"
+  },
+  {
+    "id": 5005,
+    "module_id": 3001,
+    "title": "Unit 1 Header",
+    "type": "SubHeader",
+    "content_id": null,
+    "position": 5,
+    "page_url": null,
+    "external_url": null,
+    "html_url": null
+  }
+]

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mitty.models import Assignment, Course, Enrollment, Submission, Term
+from mitty.models import Assignment, Course, Enrollment, ModuleItem, Submission, Term
 from mitty.storage import (
     StorageError,
     _get_latest_snapshots,
@@ -17,6 +17,7 @@ from mitty.storage import (
     upsert_assignments,
     upsert_courses,
     upsert_enrollments,
+    upsert_module_items_as_resources,
     upsert_submissions,
 )
 
@@ -1153,3 +1154,196 @@ class TestStoreAll:
 
             # Should proceed normally, courses called with data
             mock_courses.assert_awaited_once_with(client, courses)
+
+
+# ------------------------------------------------------------------ #
+#  upsert_module_items_as_resources
+# ------------------------------------------------------------------ #
+
+
+def _make_module_item(
+    item_id: int,
+    module_id: int,
+    title: str,
+    item_type: str,
+    position: int = 1,
+    *,
+    page_url: str | None = None,
+    external_url: str | None = None,
+) -> ModuleItem:
+    """Create a ModuleItem instance for testing."""
+    return ModuleItem(
+        id=item_id,
+        module_id=module_id,
+        title=title,
+        type=item_type,
+        position=position,
+        page_url=page_url,
+        external_url=external_url,
+    )
+
+
+class TestUpsertModuleItemsAsResources:
+    """upsert_module_items_as_resources maps ModuleItems to resource rows."""
+
+    async def test_upsert_module_items_maps_types(self) -> None:
+        """Page, File, ExternalUrl, Assignment are mapped to correct types."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Intro Page", "Page", page_url="intro-page"),
+            _make_module_item(2, 100, "Rubric.pdf", "File"),
+            _make_module_item(
+                3,
+                100,
+                "External Link",
+                "ExternalUrl",
+                external_url="https://example.com",
+            ),
+            _make_module_item(4, 100, "HW 1", "Assignment"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 4
+        type_map = {r["canvas_item_id"]: r["resource_type"] for r in rows}
+        assert type_map[1] == "canvas_page"
+        assert type_map[2] == "file"
+        assert type_map[3] == "link"
+        assert type_map[4] == "link"
+
+    async def test_upsert_module_items_denormalizes_module_name(self) -> None:
+        """Each row carries the module_name from the parent module."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Intro", "Page", page_url="intro"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1: Rhetoric"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        row = rows[0]
+        assert row["module_name"] == "Unit 1: Rhetoric"
+        assert row["canvas_module_id"] == 100
+        assert row["course_id"] == 12345
+        assert row["title"] == "Intro"
+
+    async def test_upsert_module_items_idempotent(self) -> None:
+        """Upsert uses on_conflict='canvas_item_id' for idempotency."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Page", "Page", page_url="p"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_item_id"
+
+    async def test_skips_unknown_item_types(self) -> None:
+        """SubHeader and other unknown types are silently skipped."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Header", "SubHeader"),
+            _make_module_item(2, 100, "Page", "Page", page_url="p"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        assert rows[0]["canvas_item_id"] == 2
+
+    async def test_empty_items_skips_upsert(self) -> None:
+        """Empty items list does not call upsert."""
+        client = _mock_client()
+
+        await upsert_module_items_as_resources(
+            client, [], course_id=12345, module_name="Unit 1"
+        )
+
+        client.table.assert_not_called()
+
+    async def test_all_unknown_types_skips_upsert(self) -> None:
+        """If all items are SubHeaders, no upsert happens."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Header", "SubHeader"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        client.table.assert_not_called()
+
+    async def test_module_position_set_from_item(self) -> None:
+        """module_position is taken from the item's position field."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Page", "Page", position=7, page_url="p"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["module_position"] == 7
+        assert rows[0]["sort_order"] == 7
+
+    async def test_source_url_prefers_external_url(self) -> None:
+        """ExternalUrl items use external_url as source_url."""
+        client = _mock_client()
+        items = [
+            _make_module_item(
+                1,
+                100,
+                "Link",
+                "ExternalUrl",
+                external_url="https://example.com",
+            ),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["source_url"] == "https://example.com"
+
+    async def test_source_url_falls_back_to_page_url(self) -> None:
+        """Page items use page_url as source_url."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Page", "Page", page_url="my-page"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["source_url"] == "my-page"
+
+    async def test_api_failure_raises_storage_error(self) -> None:
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db error")
+        )
+        items = [
+            _make_module_item(1, 100, "Page", "Page", page_url="p"),
+        ]
+
+        with pytest.raises(StorageError, match="db error"):
+            await upsert_module_items_as_resources(
+                client, items, course_id=12345, module_name="Unit 1"
+            )
