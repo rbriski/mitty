@@ -53,8 +53,7 @@ async def generate_study_plan(
     try:
         result = await generate_plan(client, user_id, plan_date)
     except PlanGenerationError as exc:
-        msg = str(exc)
-        if "No student signal found" in msg:
+        if exc.code == "NO_SIGNAL":
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -63,7 +62,7 @@ async def generate_study_plan(
                     "Complete a check-in first.",
                 },
             ) from None
-        if "already exists" in msg:
+        if exc.code == "PLAN_EXISTS":
             raise HTTPException(
                 status_code=409,
                 detail={

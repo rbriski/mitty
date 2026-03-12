@@ -45,6 +45,10 @@ _SIGNAL_MAX_AGE = timedelta(hours=24)
 class PlanGenerationError(Exception):
     """Raised when plan generation cannot proceed."""
 
+    def __init__(self, message: str, *, code: str = "GENERATION_FAILED") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 # ---------------------------------------------------------------------------
 # Result model
@@ -100,7 +104,7 @@ async def _read_latest_signal(
             f"No student signal found for user {user_id} within 24h of "
             f"{plan_date}. Ask the student to complete a check-in first."
         )
-        raise PlanGenerationError(msg)
+        raise PlanGenerationError(msg, code="NO_SIGNAL")
 
     return response.data[0]
 
@@ -208,7 +212,7 @@ async def _check_existing_plan(
                 f"A plan with status '{status}' already exists for "
                 f"{plan_date} (plan_id={plan_id}). Cannot replace."
             )
-            raise PlanGenerationError(msg)
+            raise PlanGenerationError(msg, code="PLAN_EXISTS")
 
         if status == "draft":
             logger.info("Replacing existing draft plan %d for %s", plan_id, plan_date)
@@ -284,12 +288,19 @@ def _build_opportunities(
         due_at_raw = asn.get("due_at")
         due_at: datetime | None = None
         if due_at_raw:
-            if isinstance(due_at_raw, str):
-                due_at = datetime.fromisoformat(due_at_raw)
-            else:
-                due_at = due_at_raw
+            try:
+                if isinstance(due_at_raw, str):
+                    due_at = datetime.fromisoformat(due_at_raw)
+                else:
+                    due_at = due_at_raw
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed due_at for assignment %s: %r",
+                    asn.get("name"), due_at_raw,
+                )
+                due_at = None
             # Ensure timezone-aware for scoring arithmetic
-            if due_at.tzinfo is None:
+            if due_at is not None and due_at.tzinfo is None:
                 due_at = due_at.replace(tzinfo=UTC)
 
         # Skip stale overdue items — more than 7 days past due is not actionable.
@@ -327,11 +338,18 @@ def _build_opportunities(
         scheduled_raw = assess.get("scheduled_date")
         scheduled_at: datetime | None = None
         if scheduled_raw:
-            if isinstance(scheduled_raw, str):
-                scheduled_at = datetime.fromisoformat(scheduled_raw)
-            else:
-                scheduled_at = scheduled_raw
-            if scheduled_at.tzinfo is None:
+            try:
+                if isinstance(scheduled_raw, str):
+                    scheduled_at = datetime.fromisoformat(scheduled_raw)
+                else:
+                    scheduled_at = scheduled_raw
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed scheduled_date for assessment %s: %r",
+                    assess.get("name"), scheduled_raw,
+                )
+                scheduled_at = None
+            if scheduled_at is not None and scheduled_at.tzinfo is None:
                 scheduled_at = scheduled_at.replace(tzinfo=UTC)
 
         # Skip past assessments — can't study for a test that already happened.
@@ -383,6 +401,8 @@ async def _write_plan(
         "updated_at": now_iso,
     }
     response = await client.table("study_plans").insert(row).execute()
+    if not response.data:
+        raise PlanGenerationError("Failed to insert study plan — no data returned.")
     return response.data[0]["id"]
 
 
@@ -536,12 +556,20 @@ async def generate_plan(
     blocks = allocate_blocks(scored, available_minutes, signal.energy_level)
     total_minutes = sum(b.duration_minutes for b in blocks)
 
-    # 9. Write plan + blocks.
+    # 9. Write plan + blocks (clean up plan on block write failure).
     plan_id = await _write_plan(client, user_id, plan_date, total_minutes)
 
     # Build course_name -> course_id reverse lookup for block writes.
     course_id_lookup: dict[str, int] = {v: k for k, v in course_names.items()}
-    await _write_blocks(client, plan_id, blocks, course_id_lookup)
+    try:
+        await _write_blocks(client, plan_id, blocks, course_id_lookup)
+    except Exception as exc:
+        logger.error(
+            "Failed to write blocks for plan %d, cleaning up: %s",
+            plan_id, exc,
+        )
+        await client.table("study_plans").delete().eq("id", plan_id).execute()
+        raise PlanGenerationError(f"Failed to write study blocks: {exc}") from exc
 
     elapsed = time.monotonic() - t_start
     logger.info(

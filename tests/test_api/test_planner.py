@@ -144,7 +144,8 @@ class TestGenerateEndpoint:
     ) -> None:
         """Returns 400 NO_SIGNAL_TODAY when no recent signal exists."""
         mock_generate.side_effect = PlanGenerationError(
-            "No student signal found for user abc within 24h of 2026-03-11."
+            "No student signal found for user abc within 24h of 2026-03-11.",
+            code="NO_SIGNAL",
         )
         mock_supabase_client.postgrest = MagicMock()
         mock_supabase_client.postgrest.auth = MagicMock()
@@ -163,7 +164,8 @@ class TestGenerateEndpoint:
     ) -> None:
         """Returns 409 PLAN_EXISTS when active/completed plan exists."""
         mock_generate.side_effect = PlanGenerationError(
-            "A plan with status 'active' already exists for 2026-03-11 (plan_id=5)."
+            "A plan with status 'active' already exists for 2026-03-11 (plan_id=5).",
+            code="PLAN_EXISTS",
         )
         mock_supabase_client.postgrest = MagicMock()
         mock_supabase_client.postgrest.auth = MagicMock()
