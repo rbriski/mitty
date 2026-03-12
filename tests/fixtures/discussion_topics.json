@@ -1,0 +1,38 @@
+[
+  {
+    "id": 11001,
+    "title": "Welcome & Introductions",
+    "message": "<h2>Welcome to the Course!</h2><p>Please introduce yourself and share your <strong>favorite book</strong> from last year.</p>",
+    "posted_at": "2026-01-15T09:00:00Z",
+    "author": {
+      "id": 42,
+      "display_name": "Mrs. Johnson"
+    },
+    "is_announcement": true,
+    "discussion_type": "side_comment",
+    "html_url": "https://mitty.instructure.com/courses/12345/discussion_topics/11001"
+  },
+  {
+    "id": 11002,
+    "title": "Week 3 Discussion: Rhetorical Strategies",
+    "message": "<p>Read Chapter 3 and discuss the rhetorical strategies used by the author.</p><script>alert('xss')</script><style>body { color: red; }</style>",
+    "posted_at": "2026-02-05T10:30:00Z",
+    "author": {
+      "id": 42,
+      "display_name": "Mrs. Johnson"
+    },
+    "is_announcement": false,
+    "discussion_type": "threaded",
+    "html_url": "https://mitty.instructure.com/courses/12345/discussion_topics/11002"
+  },
+  {
+    "id": 11003,
+    "title": "Study Group Sign-Up",
+    "message": null,
+    "posted_at": "2026-02-10T08:00:00Z",
+    "author": null,
+    "is_announcement": false,
+    "discussion_type": "side_comment",
+    "html_url": ""
+  }
+]
