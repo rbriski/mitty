@@ -194,6 +194,7 @@ assessments = sa.Table(
         nullable=True,
     ),
     sa.Column("canvas_quiz_id", sa.Integer, nullable=True, unique=True),
+    sa.Column("canvas_event_id", sa.Integer, nullable=True, unique=True),
     sa.Column(
         "auto_created",
         sa.Boolean,
@@ -206,6 +207,7 @@ assessments = sa.Table(
 )
 
 sa.Index("ix_assessments_canvas_quiz_id", assessments.c.canvas_quiz_id)
+sa.Index("ix_assessments_canvas_event_id", assessments.c.canvas_event_id)
 sa.Index(
     "ix_assessments_course_scheduled",
     assessments.c.course_id,

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 from mitty.canvas.fetcher import (
     fetch_all,
     fetch_assignments,
+    fetch_calendar_events,
     fetch_courses,
     fetch_enrollments,
     fetch_files,
@@ -20,6 +21,7 @@ from mitty.canvas.fetcher import (
 )
 from mitty.models import (
     Assignment,
+    CalendarEvent,
     Course,
     Enrollment,
     FileMetadata,
@@ -614,3 +616,74 @@ class TestStripHtml:
         text = strip_html(html)
         assert "Line one" in text
         assert "Line two" in text
+
+
+class TestFetchCalendarEvents:
+    """fetch_calendar_events calls get_paginated with context codes."""
+
+    async def test_fetch_calendar_events_parses_fixture(self) -> None:
+        raw = _load_fixture("calendar_events.json")
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_calendar_events(client, [12345])
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/calendar_events",
+            {"per_page": "100", "context_codes[]": "course_12345"},
+        )
+        assert len(result) == 4
+        assert all(isinstance(e, CalendarEvent) for e in result)
+
+        # First event: quiz with dates
+        assert result[0].id == 7001
+        assert result[0].title == "Chapter 5 Quiz"
+        assert result[0].context_code == "course_12345"
+        assert result[0].start_at is not None
+
+        # Second event: user-context (non-course)
+        assert result[1].id == 7002
+        assert result[1].context_code == "user_42"
+
+        # Fourth event: null dates
+        assert result[3].id == 7004
+        assert result[3].start_at is None
+
+    async def test_multiple_courses_fetch_separately(self) -> None:
+        """Each course ID triggers a separate API call."""
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=[])
+
+        result = await fetch_calendar_events(client, [100, 200])
+
+        assert client.get_paginated.call_count == 2
+        assert result == []
+
+    async def test_empty_course_ids_returns_empty(self) -> None:
+        client = AsyncMock()
+
+        result = await fetch_calendar_events(client, [])
+
+        assert result == []
+        client.get_paginated.assert_not_called()
+
+    async def test_date_range_params_passed(self) -> None:
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=[])
+
+        await fetch_calendar_events(
+            client,
+            [12345],
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+        )
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/calendar_events",
+            {
+                "per_page": "100",
+                "start_date": "2026-01-01",
+                "end_date": "2026-06-30",
+                "context_codes[]": "course_12345",
+            },
+        )

@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 
 from mitty.models import (
     Assignment,
+    CalendarEvent,
     Course,
     Enrollment,
     FileMetadata,
@@ -240,6 +241,56 @@ async def fetch_pages(
             page = page.model_copy(update={"body": strip_html(page.body)})
         pages.append(page)
     return pages
+
+
+async def fetch_calendar_events(
+    client: CanvasClient,
+    course_ids: list[int],
+    *,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[CalendarEvent]:
+    """Fetch calendar events for the given courses.
+
+    Calls ``GET /api/v1/calendar_events`` with ``context_codes[]`` set to
+    ``course_<id>`` for each course ID and optional date range filtering.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_ids: List of Canvas course IDs to fetch events for.
+        start_date: Optional ISO-8601 start date filter.
+        end_date: Optional ISO-8601 end date filter.
+
+    Returns:
+        A list of validated ``CalendarEvent`` model instances.
+    """
+    if not course_ids:
+        return []
+
+    params: dict[str, str] = {
+        "per_page": "100",
+    }
+    if start_date:
+        params["start_date"] = start_date
+    if end_date:
+        params["end_date"] = end_date
+
+    # Canvas expects multiple context_codes[] params; we pass a list and
+    # let get_paginated handle list-valued params (or send them one by one).
+    context_codes = [f"course_{cid}" for cid in course_ids]
+
+    all_events: list[CalendarEvent] = []
+    for code in context_codes:
+        raw = await client.get_paginated(
+            "/api/v1/calendar_events",
+            {**params, "context_codes[]": code},
+        )
+        all_events.extend(CalendarEvent.model_validate(item) for item in raw)
+
+    logger.info(
+        "Fetched %d calendar events for %d courses", len(all_events), len(course_ids)
+    )
+    return all_events
 
 
 async def fetch_all(
