@@ -30,6 +30,7 @@ from mitty.storage import (
     insert_resource_chunks,
     store_all,
     upsert_assignments,
+    upsert_assignments_as_assessments,
     upsert_calendar_events_as_assessments,
     upsert_courses,
     upsert_enrollments,
@@ -1082,6 +1083,9 @@ _STORE_ALL_PATCHES: dict[str, str] = {
     ),
     "chunk_and_store_resources": "mitty.storage.chunk_and_store_resources",
     "is_assessment_event": "mitty.canvas.classify.is_assessment_event",
+    "upsert_assignments_as_assessments": (
+        "mitty.storage.upsert_assignments_as_assessments"
+    ),
 }
 
 
@@ -1163,6 +1167,10 @@ class TestStoreAll:
                 _STORE_ALL_PATCHES["is_assessment_event"],
                 return_value=False,
             ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             await store_all(
                 client,
@@ -1228,6 +1236,10 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             await store_all(client, {"quizzes": quizzes})
 
@@ -1278,6 +1290,10 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             await store_all(client, {"modules": modules_data})
 
@@ -1320,6 +1336,10 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             await store_all(
                 client,
@@ -1373,6 +1393,10 @@ class TestStoreAll:
             patch(
                 _STORE_ALL_PATCHES["is_assessment_event"],
                 side_effect=lambda t: "exam" in t.lower(),
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
             ),
         ):
             await store_all(
@@ -1434,6 +1458,10 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             with pytest.raises(StorageError, match="upsert assignments"):
                 await store_all(
@@ -1501,6 +1529,10 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             # Completely empty dict
             await store_all(client, {})
@@ -1564,6 +1596,10 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             courses = [Course(id=1, name="Test", course_code="T")]
             await store_all(
@@ -2368,6 +2404,10 @@ class TestStoreAllChunking:
                 new_callable=AsyncMock,
             ) as mock_chunk,
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             await store_all(client, {"pages": pages})
 
@@ -2415,6 +2455,10 @@ class TestStoreAllChunking:
                 new_callable=AsyncMock,
             ) as mock_chunk,
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             await store_all(client, {"pages": pages})
 
@@ -2455,6 +2499,10 @@ class TestStoreAllChunking:
                 new_callable=AsyncMock,
             ) as mock_chunk,
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             await store_all(client, {})
 
@@ -2499,9 +2547,171 @@ class TestStoreAllChunking:
                 new_callable=AsyncMock,
             ) as mock_chunk,
             patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
         ):
             await store_all(client, {"pages": pages})
 
         mock_chunk.assert_awaited_once()
         canvas_ids = mock_chunk.call_args[0][1]
         assert sorted(canvas_ids) == [1_000_000_080, 1_000_000_090]
+
+
+# ------------------------------------------------------------------ #
+#  upsert_assignments_as_assessments
+# ------------------------------------------------------------------ #
+
+
+class TestUpsertAssignmentsAsAssessments:
+    """upsert_assignments_as_assessments classifies and upserts assignments."""
+
+    async def test_classified_assignments_become_assessments(self) -> None:
+        """Assignments matching the classifier are upserted as assessments."""
+        client = _mock_client()
+        assignments: dict[str, list[Assignment]] = {
+            "12345": [
+                Assignment(
+                    id=100,
+                    name="Chapter 5 Test",
+                    course_id=12345,
+                    due_at=datetime(2026, 4, 15, 23, 59, 59, tzinfo=UTC),
+                    points_possible=50.0,
+                    html_url="https://mitty.instructure.com/courses/12345/assignments/100",
+                ),
+                Assignment(
+                    id=101,
+                    name="Midterm Exam",
+                    course_id=12345,
+                    due_at=datetime(2026, 5, 1, 15, 0, 0, tzinfo=UTC),
+                    points_possible=100.0,
+                    html_url="https://mitty.instructure.com/courses/12345/assignments/101",
+                ),
+            ],
+        }
+
+        await upsert_assignments_as_assessments(client, assignments)
+
+        client.table.assert_called_once_with("assessments")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+
+        test_row = next(r for r in rows if r["canvas_assignment_id"] == 100)
+        assert test_row["course_id"] == 12345
+        assert test_row["name"] == "Chapter 5 Test"
+        assert test_row["assessment_type"] == "test"
+        assert test_row["source"] == "canvas_assignment"
+        assert test_row["scheduled_date"] == "2026-04-15T23:59:59+00:00"
+        assert test_row["weight"] == 50.0
+        assert test_row["auto_created"] is True
+        assert "created_at" in test_row
+        assert "updated_at" in test_row
+
+        exam_row = next(r for r in rows if r["canvas_assignment_id"] == 101)
+        assert exam_row["assessment_type"] == "test"
+        assert exam_row["name"] == "Midterm Exam"
+
+    async def test_non_assessment_assignments_skipped(self) -> None:
+        """Assignments not matching the classifier are not upserted."""
+        client = _mock_client()
+        assignments: dict[str, list[Assignment]] = {
+            "12345": [
+                Assignment(
+                    id=200,
+                    name="Homework 3",
+                    course_id=12345,
+                ),
+                Assignment(
+                    id=201,
+                    name="Reading Response",
+                    course_id=12345,
+                ),
+            ],
+        }
+
+        await upsert_assignments_as_assessments(client, assignments)
+
+        # No assessments to upsert — table should not be called.
+        client.table.assert_not_called()
+
+    async def test_exclusion_patterns_filter_review_assignments(self) -> None:
+        """Assignments with exclusion keywords (review, prep) are skipped."""
+        client = _mock_client()
+        assignments: dict[str, list[Assignment]] = {
+            "12345": [
+                Assignment(id=300, name="Quiz Review", course_id=12345),
+                Assignment(id=301, name="Test Prep", course_id=12345),
+                Assignment(id=302, name="Exam Corrections", course_id=12345),
+            ],
+        }
+
+        await upsert_assignments_as_assessments(client, assignments)
+
+        client.table.assert_not_called()
+
+    async def test_idempotent_on_canvas_assignment_id(self) -> None:
+        """Upsert uses on_conflict='canvas_assignment_id' for idempotent re-sync."""
+        client = _mock_client()
+        assignments: dict[str, list[Assignment]] = {
+            "12345": [
+                Assignment(id=400, name="Unit Test", course_id=12345),
+            ],
+        }
+
+        await upsert_assignments_as_assessments(client, assignments)
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_assignment_id"
+
+    async def test_empty_assignments_dict(self) -> None:
+        """Empty assignments dict short-circuits without API calls."""
+        client = _mock_client()
+
+        await upsert_assignments_as_assessments(client, {})
+
+        client.table.assert_not_called()
+
+    async def test_due_at_none_sets_scheduled_date_none(self) -> None:
+        """Assignment with no due_at sets scheduled_date to None."""
+        client = _mock_client()
+        assignments: dict[str, list[Assignment]] = {
+            "12345": [
+                Assignment(id=500, name="Final Exam", course_id=12345, due_at=None),
+            ],
+        }
+
+        await upsert_assignments_as_assessments(client, assignments)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["scheduled_date"] is None
+
+    async def test_multiple_courses(self) -> None:
+        """Assignments from multiple courses are all classified and upserted."""
+        client = _mock_client()
+        assignments: dict[str, list[Assignment]] = {
+            "1": [Assignment(id=600, name="Quiz 1", course_id=1)],
+            "2": [Assignment(id=601, name="Midterm", course_id=2)],
+        }
+
+        await upsert_assignments_as_assessments(client, assignments)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        course_ids = {r["course_id"] for r in rows}
+        assert course_ids == {1, 2}
+
+    async def test_api_failure_raises_storage_error(self) -> None:
+        """Supabase failure is wrapped in StorageError."""
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db timeout")
+        )
+        assignments: dict[str, list[Assignment]] = {
+            "12345": [
+                Assignment(id=700, name="Chapter Exam", course_id=12345),
+            ],
+        }
+
+        with pytest.raises(StorageError, match="db timeout"):
+            await upsert_assignments_as_assessments(client, assignments)

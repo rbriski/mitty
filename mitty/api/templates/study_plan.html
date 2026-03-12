@@ -59,18 +59,24 @@
       </a>
 
       {# Page header #}
-      <div class="flex items-center justify-between mb-8">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-2">
         <div>
           <h1 class="text-2xl font-bold text-gray-900">Study Plan</h1>
           <p class="text-sm text-gray-500" x-text="todayFormatted"></p>
         </div>
-        <div x-show="plan" class="flex items-center gap-2">
+        <div x-show="plan" class="flex items-center gap-3">
           <span
             class="inline-block px-3 py-1 rounded-full text-xs font-semibold"
             :class="statusBadge(plan?.status)"
             x-text="plan?.status"
           ></span>
           <span class="text-sm text-gray-500" x-text="plan?.total_minutes + ' min'"></span>
+          <button
+            @click="showCheckin = true"
+            class="px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-gray-600 border border-gray-300 hover:bg-gray-50 transition-colors"
+          >
+            Regenerate
+          </button>
         </div>
       </div>
 
@@ -85,40 +91,302 @@
         <p class="text-sm text-red-700" x-text="fetchError"></p>
       </div>
 
-      {# ── No plan placeholder ── #}
-      <div x-show="!loading && !fetchError && !plan" class="text-center py-16">
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
-          <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-          </svg>
+      {# ════════════════════════════════════════════
+         Assessment Alerts
+         ════════════════════════════════════════════ #}
+      <div x-show="!loading && upcomingAssessments.length > 0" class="mb-6">
+        <div class="space-y-2">
+          <template x-for="a in upcomingAssessments" :key="a.id">
+            <div class="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <svg class="w-5 h-5 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+              </svg>
+              <div class="flex-1 min-w-0">
+                <span class="text-sm font-medium text-gray-900" x-text="a.name"></span>
+                <span class="text-sm text-amber-700 ml-1" x-text="'in ' + a.days_away + (a.days_away === 1 ? ' day' : ' days')"></span>
+                <span x-show="a.course_name" class="text-xs text-gray-500 ml-2" x-text="a.course_name"></span>
+              </div>
+              <span
+                class="flex-shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700"
+                x-text="a.assessment_type"
+              ></span>
+            </div>
+          </template>
         </div>
-        <h3 class="text-lg font-semibold text-gray-900 mb-1">No study plan for today</h3>
-        <p class="text-sm text-gray-500">Check back later or ask your tutor to create one.</p>
       </div>
 
-      {# ── Study blocks list ── #}
+      {# ════════════════════════════════════════════
+         Cold Start Banner (no assessments at all)
+         ════════════════════════════════════════════ #}
+      <div x-show="!loading && !fetchError && coldStart" class="mb-6">
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center">
+          <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-100 mb-3">
+            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+          <h3 class="text-base font-semibold text-blue-900 mb-1">Getting started</h3>
+          <p class="text-sm text-blue-700">
+            No assessments found yet. Once your courses have upcoming tests or quizzes,
+            study plans will be tailored to help you prepare.
+          </p>
+          <p class="text-sm text-blue-600 mt-2">
+            You can still do a check-in below to generate a general study plan.
+          </p>
+        </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Check-in Form (shown when no plan for today)
+         ════════════════════════════════════════════ #}
+      <div x-show="!loading && !fetchError && (!plan || showCheckin)" class="mb-8">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-1">Daily Check-in</h2>
+          <p class="text-sm text-gray-500 mb-5">Tell us how you're doing and we'll build your study plan.</p>
+
+          {# Check-in error #}
+          <div x-show="checkinError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p class="text-sm text-red-700" x-text="checkinError"></p>
+          </div>
+
+          <form @submit.prevent="submitCheckin()">
+
+            {# Available Time — quick picks #}
+            <div class="mb-5">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                How much time do you have?
+              </label>
+              <div class="flex flex-wrap gap-2">
+                <template x-for="mins in [30, 60, 90, 120, 150, 180]" :key="mins">
+                  <button
+                    type="button"
+                    @click="checkin.available_minutes = mins"
+                    class="px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
+                    :class="checkin.available_minutes === mins
+                      ? 'bg-mitty-600 text-white border-mitty-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:border-mitty-500'"
+                    x-text="mins + ' min'"
+                  ></button>
+                </template>
+              </div>
+            </div>
+
+            {# Energy Level (1–5) #}
+            <div class="mb-5">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                Energy level
+              </label>
+              <div class="flex gap-2">
+                <template x-for="level in [1, 2, 3, 4, 5]" :key="'energy-' + level">
+                  <button
+                    type="button"
+                    @click="checkin.energy_level = level"
+                    class="w-10 h-10 rounded-lg text-sm font-medium border transition-colors flex items-center justify-center"
+                    :class="checkin.energy_level === level
+                      ? 'bg-mitty-600 text-white border-mitty-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:border-mitty-500'"
+                    x-text="level"
+                  ></button>
+                </template>
+              </div>
+              <p class="text-xs text-gray-400 mt-1">1 = exhausted, 5 = fully energized</p>
+            </div>
+
+            {# Stress Level (1–5) #}
+            <div class="mb-5">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                Stress level
+              </label>
+              <div class="flex gap-2">
+                <template x-for="level in [1, 2, 3, 4, 5]" :key="'stress-' + level">
+                  <button
+                    type="button"
+                    @click="checkin.stress_level = level"
+                    class="w-10 h-10 rounded-lg text-sm font-medium border transition-colors flex items-center justify-center"
+                    :class="checkin.stress_level === level
+                      ? 'bg-mitty-600 text-white border-mitty-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:border-mitty-500'"
+                    x-text="level"
+                  ></button>
+                </template>
+              </div>
+              <p class="text-xs text-gray-400 mt-1">1 = very calm, 5 = very stressed</p>
+            </div>
+
+            {# Focus Course (optional) #}
+            <div class="mb-5" x-show="courses.length > 0">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                Focus course <span class="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <select
+                x-model="checkin.focus_course"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
+              >
+                <option value="">No preference</option>
+                <template x-for="c in courses" :key="c.id">
+                  <option :value="c.name" x-text="c.name"></option>
+                </template>
+              </select>
+            </div>
+
+            {# Blockers (optional) #}
+            <div class="mb-6">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                Any blockers? <span class="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <textarea
+                x-model="checkin.blockers"
+                rows="2"
+                maxlength="2000"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm resize-none"
+                placeholder="e.g., didn't sleep well, have practice at 5pm..."
+              ></textarea>
+            </div>
+
+            {# Submit #}
+            <button
+              type="submit"
+              :disabled="checkinSubmitting || !checkin.available_minutes || !checkin.energy_level || !checkin.stress_level"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+            >
+              <span x-show="!checkinSubmitting">Generate Study Plan</span>
+              <span x-show="checkinSubmitting" class="flex items-center justify-center gap-2">
+                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                Building your plan...
+              </span>
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Progress Bar
+         ════════════════════════════════════════════ #}
+      <div x-show="!loading && !fetchError && plan && blocks.length > 0" class="mb-6">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-medium text-gray-700">Progress</span>
+            <span class="text-sm text-gray-500">
+              <span x-text="completedBlocks"></span>/<span x-text="blocks.length"></span> blocks
+              &middot;
+              <span x-text="actualMinutes"></span>/<span x-text="plan?.total_minutes || 0"></span> min
+            </span>
+          </div>
+          <div class="w-full bg-gray-100 rounded-full h-3">
+            <div
+              class="h-3 rounded-full transition-all duration-500 bg-emerald-500"
+              :style="'width: ' + progressPercent + '%'"
+            ></div>
+          </div>
+          <p
+            x-show="completedBlocks === blocks.length && blocks.length > 0"
+            class="text-sm text-emerald-600 font-medium text-center mt-2"
+          >
+            All done! Great work today.
+          </p>
+        </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Study Blocks List
+         ════════════════════════════════════════════ #}
       <div x-show="!loading && !fetchError && plan && blocks.length > 0">
         <div class="space-y-3">
           <template x-for="block in blocks" :key="block.id">
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-              <div class="flex items-start justify-between">
-                <div class="flex-1 min-w-0 mr-3">
-                  <h3 class="font-semibold text-gray-900" x-text="block.title"></h3>
-                  <p x-show="block.description" class="text-sm text-gray-500 mt-1" x-text="block.description"></p>
-                  <div class="flex items-center gap-3 mt-2">
-                    <span class="text-xs text-gray-400" x-text="block.target_minutes + ' min'"></span>
-                    <span
-                      class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-                      :class="blockTypeBadge(block.block_type)"
-                      x-text="block.block_type.replace('_', ' ')"
-                    ></span>
+            <div
+              class="bg-white rounded-xl shadow-sm border p-5 transition-colors"
+              :class="block.status === 'completed' ? 'border-emerald-200 bg-emerald-50/30'
+                     : block.status === 'in_progress' ? 'border-mitty-200 bg-mitty-50/30'
+                     : block.status === 'skipped' ? 'border-gray-200 bg-gray-50 opacity-60'
+                     : 'border-gray-100'"
+            >
+              <div class="flex items-start justify-between gap-3">
+                {# Block type icon + info #}
+                <div class="flex items-start gap-3 flex-1 min-w-0">
+                  {# Type icon #}
+                  <div
+                    class="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-lg"
+                    :class="blockTypeIcon(block.block_type).bg"
+                  >
+                    <span x-text="blockTypeIcon(block.block_type).icon"></span>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <h3 class="font-semibold text-gray-900 text-sm sm:text-base" x-text="block.title"></h3>
+                    <p x-show="block.description" class="text-sm text-gray-500 mt-0.5 line-clamp-2" x-text="block.description"></p>
+                    <div class="flex flex-wrap items-center gap-2 mt-2">
+                      <span class="text-xs text-gray-400" x-text="block.target_minutes + ' min'"></span>
+                      <span
+                        class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                        :class="blockTypeBadge(block.block_type)"
+                        x-text="block.block_type.replace(/_/g, ' ')"
+                      ></span>
+                      <span x-show="block._course_name" class="text-xs text-gray-400" x-text="block._course_name"></span>
+                    </div>
+                    {# Timer display when in progress #}
+                    <div x-show="block.status === 'in_progress'" class="mt-2 flex items-center gap-2">
+                      <span class="inline-block w-2 h-2 rounded-full bg-mitty-500 animate-pulse"></span>
+                      <span class="text-xs text-mitty-600 font-medium" x-text="blockTimer(block)"></span>
+                    </div>
                   </div>
                 </div>
+
+                {# Status badge (mobile-friendly) #}
                 <span
                   class="flex-shrink-0 inline-block px-2.5 py-1 rounded-full text-xs font-semibold"
                   :class="statusBadge(block.status)"
-                  x-text="block.status"
+                  x-text="block.status.replace(/_/g, ' ')"
                 ></span>
+              </div>
+
+              {# Action buttons #}
+              <div class="flex flex-wrap gap-2 mt-4 pt-3 border-t border-gray-100">
+                {# Start button — only for pending blocks #}
+                <button
+                  x-show="block.status === 'pending'"
+                  @click="startBlock(block)"
+                  :disabled="blockActionLoading === block.id"
+                  class="px-4 py-1.5 text-sm font-medium rounded-lg bg-mitty-600 text-white hover:bg-mitty-700 disabled:bg-gray-300 transition-colors"
+                >
+                  Start
+                </button>
+
+                {# Done button — for in_progress blocks #}
+                <button
+                  x-show="block.status === 'in_progress'"
+                  @click="completeBlock(block)"
+                  :disabled="blockActionLoading === block.id"
+                  class="px-4 py-1.5 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-gray-300 transition-colors"
+                >
+                  Done
+                </button>
+
+                {# Skip button — for pending or in_progress blocks #}
+                <button
+                  x-show="block.status === 'pending' || block.status === 'in_progress'"
+                  @click="skipBlock(block)"
+                  :disabled="blockActionLoading === block.id"
+                  class="px-4 py-1.5 text-sm font-medium rounded-lg bg-white text-gray-600 border border-gray-300 hover:bg-gray-50 disabled:bg-gray-100 transition-colors"
+                >
+                  Skip
+                </button>
+
+                {# Completed / Skipped indicators #}
+                <span
+                  x-show="block.status === 'completed'"
+                  class="text-sm text-emerald-600 flex items-center gap-1"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                  Completed
+                  <span x-show="block.actual_minutes" class="text-gray-400 ml-1" x-text="'(' + block.actual_minutes + ' min)'"></span>
+                </span>
+                <span
+                  x-show="block.status === 'skipped'"
+                  class="text-sm text-gray-400"
+                >
+                  Skipped
+                </span>
               </div>
             </div>
           </template>
@@ -150,6 +418,28 @@
 
       plan: null,
       blocks: [],
+      courses: [],
+      upcomingAssessments: [],
+      coldStart: false,
+      showCheckin: false,
+
+      // Check-in form state
+      checkin: {
+        available_minutes: 120,
+        energy_level: 3,
+        stress_level: 2,
+        focus_course: '',
+        blockers: '',
+      },
+      checkinSubmitting: false,
+      checkinError: '',
+
+      // Block action loading (stores block id being acted on)
+      blockActionLoading: null,
+
+      // Timer tick (updated every second for in-progress blocks)
+      _timerInterval: null,
+      _now: Date.now(),
 
       get todayFormatted() {
         return new Date().toLocaleDateString('en-US', {
@@ -164,22 +454,47 @@
           + String(d.getDate()).padStart(2, '0');
       },
 
+      get completedBlocks() {
+        return this.blocks.filter(b => b.status === 'completed').length;
+      },
+
+      get actualMinutes() {
+        return this.blocks.reduce((sum, b) => sum + (b.actual_minutes || 0), 0);
+      },
+
+      get progressPercent() {
+        if (this.blocks.length === 0) return 0;
+        return Math.round((this.completedBlocks / this.blocks.length) * 100);
+      },
+
       async init() {
         const { data: { session } } = await supabase.auth.getSession();
         this.session = session;
 
         supabase.auth.onAuthStateChange((_event, session) => {
           this.session = session;
-          if (session) this.fetchPlan();
+          if (session) this.loadAll();
         });
 
-        if (this.session) this.fetchPlan();
+        if (this.session) this.loadAll();
+
+        // Tick the timer every second for in-progress block display
+        this._timerInterval = setInterval(() => { this._now = Date.now(); }, 1000);
       },
 
       async signOut() {
+        if (this._timerInterval) clearInterval(this._timerInterval);
         await supabase.auth.signOut();
         this.session = null;
         window.location.href = '/';
+      },
+
+      async loadAll() {
+        await Promise.all([
+          this.fetchPlan(),
+          this.fetchCourses(),
+          this.fetchAssessments(),
+        ]);
       },
 
       async fetchPlan() {
@@ -195,42 +510,315 @@
             return;
           }
 
-          const resp = await fetch(
-            '/study-plans/?date_from=' + this.todayISO + '&date_to=' + this.todayISO + '&limit=1',
-            { headers: { 'Authorization': 'Bearer ' + token } }
-          );
+          const resp = await fetch('/study-plans/today', {
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (resp.status === 404) {
+            // No plan for today — show check-in form
+            return;
+          }
 
           if (!resp.ok) {
             this.fetchError = 'Failed to load study plan (HTTP ' + resp.status + ')';
             return;
           }
 
-          const result = await resp.json();
-
-          if (!result.data || result.data.length === 0) {
-            // No plan for today
-            return;
-          }
-
-          this.plan = result.data[0];
-
-          // Fetch blocks for this plan
-          const blocksResp = await fetch(
-            '/study-blocks?plan_id=' + this.plan.id,
-            { headers: { 'Authorization': 'Bearer ' + token } }
-          );
-
-          if (blocksResp.ok) {
-            const blocksResult = await blocksResp.json();
-            this.blocks = blocksResult.data || [];
-          }
-
+          const data = await resp.json();
+          this.plan = data;
+          this.blocks = (data.blocks || []).map(b => ({
+            ...b,
+            _course_name: this.courseNameById(b.course_id),
+          }));
         } catch (err) {
           this.fetchError = 'Failed to load study plan: ' + err.message;
         } finally {
           this.loading = false;
         }
       },
+
+      async fetchCourses() {
+        try {
+          const { data, error } = await supabase
+            .from('courses')
+            .select('id, name')
+            .eq('workflow_state', 'available')
+            .order('name');
+          if (!error && data) {
+            this.courses = data;
+            // Refresh course names on blocks if they loaded before courses
+            this.blocks = this.blocks.map(b => ({
+              ...b,
+              _course_name: this.courseNameById(b.course_id),
+            }));
+          }
+        } catch (err) {
+          console.warn('Failed to fetch courses:', err.message);
+        }
+      },
+
+      async fetchAssessments() {
+        try {
+          const token = this.session?.access_token;
+          if (!token) return;
+
+          // Fetch assessments within the next 7 days
+          const now = new Date();
+          const weekLater = new Date(Date.now() + 7 * 86400000);
+          const nowISO = now.toISOString();
+          const weekISO = weekLater.toISOString();
+
+          const resp = await fetch(
+            '/assessments/?limit=50',
+            { headers: { 'Authorization': 'Bearer ' + token } }
+          );
+
+          if (!resp.ok) {
+            this.coldStart = true;
+            return;
+          }
+
+          const result = await resp.json();
+          const allAssessments = result.data || [];
+
+          if (allAssessments.length === 0) {
+            this.coldStart = true;
+            return;
+          }
+
+          this.coldStart = false;
+
+          // Filter to upcoming assessments (within 7 days)
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          // Filter to upcoming, then exclude already-scored assessments
+          const upcoming = allAssessments.filter(a => {
+            if (!a.scheduled_date) return false;
+            const d = new Date(a.scheduled_date);
+            return d >= today && d <= weekLater;
+          });
+
+          // Check submissions for linked assignments to filter out scored ones
+          const assignmentIds = upcoming
+            .map(a => a.canvas_assignment_id)
+            .filter(id => id != null);
+          let scoredIds = new Set();
+          if (assignmentIds.length > 0) {
+            const { data: subs } = await supabase
+              .from('submissions')
+              .select('assignment_id, score, workflow_state, submitted_at')
+              .in('assignment_id', assignmentIds);
+            scoredIds = new Set(
+              (subs || [])
+                .filter(s => s.score != null || s.workflow_state === 'graded')
+                .map(s => s.assignment_id)
+            );
+          }
+
+          this.upcomingAssessments = upcoming
+            .filter(a => !scoredIds.has(a.canvas_assignment_id))
+            .map(a => {
+              const d = new Date(a.scheduled_date);
+              const diffMs = d.getTime() - today.getTime();
+              const days = Math.ceil(diffMs / 86400000);
+              const course = this.courses.find(c => c.id === a.course_id);
+              return {
+                ...a,
+                days_away: days,
+                course_name: course?.name || '',
+              };
+            })
+            .sort((a, b) => a.days_away - b.days_away)
+            .slice(0, 5);
+        } catch (err) {
+          console.warn('Failed to fetch assessments:', err.message);
+        }
+      },
+
+      courseNameById(courseId) {
+        if (!courseId) return '';
+        const c = this.courses.find(c => c.id === courseId);
+        return c ? c.name : '';
+      },
+
+      // ── Check-in submission ──
+
+      async submitCheckin() {
+        this.checkinSubmitting = true;
+        this.checkinError = '';
+
+        try {
+          const token = this.session?.access_token;
+          const userId = this.session?.user?.id;
+          if (!token || !userId) {
+            this.checkinError = 'Not authenticated.';
+            return;
+          }
+
+          // Build preferences from optional fields
+          const preferences = {};
+          if (this.checkin.focus_course) {
+            preferences.focus_course = this.checkin.focus_course;
+          }
+
+          // 1) POST signal
+          const signalBody = {
+            user_id: userId,
+            available_minutes: this.checkin.available_minutes,
+            confidence_level: 3,
+            energy_level: this.checkin.energy_level,
+            stress_level: this.checkin.stress_level,
+            blockers: this.checkin.blockers || null,
+            preferences: Object.keys(preferences).length > 0 ? preferences : null,
+          };
+
+          const signalResp = await fetch('/student-signals/', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(signalBody),
+          });
+
+          if (!signalResp.ok) {
+            const errData = await signalResp.json().catch(() => null);
+            const msg = errData?.detail?.message || errData?.detail || 'Failed to save check-in';
+            this.checkinError = typeof msg === 'string' ? msg : JSON.stringify(msg);
+            return;
+          }
+
+          // 2) POST generate plan
+          const genResp = await fetch('/study-plans/generate', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          if (!genResp.ok) {
+            const errData = await genResp.json().catch(() => null);
+            const msg = errData?.detail?.message || errData?.detail || 'Failed to generate plan';
+            this.checkinError = typeof msg === 'string' ? msg : JSON.stringify(msg);
+            return;
+          }
+
+          // Success — reload the plan
+          this.showCheckin = false;
+          await this.fetchPlan();
+        } catch (err) {
+          this.checkinError = 'Check-in failed: ' + err.message;
+        } finally {
+          this.checkinSubmitting = false;
+        }
+      },
+
+      // ── Block actions ──
+
+      async startBlock(block) {
+        this.blockActionLoading = block.id;
+        try {
+          const token = this.session?.access_token;
+          const resp = await fetch('/study-blocks/' + block.id, {
+            method: 'PUT',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              status: 'in_progress',
+              started_at: new Date().toISOString(),
+            }),
+          });
+
+          if (resp.ok) {
+            const updated = await resp.json();
+            this.replaceBlock(updated);
+          }
+        } finally {
+          this.blockActionLoading = null;
+        }
+      },
+
+      async completeBlock(block) {
+        this.blockActionLoading = block.id;
+        try {
+          const token = this.session?.access_token;
+          const now = new Date();
+          let actualMinutes = block.target_minutes;
+          if (block.started_at) {
+            const started = new Date(block.started_at);
+            actualMinutes = Math.max(1, Math.round((now - started) / 60000));
+          }
+
+          const resp = await fetch('/study-blocks/' + block.id, {
+            method: 'PUT',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              status: 'completed',
+              completed_at: now.toISOString(),
+              actual_minutes: actualMinutes,
+            }),
+          });
+
+          if (resp.ok) {
+            const updated = await resp.json();
+            this.replaceBlock(updated);
+          }
+        } finally {
+          this.blockActionLoading = null;
+        }
+      },
+
+      async skipBlock(block) {
+        this.blockActionLoading = block.id;
+        try {
+          const token = this.session?.access_token;
+          const resp = await fetch('/study-blocks/' + block.id, {
+            method: 'PUT',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ status: 'skipped' }),
+          });
+
+          if (resp.ok) {
+            const updated = await resp.json();
+            this.replaceBlock(updated);
+          }
+        } finally {
+          this.blockActionLoading = null;
+        }
+      },
+
+      replaceBlock(updated) {
+        const idx = this.blocks.findIndex(b => b.id === updated.id);
+        if (idx !== -1) {
+          this.blocks[idx] = {
+            ...updated,
+            _course_name: this.courseNameById(updated.course_id),
+          };
+        }
+      },
+
+      // ── Timer display for in-progress blocks ──
+
+      blockTimer(block) {
+        if (!block.started_at) return '';
+        const started = new Date(block.started_at).getTime();
+        const elapsed = Math.max(0, Math.floor((this._now - started) / 1000));
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        return mins + ':' + String(secs).padStart(2, '0') + ' elapsed';
+      },
+
+      // ── Badge helpers ──
 
       statusBadge(status) {
         const map = {
@@ -254,6 +842,18 @@
           reflection: 'bg-amber-100 text-amber-700',
         };
         return map[blockType] || 'bg-gray-100 text-gray-600';
+      },
+
+      blockTypeIcon(blockType) {
+        const map = {
+          plan: { icon: '\uD83D\uDCCB', bg: 'bg-gray-100' },
+          urgent_deliverable: { icon: '\uD83D\uDD25', bg: 'bg-red-100' },
+          retrieval: { icon: '\uD83E\uDDE0', bg: 'bg-purple-100' },
+          worked_example: { icon: '\u270F\uFE0F', bg: 'bg-blue-100' },
+          deep_explanation: { icon: '\uD83D\uDD0D', bg: 'bg-indigo-100' },
+          reflection: { icon: '\uD83D\uDCAD', bg: 'bg-amber-100' },
+        };
+        return map[blockType] || { icon: '\uD83D\uDCDA', bg: 'bg-gray-100' };
       },
     };
   }

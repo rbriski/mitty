@@ -4,15 +4,8 @@ set -euo pipefail
 # Deploy Mitty to a remote server
 # Usage: ./deploy.sh [SERVER_HOST] [SERVER_USER]
 
-SERVER_HOST="${1:-${MITTY_SERVER_HOST:-}}"
-SERVER_USER="${2:-${MITTY_SERVER_USER:-deploy}}"
-
-if [[ -z "$SERVER_HOST" ]]; then
-    echo "Error: SERVER_HOST is required."
-    echo "Usage: ./deploy.sh <server_host> [server_user]"
-    echo "   or: MITTY_SERVER_HOST=x.x.x.x ./deploy.sh"
-    exit 1
-fi
+SERVER_HOST="${1:-91.107.204.88}"
+SERVER_USER="${2:-deploy}"
 
 REMOTE_DIR="~/mitty"
 

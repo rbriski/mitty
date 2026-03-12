@@ -408,6 +408,77 @@ async def upsert_calendar_events_as_assessments(
 
 
 # ------------------------------------------------------------------ #
+#  Assignments → Assessments (via classifier)
+# ------------------------------------------------------------------ #
+
+
+async def upsert_assignments_as_assessments(
+    client: AsyncClient,
+    assignments: dict[str, list[Assignment]],
+) -> None:
+    """Classify assignments and upsert matching ones as assessment rows.
+
+    Runs :func:`~mitty.planner.classify.is_assessment_assignment` on each
+    assignment name.  Assignments that match are upserted into the
+    ``assessments`` table with ``source='canvas_assignment'`` and
+    ``auto_created=True``.
+
+    Uses ``on_conflict="canvas_assignment_id"`` for idempotent re-sync.
+    Does **not** overwrite assessments created from quizzes or calendar
+    events — those use different conflict columns.
+
+    Args:
+        client: Async Supabase client.
+        assignments: Mapping of course_id (str) to assignment lists
+            (same shape as ``fetch_all()`` output).
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    from mitty.planner.classify import is_assessment_assignment
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for assignment_list in assignments.values():
+        for assignment in assignment_list:
+            assessment_type = is_assessment_assignment(assignment.name)
+            if assessment_type is None:
+                continue
+
+            row: dict = {
+                "course_id": assignment.course_id,
+                "name": assignment.name,
+                "assessment_type": assessment_type,
+                "scheduled_date": (
+                    assignment.due_at.isoformat() if assignment.due_at else None
+                ),
+                "weight": assignment.points_possible,
+                "canvas_assignment_id": assignment.id,
+                "auto_created": True,
+                "source": "canvas_assignment",
+                "created_at": now,
+                "updated_at": now,
+            }
+            rows.append(row)
+
+    if not rows:
+        logger.info("No assignments classified as assessments")
+        return
+
+    try:
+        await (
+            client.table("assessments")
+            .upsert(rows, on_conflict="canvas_assignment_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert assignments as assessments: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d assignments as assessments", len(rows))
+
+
+# ------------------------------------------------------------------ #
 #  Grade Snapshots
 # ------------------------------------------------------------------ #
 
@@ -857,6 +928,7 @@ async def store_all(
     7. pages -> resources
     8. files -> resources
     9. calendar_events -> assessments (filtered by classifier)
+    10. assignments -> assessments (filtered by classifier)
 
     Args:
         client: Async Supabase client.
@@ -977,6 +1049,17 @@ async def store_all(
     logger.info("store_all: starting %s", step_name)
     try:
         await upsert_calendar_events_as_assessments(client, assessment_events)
+    except StorageError:
+        raise
+    except Exception as exc:
+        msg = f"store_all failed at step '{step_name}': {exc}"
+        raise StorageError(msg) from exc
+
+    # Phase 2: assignments as assessments (via classifier)
+    step_name = "upsert_assignments_as_assessments"
+    logger.info("store_all: starting %s", step_name)
+    try:
+        await upsert_assignments_as_assessments(client, assignments)
     except StorageError:
         raise
     except Exception as exc:
