@@ -2,7 +2,7 @@
 
 ## Context
 
-By this phase, the study OS has a working planner, practice system, and mastery tracking — all without AI. Now the LLM enters, but as bounded tools inside the existing system, not as an autonomous agent. Every AI role has a specific job, uses approved sources, and includes citations.
+Phase 4 introduced lightweight LLM integration — a simple Claude API client powering concept extraction, practice generation, and answer evaluation. This phase upgrades that foundation into a production-grade AI system with proper infrastructure, adds the conversational coach, and builds the safety/trust layer.
 
 The key insight from the research: AI should generate practice, hints, explanations, and summaries. It should NOT control the planning logic, the evidence model, or the accountability loop. OECD's warning is direct — AI that improves task performance without improving learning creates "metacognitive laziness."
 
@@ -10,11 +10,12 @@ The tutor should ask more than it tells.
 
 ## Goals
 
-- Add LLM client infrastructure with prompt management, cost tracking, and audit logging
-- Build 5 bounded AI roles: practice generator, evaluator, retriever, coach, escalation detector
-- Implement source trust controls and citation requirements
+- Upgrade LLM infrastructure with prompt versioning, audit logging, cost tracking, and rate limiting
+- Build source retriever (RAG) for grounded AI outputs
 - Ship a conversational coach that follows pedagogical rules
-- Ensure every AI output is grounded in approved sources
+- Add escalation detection for patterns suggesting human help is needed
+- Implement source trust controls and citation requirements
+- Harden AI security (prompt injection defense, output validation)
 
 ## The AI architecture
 
@@ -27,6 +28,7 @@ The tutor should ask more than it tells.
 │   ┌──────────┐  ┌──────────┐  ┌──────────┐     │
 │   │ Practice  │  │  Coach   │  │ Evaluator│     │
 │   │ Generator │  │  (chat)  │  │ (scoring)│     │
+│   │ (Phase 4) │  │  (NEW)   │  │ (Phase 4)│     │
 │   └────┬─────┘  └────┬─────┘  └────┬─────┘     │
 │        │              │              │           │
 │        └──────────────┼──────────────┘           │
@@ -48,30 +50,37 @@ The tutor should ask more than it tells.
 
 Key constraint: **all AI tools go through the retriever**. No AI output without source grounding.
 
+## What exists from Phase 4
+
+Phase 4 shipped:
+- `mitty/ai/client.py` — minimal Claude API wrapper (async, structured output, retry, simple cost logging)
+- `mitty/practice/generator.py` — LLM-powered practice item generation with caching
+- `mitty/practice/evaluator.py` — LLM-powered answer scoring with exact-match fast path
+- `mitty/mastery/concepts.py` — LLM-powered concept extraction with pattern-matching fallback
+
+This phase upgrades the client and adds new AI roles on top of the existing practice infrastructure.
+
 ## Work items
 
-### 1. LLM client infrastructure
+### 1. LLM infrastructure upgrade
 
-Create `mitty/ai/client.py` and `mitty/ai/prompts.py`.
+Upgrade `mitty/ai/client.py` and create `mitty/ai/prompts.py`.
 
-**Client:**
-- Claude API integration (via anthropic SDK)
-- Structured output parsing (tool use / JSON mode)
-- Token counting and cost tracking per call
+**Client upgrades:**
+- Token counting and cost tracking per call → `ai_audit_log` table (add migration)
 - Rate limiting (requests per minute, tokens per minute)
-- Retry logic for transient errors
-- All calls logged to `ai_audit_log` table (prompt, response, model, tokens, cost, timestamp, context)
+- Cost budgeting — configurable per-session and per-day limits with alerts
 
-**Prompt management:**
+**Prompt management (new):**
 - System prompts per AI role (practice_generator, coach, evaluator, explainer)
 - Template system for injecting context (concept, resource chunks, student history)
 - Prompt versioning — store which prompt version produced each output
 - Config: model selection, temperature, max_tokens per role
 
-**Security:**
-- Provider API keys server-side only — never in frontend bundles
+**Security hardening:**
 - Student inputs sanitized before inclusion in prompts (prompt injection defense)
 - Outputs validated before returning to frontend
+- Provider API keys server-side only — never in frontend bundles (verify Phase 4 compliance)
 
 ### 2. AI retriever (source-grounded context)
 
@@ -88,47 +97,9 @@ Returns: top-k chunks with source attribution (`resource_id`, `chunk_index`, `re
 
 **Critical rule**: If retriever returns insufficient results (< threshold), the AI tool must say "I don't have enough source material for this topic" rather than hallucinate. Surface this as "No study materials" in the UI with a prompt to add resources.
 
-### 3. AI practice generator
+**Integration**: Wire the retriever into Phase 4's practice generator and evaluator so they use grounded retrieval instead of directly-passed chunks.
 
-Create `mitty/ai/practice_generator.py`.
-
-Replaces/augments the template generator from Phase 4.
-
-Given `(concept, resource_chunks[])`, generate:
-- Quiz questions (multiple choice, fill-in-blank, short answer)
-- Flashcards (term/definition, concept/explanation)
-- Worked examples (step-by-step solution + similar problem)
-- Explanation prompts (why/how/compare/what-if questions)
-
-Requirements:
-- Every generated question must cite its source chunk
-- Vary question difficulty based on mastery_level (low mastery = easier, scaffolded)
-- Vary question format to avoid pattern matching
-- Include the correct answer and a brief explanation
-- **Source trust check**: if resource coverage is low for this concept, fall back to template-based generation or flag for resource addition
-
-### 4. AI evaluator (answer scoring)
-
-Create `mitty/ai/evaluator.py`.
-
-Score student answers beyond simple keyword matching:
-
-| Input | Evaluation |
-|-------|-----------|
-| Quiz answer | Exact/partial match, accept reasonable variations |
-| Explanation | Assess completeness, accuracy, depth of understanding |
-| Worked example steps | Check each step for correctness and method |
-| Reflection | Assess metacognitive quality (specific vs. vague) |
-
-Returns:
-- `is_correct` (bool)
-- `score` (0.0 - 1.0, for partial credit)
-- `feedback` (text — what was right, what was missed, what to review)
-- `misconceptions_detected` (list — "You confused X with Y")
-
-Feed results into `mastery_state` updates. The evaluator should detect false confidence: "the answer is partially right but misses the key concept."
-
-### 5. Conversational coach
+### 3. Conversational coach
 
 Create `mitty/ai/coach.py` + chat API endpoints + chat UI.
 
@@ -159,7 +130,7 @@ The coach is conversational but strictly bounded:
 - Store per study_block: messages (role, content, timestamp), sources cited
 - Accessible for audit but NOT shown to parents (privacy — Phase 7)
 
-### 6. Escalation detector
+### 4. Escalation detector
 
 Create `mitty/ai/escalation.py`.
 
@@ -180,7 +151,7 @@ Escalation outputs:
 - Escalation log with context (which concept, evidence, suggested action)
 - Never auto-contacts teachers — that's a parent decision
 
-### 7. Source trust controls
+### 5. Source trust controls
 
 Every AI-generated output must include citations. Add trust infrastructure:
 
@@ -202,7 +173,7 @@ Every AI-generated output must include citations. Add trust infrastructure:
 - Source coverage metric: what % of mastery_states concepts have adequate resource backing?
 - Surface gaps in mastery dashboard: "No study materials for: Topic X — add resources to enable practice"
 
-### 8. Coach chat UI
+### 6. Coach chat UI
 
 The chat interface within a study block:
 
@@ -245,10 +216,10 @@ UI features:
 
 ## Acceptance criteria
 
-- [ ] LLM client infrastructure works with Claude API, includes cost tracking and audit logging
+- [ ] LLM client upgraded with audit logging to `ai_audit_log` table, prompt versioning, cost tracking
+- [ ] Rate limiting and cost budgeting enforced
 - [ ] Retriever returns relevant chunks with source attribution, refuses when sources insufficient
-- [ ] AI practice generator produces better questions than templates, with citations
-- [ ] AI evaluator scores explanations and worked examples beyond keyword matching
+- [ ] Practice generator and evaluator (Phase 4) wired through retriever for source grounding
 - [ ] Conversational coach follows pedagogical rules (ask before tell, hints before answers)
 - [ ] Coach is scoped to current block topic and approved sources only
 - [ ] Escalation detector flags repeated failure, high stress, avoidance patterns
@@ -256,21 +227,21 @@ UI features:
 - [ ] Chat UI works on mobile with block context and source display
 - [ ] "Flag this response" mechanism works
 - [ ] All AI calls logged to audit table with prompt version, tokens, cost
-- [ ] API keys are server-side only
+- [ ] API keys are server-side only, prompt injection defenses in place
 - [ ] Quality gates pass
 
 ## Risks & open questions
 
-- **LLM cost** — Practice generation + evaluation + coaching per session adds up. Track cost per session and set budget alerts. Consider caching generated practice items.
+- **LLM cost** — Coach conversations are the biggest cost driver (multi-turn). Track cost per session and set budget alerts. Consider streaming to reduce perceived latency.
 - **Prompt injection** — Student inputs go into LLM prompts. Sanitize inputs, use structured prompts, validate outputs.
 - **Pedagogical rule enforcement** — System prompts can be ignored by the model. Need output validation: did the coach actually ask a question before giving an answer? Test with adversarial inputs.
 - **"Do my homework" risk** — The coach must not do homework for the student. Scope restrictions + system prompt + output validation. Consider: if the current study block is "urgent deliverable" (homework), should the coach be available at all? Maybe only for "retrieval" and "explanation" blocks.
 - **Response quality** — LLM explanations may be wrong or misleading. Source grounding reduces but doesn't eliminate this. The "flag" button and audit log are safety nets.
-- **Latency** — LLM calls add latency to practice and chat. Cache practice items, stream chat responses.
+- **Latency** — Coach chat needs to feel responsive. Stream responses. Cache retriever results within a session.
 
 ## Dependencies
 
 - Phase 1: backend API, schema (for ai_audit_log table — add migration)
 - Phase 2: resources + resource_chunks (content for retrieval)
 - Phase 3: planner + study blocks (coach scoped to blocks)
-- Phase 4: practice system + mastery tracking (AI augments, doesn't replace)
+- Phase 4: practice system + mastery tracking + lightweight LLM client (this phase upgrades and extends)
