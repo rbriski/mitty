@@ -167,28 +167,51 @@ class TestComputeMasteryLevel:
 
 
 class TestComputeSuccessRate:
-    """Rolling success rate over the last 20 attempts."""
+    """Rolling success rate blended with history."""
 
-    def test_all_correct(self) -> None:
+    def test_all_correct_no_history(self) -> None:
         assert _compute_success_rate([1.0] * 5, existing_rate=None) == 1.0
 
-    def test_all_incorrect(self) -> None:
+    def test_all_incorrect_no_history(self) -> None:
         assert _compute_success_rate([0.0] * 5, existing_rate=None) == 0.0
 
-    def test_mixed_results(self) -> None:
+    def test_mixed_results_no_history(self) -> None:
         scores = [1.0, 0.0, 1.0, 0.0]
         assert _compute_success_rate(scores, existing_rate=None) == pytest.approx(0.5)
-
-    def test_rolling_window_last_20(self) -> None:
-        """Only the last 20 scores should matter."""
-        # 25 scores: first 5 are 0, last 20 are 1
-        scores = [0.0] * 5 + [1.0] * 20
-        assert _compute_success_rate(scores, existing_rate=None) == 1.0
 
     def test_partial_credit_counted(self) -> None:
         """Partial credit scores count proportionally toward success rate."""
         scores = [0.5, 0.5, 0.5, 0.5]
         assert _compute_success_rate(scores, existing_rate=None) == pytest.approx(0.5)
+
+    def test_blends_with_existing_rate(self) -> None:
+        """New batch blends with existing rate weighted by history count."""
+        # Existing: 0.9 rate over 10 attempts. New: 3 all-wrong.
+        # Weighted: (0.9 * 10 + 0.0 * 3) / (10 + 3) = 9.0 / 13 ~ 0.692
+        result = _compute_success_rate(
+            [0.0, 0.0, 0.0], existing_rate=0.9, existing_count=10
+        )
+        assert result == pytest.approx(9.0 / 13, abs=0.001)
+        # Critical: should NOT drop below 0.5 (scheduler reset threshold)
+        assert result > 0.5
+
+    def test_existing_count_capped_at_rolling_window(self) -> None:
+        """History weight is capped at _ROLLING_WINDOW (20) to avoid stale dominance."""
+        # 100 prior attempts at 0.9 should still be capped at 20 weight
+        result = _compute_success_rate(
+            [0.0, 0.0, 0.0], existing_rate=0.9, existing_count=100
+        )
+        expected = (0.9 * 20 + 0.0 * 3) / (20 + 3)
+        assert result == pytest.approx(expected, abs=0.001)
+
+    def test_no_existing_rate_uses_batch_only(self) -> None:
+        """When there's no existing rate, use only batch scores."""
+        result = _compute_success_rate([1.0, 0.0], existing_rate=None, existing_count=5)
+        assert result == pytest.approx(0.5)
+
+    def test_empty_scores_returns_existing(self) -> None:
+        """Empty scores should return existing rate unchanged."""
+        assert _compute_success_rate([], existing_rate=0.8, existing_count=10) == 0.8
 
 
 # ---------------------------------------------------------------------------

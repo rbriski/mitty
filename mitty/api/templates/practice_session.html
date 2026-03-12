@@ -555,7 +555,7 @@
 
         supabase.auth.onAuthStateChange((_event, session) => {
           this.session = session;
-          if (session && this.step === 'loading') this.generateItems();
+          if (session && this.step === 'loading' && !this._generating) this.generateItems();
         });
 
         if (!this.blockId) {
@@ -564,7 +564,7 @@
           return;
         }
 
-        if (this.session) this.generateItems();
+        if (this.session && !this._generating) this.generateItems();
       },
 
       async signOut() {
@@ -576,6 +576,8 @@
       // ── Generate practice items ──
 
       async generateItems() {
+        if (this._generating) return;
+        this._generating = true;
         this.step = 'loading';
         this.errorMessage = '';
 
@@ -617,6 +619,8 @@
         } catch (err) {
           this.step = 'error';
           this.errorMessage = 'Failed to start practice session: ' + err.message;
+        } finally {
+          this._generating = false;
         }
       },
 
@@ -629,10 +633,14 @@
 
       async submitAnswer() {
         if (!this.studentAnswer || this.evaluating) return;
+        const token = this.session?.access_token;
+        if (!token) {
+          this.evaluationError = 'Session expired. Please sign in again.';
+          return;
+        }
         this.evaluating = true;
 
         try {
-          const token = this.session?.access_token;
           const timeSpent = this.questionStartTime
             ? Math.round((Date.now() - this.questionStartTime) / 1000)
             : null;
@@ -701,6 +709,7 @@
         // Update mastery states
         try {
           const token = this.session?.access_token;
+          if (!token) return;
           const resp = await fetch('/mastery-states/update-from-results', {
             method: 'POST',
             headers: {

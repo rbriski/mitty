@@ -103,7 +103,7 @@ async def update_mastery(
     existing_confidence = existing.get("confidence_self_report") if existing else None
 
     mastery_level = _compute_mastery_level(scores, existing_mastery)
-    success_rate = _compute_success_rate(scores, existing_rate)
+    success_rate = _compute_success_rate(scores, existing_rate, existing_count)
     confidence = _compute_confidence_self_report(results)
 
     # Blend confidence with existing if available.
@@ -229,16 +229,20 @@ def _compute_mastery_level(
 def _compute_success_rate(
     scores: list[float],
     existing_rate: float | None,
+    existing_count: int = 0,
 ) -> float:
-    """Compute rolling success rate over the last N attempts.
+    """Compute rolling success rate blended with history.
 
-    Takes the last ``_ROLLING_WINDOW`` scores and computes the mean.
-    If there are more scores than the window, only the most recent are used.
+    Blends the new batch average with the existing rate, weighting by
+    the number of scores on each side (capped at ``_ROLLING_WINDOW``).
+    This prevents a single bad batch from wiping out a strong historical
+    rate — the stored success_rate reflects a smoothed rolling average.
 
     Args:
-        scores: All scores from this batch (oldest first).
-        existing_rate: Previous success rate (unused when enough scores exist;
-            could be used for blending with small batches in the future).
+        scores: Scores from this batch (oldest first).
+        existing_rate: Previous success rate, or None if this is the first batch.
+        existing_count: Total historical retrieval count (used to weight
+            the existing rate vs. new scores).
 
     Returns:
         Success rate as a float 0.0–1.0.
@@ -246,9 +250,18 @@ def _compute_success_rate(
     if not scores:
         return existing_rate if existing_rate is not None else 0.0
 
-    # Use only the most recent _ROLLING_WINDOW scores.
-    window = scores[-_ROLLING_WINDOW:]
-    return sum(window) / len(window)
+    batch_avg = sum(scores) / len(scores)
+
+    if existing_rate is None:
+        return batch_avg
+
+    # Weight the existing rate by min(existing_count, _ROLLING_WINDOW)
+    # and the new batch by its length, then blend.
+    hist_weight = min(existing_count, _ROLLING_WINDOW)
+    new_weight = len(scores)
+    total_weight = hist_weight + new_weight
+
+    return (existing_rate * hist_weight + batch_avg * new_weight) / total_weight
 
 
 def _compute_confidence_self_report(

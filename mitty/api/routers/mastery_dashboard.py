@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -96,7 +97,9 @@ async def get_mastery_dashboard(
         .execute()
     )
     resource_rows = resource_result.data or []
-    resource_titles_lower = {r["title"].lower() for r in resource_rows}
+    resource_titles_lower = {
+        r["title"].lower() for r in resource_rows if r.get("title")
+    }
 
     # Build concept rows with calibration and resource coverage
     concepts: list[MasteryConceptRow] = []
@@ -106,9 +109,10 @@ async def get_mastery_dashboard(
             row.get("confidence_self_report"),
         )
 
-        # Check if any resource title contains the concept name (case-insensitive)
+        # Check if any resource title contains the concept name (word-boundary match)
         concept_lower = row["concept"].lower()
-        has_resources = any(concept_lower in title for title in resource_titles_lower)
+        pattern = re.compile(rf"\b{re.escape(concept_lower)}\b")
+        has_resources = any(pattern.search(title) for title in resource_titles_lower)
 
         concepts.append(
             MasteryConceptRow(

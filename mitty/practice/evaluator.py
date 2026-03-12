@@ -192,6 +192,10 @@ async def evaluate_answer(
         # Fallback to LLM for reasonable variations
         return await _evaluate_with_llm(ai_client, practice_item, student_answer)
 
+    # --- Flashcard: self-assessment (no LLM needed) ---
+    if ptype == "flashcard":
+        return _evaluate_flashcard_self_assessment(student_answer)
+
     # --- All other types: LLM evaluation ---
     return await _evaluate_with_llm(ai_client, practice_item, student_answer)
 
@@ -221,6 +225,34 @@ def _evaluate_mc(correct: str, student_answer: str) -> EvaluationResult:
     )
 
 
+# Flashcard self-assessment values sent by the UI.
+_FLASHCARD_SCORES: dict[str, tuple[bool, float, str]] = {
+    "correct": (True, 1.0, "You knew this one!"),
+    "partial": (False, 0.5, "Partial recall. Review this concept again soon."),
+    "incorrect": (False, 0.0, "Keep studying. You'll get it next time."),
+}
+
+
+def _evaluate_flashcard_self_assessment(student_answer: str) -> EvaluationResult:
+    """Convert a flashcard self-assessment to a result.
+
+    Flashcards use self-reported knowledge rather than LLM evaluation.
+    The student clicks 'Knew it', 'Partially', or 'Didn't know', which
+    the UI sends as 'correct', 'partial', or 'incorrect' respectively.
+    """
+    key = student_answer.strip().lower()
+    is_correct, score, feedback = _FLASHCARD_SCORES.get(
+        key,
+        (False, 0.0, "Unrecognized self-assessment."),
+    )
+    return EvaluationResult(
+        is_correct=is_correct,
+        score=score,
+        feedback=feedback,
+        misconceptions_detected=[],
+    )
+
+
 async def _evaluate_with_llm(
     ai_client: AIClient | None,
     practice_item: PracticeItem,
@@ -238,12 +270,16 @@ async def _evaluate_with_llm(
     ptype = practice_item.practice_type
     template = _PROMPT_MAP.get(ptype, _SHORT_ANSWER_PROMPT)
 
-    user_prompt = template.format(
-        question=practice_item.question_text,
-        correct=practice_item.correct_answer or "(no reference answer)",
-        student=student_answer,
-        concept=practice_item.concept,
-        explanation=practice_item.explanation or "(none provided)",
+    # Use sequential .replace() instead of .format() to avoid
+    # KeyError/ValueError when user-provided text (student answers,
+    # LLM-generated questions) contains curly braces — e.g., math
+    # notation like "f{x}" or set notation "{1, 2, 3}".
+    user_prompt = (
+        template.replace("{question}", practice_item.question_text)
+        .replace("{correct}", practice_item.correct_answer or "(no reference answer)")
+        .replace("{student}", student_answer)
+        .replace("{concept}", practice_item.concept)
+        .replace("{explanation}", practice_item.explanation or "(none provided)")
     )
 
     logger.info(

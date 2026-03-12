@@ -323,11 +323,12 @@ class TestUpsertMasteryStatesNoDuplicates:
         # Should deduplicate case-insensitively
         assert len(concepts) == 2
 
-        # Verify upsert was called with on_conflict
+        # Verify upsert was called with on_conflict and ignore_duplicates
         upsert_calls = client._upsert_calls
         assert len(upsert_calls) == 1
         rows, kwargs = upsert_calls[0]
         assert kwargs.get("on_conflict") == "user_id,course_id,concept"
+        assert kwargs.get("ignore_duplicates") is True
         assert len(rows) == 2
 
         # All rows should have initial mastery_level=0.5

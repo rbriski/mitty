@@ -362,7 +362,11 @@ async def _upsert_mastery_states(
 
     await (
         client.table("mastery_states")
-        .upsert(rows, on_conflict="user_id,course_id,concept")
+        .upsert(
+            rows,
+            on_conflict="user_id,course_id,concept",
+            ignore_duplicates=True,
+        )
         .execute()
     )
 

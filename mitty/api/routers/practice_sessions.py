@@ -214,11 +214,15 @@ async def evaluate_practice_answer(
     )
 
     # 3. Evaluate — graceful degradation on LLM failure.
+    #    ValueError: ai_client is None but LLM evaluation needed.
+    #    AIClientError / RateLimitError: LLM call itself failed.
     try:
         result = await evaluate_answer(ai_client, eval_item, data.student_answer)
-    except ValueError:
-        # LLM required but unavailable — fall back to exact match.
-        logger.warning("LLM unavailable for evaluation, falling back to exact match")
+    except Exception as exc:
+        logger.warning(
+            "Evaluation failed (%s), falling back to exact match",
+            type(exc).__name__,
+        )
         result = _exact_match_fallback(eval_item, data.student_answer)
 
     # 4. Store the practice result.
@@ -409,8 +413,8 @@ async def _fetch_resource_chunks(
     """Fetch resource chunks for a course (via resources join)."""
     result = await (
         client.table("resource_chunks")
-        .select("id, content_text, resource_id")
-        .eq("resource_id.course_id", course_id)
+        .select("id, content_text, resource_id, resources!inner(course_id)")
+        .eq("resources.course_id", course_id)
         .limit(20)
         .execute()
     )
@@ -481,6 +485,14 @@ async def _store_practice_result(
         "time_spent_seconds": time_spent_seconds,
     }
     result = await client.table("practice_results").insert(row).execute()
+    if not result.data:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "INSERT_FAILED",
+                "message": "Failed to store practice result.",
+            },
+        )
     return result.data[0]
 
 

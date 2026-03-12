@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("mitty.api.dependencies")
 
+_NOT_CONFIGURED = object()  # Sentinel for "checked but unavailable"
+
 
 async def get_ai_client(request: Request) -> AIClient | None:
     """Return an AIClient instance, or None if not configured.
@@ -28,7 +30,9 @@ async def get_ai_client(request: Request) -> AIClient | None:
     ``app.state.ai_client``.  Returns None when the Anthropic API key
     is not set, allowing endpoints to degrade gracefully.
     """
-    existing: AIClient | None = getattr(request.app.state, "ai_client", None)
+    existing = getattr(request.app.state, "ai_client", None)
+    if existing is _NOT_CONFIGURED:
+        return None
     if existing is not None:
         return existing
 
@@ -39,6 +43,7 @@ async def get_ai_client(request: Request) -> AIClient | None:
         settings = load_settings()
         if settings.anthropic_api_key is None:
             logger.info("Anthropic API key not configured — AI features disabled")
+            request.app.state.ai_client = _NOT_CONFIGURED
             return None
 
         client = _AIClient(
@@ -49,6 +54,7 @@ async def get_ai_client(request: Request) -> AIClient | None:
         return client
     except Exception:
         logger.warning("Failed to create AIClient", exc_info=True)
+        request.app.state.ai_client = _NOT_CONFIGURED
         return None
 
 

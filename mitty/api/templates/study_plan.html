@@ -355,13 +355,13 @@
                 </button>
 
                 {# Start Practice button — for retrieval blocks that are pending or in_progress #}
-                <a
+                <button
                   x-show="block.block_type === 'retrieval' && (block.status === 'pending' || block.status === 'in_progress')"
-                  :href="'/practice?block_id=' + block.id"
-                  class="px-4 py-1.5 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-colors inline-block"
+                  @click="if (block.status === 'pending') { await startBlock(block); } window.location.href = '/practice?block_id=' + block.id;"
+                  class="px-4 py-1.5 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-colors"
                 >
                   Start Practice
-                </a>
+                </button>
 
                 {# Done button — for in_progress blocks #}
                 <button
