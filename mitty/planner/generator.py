@@ -263,11 +263,16 @@ def _build_opportunities(
         _seen_courses[cid] = count + 1
 
     # Homework opportunities from assignments + submissions.
+    # Skip assignments that are already graded/scored.
     for asn in assignments:
         course_id = asn["course_id"]
         course_name = course_names.get(course_id, f"Course {course_id}")
         enrollment = enrollment_lookup.get(course_id, {})
         sub = submissions_by_assignment.get(asn["id"], {})
+
+        # Already graded or scored — nothing to study for.
+        if sub.get("score") is not None or sub.get("workflow_state") == "graded":
+            continue
 
         due_at_raw = asn.get("due_at")
         due_at: datetime | None = None
@@ -276,6 +281,9 @@ def _build_opportunities(
                 due_at = datetime.fromisoformat(due_at_raw)
             else:
                 due_at = due_at_raw
+            # Ensure timezone-aware for scoring arithmetic
+            if due_at.tzinfo is None:
+                due_at = due_at.replace(tzinfo=UTC)
 
         opportunities.append(
             StudyOpportunity(
@@ -305,6 +313,8 @@ def _build_opportunities(
                 scheduled_at = datetime.fromisoformat(scheduled_raw)
             else:
                 scheduled_at = scheduled_raw
+            if scheduled_at.tzinfo is None:
+                scheduled_at = scheduled_at.replace(tzinfo=UTC)
 
         opportunities.append(
             StudyOpportunity(
