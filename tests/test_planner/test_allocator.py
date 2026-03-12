@@ -340,7 +340,7 @@ class TestBlockTitles:
         study_blocks = [b for b in blocks if b.block_type not in ("plan", "reflection")]
         titles = [b.title for b in study_blocks]
         # Should have "Review Algebra" for grade-risk course
-        assert any("Review" in t or "Algebra" in t for t in titles)
+        assert any("Review" in t and "Algebra" in t for t in titles)
 
     def test_missing_hw_block_says_complete(self) -> None:
         scored = _score(
@@ -374,14 +374,15 @@ class TestEnergy:
             b for b in blocks_normal if b.block_type not in ("plan", "reflection")
         ]
 
-        if content_low and content_normal:
-            # Low energy blocks should generally be shorter (or more numerous)
-            avg_low = sum(b.duration_minutes for b in content_low) / len(content_low)
-            avg_normal = sum(b.duration_minutes for b in content_normal) / len(
-                content_normal
-            )
-            # Low energy should not produce longer average blocks
-            assert avg_low <= avg_normal + 1  # small tolerance
+        assert content_low, "Expected content blocks for low energy"
+        assert content_normal, "Expected content blocks for normal energy"
+        # Low energy blocks should generally be shorter (or more numerous)
+        avg_low = sum(b.duration_minutes for b in content_low) / len(content_low)
+        avg_normal = sum(b.duration_minutes for b in content_normal) / len(
+            content_normal
+        )
+        # Low energy should not produce longer average blocks
+        assert avg_low <= avg_normal + 1  # small tolerance
 
     def test_high_energy_longer_blocks(self) -> None:
         blocks_high = allocate_blocks(_typical_scored(), 120, energy=5)
@@ -394,12 +395,13 @@ class TestEnergy:
             b for b in blocks_normal if b.block_type not in ("plan", "reflection")
         ]
 
-        if content_high and content_normal:
-            avg_high = sum(b.duration_minutes for b in content_high) / len(content_high)
-            avg_normal = sum(b.duration_minutes for b in content_normal) / len(
-                content_normal
-            )
-            assert avg_high >= avg_normal - 1
+        assert content_high, "Expected content blocks for high energy"
+        assert content_normal, "Expected content blocks for normal energy"
+        avg_high = sum(b.duration_minutes for b in content_high) / len(content_high)
+        avg_normal = sum(b.duration_minutes for b in content_normal) / len(
+            content_normal
+        )
+        assert avg_high >= avg_normal - 1
 
 
 # ---------------------------------------------------------------------------

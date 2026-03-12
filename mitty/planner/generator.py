@@ -224,7 +224,6 @@ async def _check_existing_plan(
 
 def _build_course_lookup(
     enrollments: list[dict[str, Any]],
-    courses: dict[int, str],
 ) -> dict[int, dict[str, Any]]:
     """Build a course_id -> enrollment dict for quick lookup."""
     result: dict[int, dict[str, Any]] = {}
@@ -246,11 +245,16 @@ def _build_opportunities(
     opportunities: list[StudyOpportunity] = []
 
     # Build a previous-score lookup from grade snapshots.
-    # snapshots are expected ordered by scraped_at desc; take the second
-    # per course for "previous" score.
+    # Sort by scraped_at desc so the first per course is "current" and the
+    # second is "previous".
+    sorted_snapshots = sorted(
+        grade_snapshots,
+        key=lambda s: s.get("scraped_at", ""),
+        reverse=True,
+    )
     _prev_scores: dict[int, float | None] = {}
     _seen_courses: dict[int, int] = {}  # course_id -> count
-    for snap in grade_snapshots:
+    for snap in sorted_snapshots:
         cid = snap["course_id"]
         count = _seen_courses.get(cid, 0)
         if count == 1:
@@ -452,7 +456,7 @@ async def generate_plan(
     except Exception:
         logger.warning("Failed to read course names — using fallback IDs.")
 
-    enrollment_lookup = _build_course_lookup(enrollments_data, course_names)
+    enrollment_lookup = _build_course_lookup(enrollments_data)
 
     # 6. Build opportunities.
     opportunities = _build_opportunities(
@@ -484,7 +488,11 @@ async def generate_plan(
     )
 
     # 8. Allocate blocks.
-    available_minutes = signal_row["available_minutes"]
+    available_minutes = signal_row.get("available_minutes")
+    if available_minutes is None:
+        raise PlanGenerationError(
+            "Student signal is missing 'available_minutes' — cannot allocate blocks."
+        )
     blocks = allocate_blocks(scored, available_minutes, signal.energy_level)
     total_minutes = sum(b.duration_minutes for b in blocks)
 

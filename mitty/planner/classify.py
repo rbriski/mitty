@@ -1,7 +1,7 @@
 """Heuristic classifier for Canvas assignment names.
 
 Classifies assignments as academic assessments (test, quiz, exam, midterm,
-final, assessment) based on keyword matching in the assignment name, with
+assessment) based on keyword matching in the assignment name, with
 exclusion patterns for false positives like "Quiz Review" or "Test Prep."
 """
 

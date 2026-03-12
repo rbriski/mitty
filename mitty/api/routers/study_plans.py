@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import logging
 from datetime import (
+    UTC,
     date,  # noqa: TCH003 — must be available at runtime for FastAPI/Pydantic
+    datetime,
 )
 from typing import Annotated
 
@@ -46,7 +48,7 @@ async def generate_study_plan(
     - Silently replaces draft plans.
     """
     user_id = current_user["user_id"]
-    plan_date = date.today()
+    plan_date = datetime.now(UTC).date()
 
     try:
         result = await generate_plan(client, user_id, plan_date)
@@ -84,6 +86,7 @@ async def generate_study_plan(
         client.table("study_plans")
         .select("*")
         .eq("id", result.plan_id)
+        .eq("user_id", user_id)
         .maybe_single()
         .execute()
     )
@@ -119,7 +122,7 @@ async def get_today_plan(
 ) -> StudyPlanWithBlocksResponse:
     """Get today's study plan with nested blocks, or 404 if none exists."""
     user_id = current_user["user_id"]
-    today = date.today().isoformat()
+    today = datetime.now(UTC).date().isoformat()
 
     plan_resp = await (
         client.table("study_plans")

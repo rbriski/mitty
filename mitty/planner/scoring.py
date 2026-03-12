@@ -159,7 +159,7 @@ def _factor_grade_risk(opp: StudyOpportunity) -> float:
         return 0.4  # neutral when unknown
     # Clamp to [0, 100] and invert so lower grades → higher risk.
     clamped = max(0.0, min(100.0, opp.current_score))
-    # Map: 100 → 0.1, 50 → 0.8 (linear with floor/ceiling)
+    # Map: 100 → 0.2, 50 → 1.0 (linear with floor/ceiling)
     return max(0.1, min(1.0, 1.0 - (clamped - 50.0) / 62.5))
 
 
