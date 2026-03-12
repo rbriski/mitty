@@ -32,6 +32,8 @@ class Settings(BaseModel):
         supabase_service_role_key: Supabase service-role key for API (optional).
         allowed_origins: Comma-separated CORS origins for the API.
         fastapi_debug: Enable FastAPI debug mode.
+        anthropic_api_key: Anthropic API key for LLM calls (optional).
+        anthropic_model: Anthropic model identifier for LLM calls.
     """
 
     canvas_base_url: str = "https://mitty.instructure.com"
@@ -49,6 +51,8 @@ class Settings(BaseModel):
     supabase_service_role_key: SecretStr | None = None
     allowed_origins: str = ""
     fastapi_debug: bool = False
+    anthropic_api_key: SecretStr | None = None
+    anthropic_model: str = "claude-sonnet-4-20250514"
 
 
 def load_settings() -> Settings:
@@ -101,6 +105,12 @@ def load_settings() -> Settings:
 
     if os.environ.get("FASTAPI_DEBUG", "").lower() in ("1", "true", "yes"):
         overrides["fastapi_debug"] = True
+
+    if anthropic_api_key := os.environ.get("ANTHROPIC_API_KEY"):
+        overrides["anthropic_api_key"] = anthropic_api_key
+
+    if anthropic_model := os.environ.get("ANTHROPIC_MODEL"):
+        overrides["anthropic_model"] = anthropic_model
 
     return Settings(**overrides)
 
