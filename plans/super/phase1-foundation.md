@@ -2,7 +2,7 @@
 
 ## Meta
 - **Source**: tickets/phase1-foundation.md
-- **Phase**: devolved
+- **Phase**: detailing
 - **Branch**: feature/phase1-foundation
 - **Worktree**: ../worktrees/mitty/phase1-foundation
 - **Created**: 2026-03-11
