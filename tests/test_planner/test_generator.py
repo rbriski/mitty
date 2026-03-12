@@ -495,3 +495,117 @@ async def test_multiple_courses() -> None:
 
     assert isinstance(result, StudyPlan)
     assert len(result.blocks) >= 2  # at least plan + reflection
+
+
+# ---------------------------------------------------------------------------
+# Tests — mastery data integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_with_mastery_states() -> None:
+    """Mastery states are read and factored into opportunity scoring."""
+    mastery_states = [
+        {
+            "id": 1,
+            "user_id": USER_ID,
+            "course_id": 1,
+            "concept": "Quadratic Equations",
+            "mastery_level": 0.3,
+            "confidence_self_report": 0.8,
+            "retrieval_count": 2,
+            "updated_at": datetime(2026, 3, 10, tzinfo=UTC).isoformat(),
+        },
+        {
+            "id": 2,
+            "user_id": USER_ID,
+            "course_id": 1,
+            "concept": "Factoring",
+            "mastery_level": 0.5,
+            "confidence_self_report": 0.6,
+            "retrieval_count": 3,
+            "updated_at": datetime(2026, 3, 10, tzinfo=UTC).isoformat(),
+        },
+    ]
+    client = _build_mock_client(mastery_states=mastery_states)
+    result = await generate_plan(client, USER_ID, PLAN_DATE)
+
+    assert isinstance(result, StudyPlan)
+    assert len(result.blocks) > 0
+
+
+@pytest.mark.asyncio
+async def test_mastery_states_empty_degrades_gracefully() -> None:
+    """Plan generates without mastery states — gaps default to 0.0."""
+    client = _build_mock_client(mastery_states=[])
+    result = await generate_plan(client, USER_ID, PLAN_DATE)
+
+    assert isinstance(result, StudyPlan)
+    assert len(result.blocks) > 0
+
+
+@pytest.mark.asyncio
+async def test_mastery_gaps_computed_from_states() -> None:
+    """Verify _compute_mastery_gaps produces correct gap values."""
+    from mitty.planner.generator import _compute_mastery_gaps
+
+    mastery_states = [
+        {
+            "course_id": 1,
+            "mastery_level": 0.3,
+            "confidence_self_report": 0.8,
+        },
+        {
+            "course_id": 1,
+            "mastery_level": 0.5,
+            "confidence_self_report": 0.6,
+        },
+        {
+            "course_id": 2,
+            "mastery_level": 0.9,
+            "confidence_self_report": 0.85,
+        },
+    ]
+    gaps = _compute_mastery_gaps(mastery_states)
+
+    # Course 1: avg mastery = 0.4, mastery_gap = 0.6
+    #           avg confidence = 0.7, confidence_gap = 0.7 - 0.4 = 0.3
+    assert 1 in gaps
+    mg1, cg1 = gaps[1]
+    assert abs(mg1 - 0.6) < 0.01
+    assert abs(cg1 - 0.3) < 0.01
+
+    # Course 2: avg mastery = 0.9, mastery_gap = 0.1
+    #           avg confidence = 0.85, confidence_gap = -0.05
+    assert 2 in gaps
+    mg2, cg2 = gaps[2]
+    assert abs(mg2 - 0.1) < 0.01
+    assert abs(cg2 - (-0.05)) < 0.01
+
+
+@pytest.mark.asyncio
+async def test_mastery_gaps_empty_states() -> None:
+    """Empty mastery states produce empty gaps dict."""
+    from mitty.planner.generator import _compute_mastery_gaps
+
+    gaps = _compute_mastery_gaps([])
+    assert gaps == {}
+
+
+@pytest.mark.asyncio
+async def test_mastery_gaps_missing_confidence() -> None:
+    """Mastery states without confidence_self_report default confidence_gap to 0."""
+    from mitty.planner.generator import _compute_mastery_gaps
+
+    mastery_states = [
+        {
+            "course_id": 1,
+            "mastery_level": 0.4,
+            "confidence_self_report": None,
+        },
+    ]
+    gaps = _compute_mastery_gaps(mastery_states)
+    assert 1 in gaps
+    mg, cg = gaps[1]
+    assert abs(mg - 0.6) < 0.01
+    assert cg == 0.0  # no confidence data
