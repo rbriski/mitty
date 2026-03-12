@@ -1,0 +1,266 @@
+"""Hybrid answer evaluator — exact-match for MC/fill-in-blank, LLM for free-text.
+
+Provides ``evaluate_answer()`` which takes a practice item and student answer,
+returns an ``EvaluationResult`` with score, feedback, and detected misconceptions.
+
+Cost optimization: exact-match paths (MC, fill-in-blank with matching text) never
+invoke the LLM.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from mitty.ai.client import AIClient
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Data models
+# ---------------------------------------------------------------------------
+
+
+class PracticeItem(BaseModel):
+    """Minimal representation of a practice item for evaluation.
+
+    Mirrors the relevant columns from ``practice_items`` table.
+    """
+
+    practice_type: str
+    question_text: str
+    correct_answer: str | None = None
+    options_json: list | dict | None = None
+    explanation: str | None = None
+    concept: str = ""
+
+
+class EvaluationResult(BaseModel):
+    """Result of evaluating a student answer.
+
+    Attributes:
+        is_correct: Whether the answer is considered correct.
+        score: Numeric score between 0.0 and 1.0 (supports partial credit).
+        feedback: Human-readable feedback explaining the evaluation.
+        misconceptions_detected: List of identified misconceptions, if any.
+    """
+
+    is_correct: bool
+    score: float = Field(ge=0.0, le=1.0)
+    feedback: str
+    misconceptions_detected: list[str] = Field(default_factory=list)
+
+
+class _LLMEvaluation(BaseModel):
+    """Structured response model for LLM-based evaluation.
+
+    Used as the response_model for ``AIClient.call_structured()``.
+    """
+
+    is_correct: bool
+    score: float = Field(ge=0.0, le=1.0)
+    feedback: str
+    misconceptions_detected: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Exact-match helpers
+# ---------------------------------------------------------------------------
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and strip whitespace for comparison."""
+    return text.strip().lower()
+
+
+def _exact_match(student: str, correct: str) -> bool:
+    """Case-insensitive, whitespace-trimmed equality check."""
+    return _normalize(student) == _normalize(correct)
+
+
+# ---------------------------------------------------------------------------
+# LLM evaluation prompts
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROMPT_BASE = """\
+You are an expert educational assessor evaluating a student's answer.
+Score on a 0.0-1.0 scale. Identify any misconceptions.
+Be encouraging but accurate. Provide specific, actionable feedback."""
+
+_FILL_IN_BLANK_PROMPT = """\
+Practice type: Fill-in-the-blank
+Question: {question}
+Correct answer: {correct}
+Student answer: {student}
+Concept: {concept}
+
+The student's answer did not exactly match the expected answer.
+Determine if the student's answer is a reasonable variation (e.g., singular/plural,
+synonym, alternate spelling) of the correct answer.
+Score 1.0 if acceptable, 0.0 if wrong."""
+
+_SHORT_ANSWER_PROMPT = """\
+Practice type: Short answer
+Question: {question}
+Expected answer: {correct}
+Student answer: {student}
+Concept: {concept}
+
+Evaluate the student's short answer against the expected answer.
+Award partial credit (0.0-1.0) based on accuracy and completeness.
+Identify any misconceptions in the student's reasoning."""
+
+_EXPLANATION_PROMPT = """\
+Practice type: Explanation
+Question: {question}
+Reference answer: {correct}
+Student answer: {student}
+Concept: {concept}
+
+Evaluate the student's explanation for:
+1. Completeness — does it cover the key points?
+2. Accuracy — are the statements factually correct?
+3. Depth — does it demonstrate understanding beyond surface level?
+Award a score from 0.0 to 1.0. Identify any misconceptions."""
+
+_WORKED_EXAMPLE_PROMPT = """\
+Practice type: Worked example
+Problem: {question}
+Correct solution: {correct}
+Reference method: {explanation}
+Student work: {student}
+Concept: {concept}
+
+Evaluate the student's worked example for:
+1. Method correctness — is the approach valid?
+2. Answer correctness — is the final answer right?
+3. Work shown — are intermediate steps clear and correct?
+Award a score from 0.0 to 1.0. Identify any misconceptions."""
+
+_PROMPT_MAP: dict[str, str] = {
+    "fill_in_blank": _FILL_IN_BLANK_PROMPT,
+    "short_answer": _SHORT_ANSWER_PROMPT,
+    "explanation": _EXPLANATION_PROMPT,
+    "worked_example": _WORKED_EXAMPLE_PROMPT,
+}
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+
+async def evaluate_answer(
+    ai_client: AIClient | None,
+    practice_item: PracticeItem,
+    student_answer: str,
+) -> EvaluationResult:
+    """Evaluate a student's answer against a practice item.
+
+    Uses exact matching for multiple-choice and fill-in-blank types
+    (when the answer matches). Falls back to LLM evaluation for
+    free-text types and non-matching fill-in-blank answers.
+
+    Args:
+        ai_client: AIClient instance for LLM calls. May be None for
+            practice types that only need exact matching.
+        practice_item: The practice item being answered.
+        student_answer: The student's submitted answer.
+
+    Returns:
+        EvaluationResult with score, feedback, and any misconceptions.
+    """
+    ptype = practice_item.practice_type
+    correct = practice_item.correct_answer or ""
+
+    # --- Multiple choice: always exact match ---
+    if ptype == "multiple_choice":
+        return _evaluate_mc(correct, student_answer)
+
+    # --- Fill-in-blank: exact match first, LLM fallback ---
+    if ptype == "fill_in_blank":
+        if _exact_match(student_answer, correct):
+            return EvaluationResult(
+                is_correct=True,
+                score=1.0,
+                feedback="Correct!",
+                misconceptions_detected=[],
+            )
+        # Fallback to LLM for reasonable variations
+        return await _evaluate_with_llm(ai_client, practice_item, student_answer)
+
+    # --- All other types: LLM evaluation ---
+    return await _evaluate_with_llm(ai_client, practice_item, student_answer)
+
+
+# ---------------------------------------------------------------------------
+# Internal evaluators
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_mc(correct: str, student_answer: str) -> EvaluationResult:
+    """Evaluate a multiple-choice answer via exact match."""
+    is_correct = _exact_match(student_answer, correct)
+
+    if is_correct:
+        return EvaluationResult(
+            is_correct=True,
+            score=1.0,
+            feedback="Correct!",
+            misconceptions_detected=[],
+        )
+
+    return EvaluationResult(
+        is_correct=False,
+        score=0.0,
+        feedback=f"Incorrect. The correct answer is {correct}.",
+        misconceptions_detected=[],
+    )
+
+
+async def _evaluate_with_llm(
+    ai_client: AIClient | None,
+    practice_item: PracticeItem,
+    student_answer: str,
+) -> EvaluationResult:
+    """Evaluate using the LLM for free-text practice types.
+
+    Raises:
+        ValueError: If ai_client is None when LLM evaluation is needed.
+    """
+    if ai_client is None:
+        msg = "AIClient is required for LLM-based evaluation."
+        raise ValueError(msg)
+
+    ptype = practice_item.practice_type
+    template = _PROMPT_MAP.get(ptype, _SHORT_ANSWER_PROMPT)
+
+    user_prompt = template.format(
+        question=practice_item.question_text,
+        correct=practice_item.correct_answer or "(no reference answer)",
+        student=student_answer,
+        concept=practice_item.concept,
+        explanation=practice_item.explanation or "(none provided)",
+    )
+
+    logger.info(
+        "LLM evaluation: type=%s concept=%s",
+        ptype,
+        practice_item.concept,
+    )
+
+    llm_result = await ai_client.call_structured(
+        system=_SYSTEM_PROMPT_BASE,
+        user_prompt=user_prompt,
+        response_model=_LLMEvaluation,
+    )
+
+    return EvaluationResult(
+        is_correct=llm_result.is_correct,
+        score=llm_result.score,
+        feedback=llm_result.feedback,
+        misconceptions_detected=llm_result.misconceptions_detected,
+    )
