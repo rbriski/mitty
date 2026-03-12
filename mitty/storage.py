@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from supabase import AsyncClient, acreate_client
 
 if TYPE_CHECKING:
+    from mitty.chunking import Chunk
     from mitty.models import (
         Assignment,
         CalendarEvent,
@@ -705,6 +706,66 @@ async def upsert_files_as_resources(
         raise StorageError(msg) from exc
 
     logger.info("Upserted %d files as resources", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Resource Chunks
+# ------------------------------------------------------------------ #
+
+
+async def insert_resource_chunks(
+    client: AsyncClient,
+    resource_id: int,
+    chunks: list[Chunk],
+) -> None:
+    """Insert chunked text rows for a resource.
+
+    Deletes any existing chunks for the given *resource_id* first
+    (full replace strategy), then inserts the new chunks.
+
+    Args:
+        client: Async Supabase client.
+        resource_id: The ID of the parent resource.
+        chunks: List of :class:`~mitty.chunking.Chunk` objects to store.
+
+    Raises:
+        StorageError: If the Supabase delete or insert fails.
+    """
+    if not chunks:
+        return
+
+    # Delete existing chunks for this resource (idempotent re-chunk).
+    try:
+        await (
+            client.table("resource_chunks")
+            .delete()
+            .eq("resource_id", resource_id)
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to delete existing chunks for resource {resource_id}: {exc}"
+        raise StorageError(msg) from exc
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for chunk in chunks:
+        rows.append(
+            {
+                "resource_id": resource_id,
+                "chunk_index": chunk.chunk_index,
+                "content_text": chunk.content_text,
+                "token_count": chunk.token_count,
+                "created_at": now,
+            }
+        )
+
+    try:
+        await client.table("resource_chunks").insert(rows).execute()
+    except Exception as exc:
+        msg = f"Failed to insert resource chunks for resource {resource_id}: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Inserted %d chunks for resource %d", len(rows), resource_id)
 
 
 # ------------------------------------------------------------------ #

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from mitty.chunking import Chunk
 from mitty.models import (
     Assignment,
     CalendarEvent,
@@ -24,6 +25,7 @@ from mitty.storage import (
     _get_latest_snapshots,
     create_storage,
     insert_grade_snapshots,
+    insert_resource_chunks,
     store_all,
     upsert_assignments,
     upsert_calendar_events_as_assessments,
@@ -1751,3 +1753,103 @@ class TestUpsertCalendarEventsAsAssessments:
 
         with pytest.raises(StorageError, match="calendar events"):
             await upsert_calendar_events_as_assessments(client, events)
+
+
+# ------------------------------------------------------------------ #
+#  insert_resource_chunks
+# ------------------------------------------------------------------ #
+
+
+def _mock_chunk_client(
+    *, delete_fail: bool = False, insert_fail: bool = False
+) -> AsyncMock:
+    """Build a mock client supporting delete and insert chains for chunks."""
+    client = AsyncMock()
+    table_mock = MagicMock()
+
+    # delete chain: table().delete().eq().execute()
+    delete_builder = MagicMock()
+    eq_builder = MagicMock()
+    if delete_fail:
+        eq_builder.execute = AsyncMock(side_effect=Exception("delete failed"))
+    else:
+        eq_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+    delete_builder.eq = MagicMock(return_value=eq_builder)
+    table_mock.delete = MagicMock(return_value=delete_builder)
+
+    # insert chain: table().insert().execute()
+    insert_builder = MagicMock()
+    if insert_fail:
+        insert_builder.execute = AsyncMock(side_effect=Exception("insert failed"))
+    else:
+        insert_builder.execute = AsyncMock(return_value=MagicMock(data=[]))
+    table_mock.insert = MagicMock(return_value=insert_builder)
+
+    client.table = MagicMock(return_value=table_mock)
+    return client
+
+
+class TestInsertResourceChunks:
+    """insert_resource_chunks stores chunked text rows for a resource."""
+
+    async def test_inserts_chunks_with_correct_fields(self) -> None:
+        """Each chunk is stored with resource_id, chunk_index, content, tokens."""
+        client = _mock_chunk_client()
+        chunks = [
+            Chunk(content_text="First chunk.", chunk_index=0, token_count=3),
+            Chunk(content_text="Second chunk.", chunk_index=1, token_count=3),
+        ]
+
+        await insert_resource_chunks(client, resource_id=42, chunks=chunks)
+
+        table_mock = client.table.return_value
+        # Delete called first
+        table_mock.delete.assert_called_once()
+        table_mock.delete.return_value.eq.assert_called_once_with("resource_id", 42)
+
+        # Insert called with correct rows
+        table_mock.insert.assert_called_once()
+        rows = table_mock.insert.call_args[0][0]
+        assert len(rows) == 2
+        assert rows[0]["resource_id"] == 42
+        assert rows[0]["chunk_index"] == 0
+        assert rows[0]["content_text"] == "First chunk."
+        assert rows[0]["token_count"] == 3
+        assert "created_at" in rows[0]
+        assert rows[1]["chunk_index"] == 1
+
+    async def test_empty_chunks_skips(self) -> None:
+        """Empty chunks list does not make any API calls."""
+        client = _mock_chunk_client()
+
+        await insert_resource_chunks(client, resource_id=42, chunks=[])
+
+        client.table.assert_not_called()
+
+    async def test_delete_failure_raises_storage_error(self) -> None:
+        """Delete failure is wrapped in StorageError."""
+        client = _mock_chunk_client(delete_fail=True)
+        chunks = [Chunk(content_text="Text.", chunk_index=0, token_count=2)]
+
+        with pytest.raises(StorageError, match="delete failed"):
+            await insert_resource_chunks(client, resource_id=1, chunks=chunks)
+
+    async def test_insert_failure_raises_storage_error(self) -> None:
+        """Insert failure is wrapped in StorageError."""
+        client = _mock_chunk_client(insert_fail=True)
+        chunks = [Chunk(content_text="Text.", chunk_index=0, token_count=2)]
+
+        with pytest.raises(StorageError, match="insert failed"):
+            await insert_resource_chunks(client, resource_id=1, chunks=chunks)
+
+    async def test_deletes_existing_before_insert(self) -> None:
+        """Existing chunks for the resource are deleted before inserting new ones."""
+        client = _mock_chunk_client()
+        chunks = [Chunk(content_text="New.", chunk_index=0, token_count=1)]
+
+        await insert_resource_chunks(client, resource_id=99, chunks=chunks)
+
+        # Verify delete was called on the resource_chunks table
+        client.table.assert_called_with("resource_chunks")
+        table_mock = client.table.return_value
+        table_mock.delete.return_value.eq.assert_called_once_with("resource_id", 99)
