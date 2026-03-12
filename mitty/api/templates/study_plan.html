@@ -64,13 +64,19 @@
           <h1 class="text-2xl font-bold text-gray-900">Study Plan</h1>
           <p class="text-sm text-gray-500" x-text="todayFormatted"></p>
         </div>
-        <div x-show="plan" class="flex items-center gap-2">
+        <div x-show="plan" class="flex items-center gap-3">
           <span
             class="inline-block px-3 py-1 rounded-full text-xs font-semibold"
             :class="statusBadge(plan?.status)"
             x-text="plan?.status"
           ></span>
           <span class="text-sm text-gray-500" x-text="plan?.total_minutes + ' min'"></span>
+          <button
+            @click="showCheckin = true"
+            class="px-3 py-1.5 text-xs font-medium rounded-lg bg-white text-gray-600 border border-gray-300 hover:bg-gray-50 transition-colors"
+          >
+            Regenerate
+          </button>
         </div>
       </div>
 
@@ -133,7 +139,7 @@
       {# ════════════════════════════════════════════
          Check-in Form (shown when no plan for today)
          ════════════════════════════════════════════ #}
-      <div x-show="!loading && !fetchError && !plan" class="mb-8">
+      <div x-show="!loading && !fetchError && (!plan || showCheckin)" class="mb-8">
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
           <h2 class="text-lg font-semibold text-gray-900 mb-1">Daily Check-in</h2>
           <p class="text-sm text-gray-500 mb-5">Tell us how you're doing and we'll build your study plan.</p>
@@ -415,10 +421,11 @@
       courses: [],
       upcomingAssessments: [],
       coldStart: false,
+      showCheckin: false,
 
       // Check-in form state
       checkin: {
-        available_minutes: 60,
+        available_minutes: 120,
         energy_level: 3,
         stress_level: 2,
         focus_course: '',
@@ -699,6 +706,7 @@
           }
 
           // Success — reload the plan
+          this.showCheckin = false;
           await this.fetchPlan();
         } catch (err) {
           this.checkinError = 'Check-in failed: ' + err.message;
