@@ -1,1 +1,1 @@
-"""Practice item generation module — LLM-powered practice content."""
+"""Practice item generation and evaluation — LLM-powered practice content."""
