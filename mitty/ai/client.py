@@ -119,7 +119,7 @@ class AIClient:
             if block.type == "tool_use" and block.name == tool_name:
                 return response_model.model_validate(block.input)
 
-        msg = f"No tool_use block named '{tool_name}' " f"found in API response."
+        msg = f"No tool_use block named '{tool_name}' found in API response."
         raise AIClientError(msg)
 
     # ------------------------------------------------------------------
@@ -169,7 +169,7 @@ class AIClient:
                 if attempt < self._max_retries:
                     delay = _BASE_BACKOFF * (2**attempt)
                     logger.warning(
-                        "Anthropic API %d (attempt %d/%d), " "retrying in %.1fs",
+                        "Anthropic API %d (attempt %d/%d), retrying in %.1fs",
                         exc.status_code,
                         attempt + 1,
                         1 + self._max_retries,
