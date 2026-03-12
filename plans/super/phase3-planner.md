@@ -2,7 +2,7 @@
 
 ## Meta
 - **Source:** tickets/phase3-planner.md
-- **Phase:** detailing
+- **Phase:** devolved
 - **Created:** 2026-03-11
 - **Sessions:** 1
 
@@ -431,4 +431,20 @@ The ticket says "all weights configurable." Where should weights live?
 **Depends on:** US-009 (Quality Gate)
 
 ## Beads Manifest
-*(Pending)*
+
+- **Epic:** mitty-fuw
+- **Branch:** feature/phase3-planner
+- **PR:** https://github.com/rbriski/mitty/pull/8
+
+| Story | Bead ID | Depends on |
+|-------|---------|------------|
+| US-001 Migration | mitty-fuw.1 | — |
+| US-002 Classifier | mitty-fuw.2 | — |
+| US-003 Ingestion | mitty-fuw.4 | mitty-fuw.1, mitty-fuw.2 |
+| US-004 Scoring | mitty-fuw.3 | — |
+| US-005 Allocator | mitty-fuw.5 | mitty-fuw.3 |
+| US-006 Generator | mitty-fuw.6 | mitty-fuw.3, mitty-fuw.5 |
+| US-007 API | mitty-fuw.7 | mitty-fuw.6 |
+| US-008 UI | mitty-fuw.8 | mitty-fuw.7 |
+| US-009 Quality Gate | mitty-fuw.9 | mitty-fuw.4, mitty-fuw.8 |
+| US-010 Patterns | mitty-fuw.10 | mitty-fuw.9 |
