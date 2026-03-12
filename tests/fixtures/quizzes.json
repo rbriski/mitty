@@ -1,0 +1,44 @@
+[
+  {
+    "id": 5001,
+    "title": "Chapter 5 Quiz: The Great Gatsby",
+    "quiz_type": "assignment",
+    "due_at": "2026-04-10T23:59:59Z",
+    "points_possible": 25.0,
+    "time_limit": 30,
+    "assignment_id": 67900,
+    "description": "<p>Quiz covering chapters 4-5 themes.</p>",
+    "html_url": "https://mitty.instructure.com/courses/12345/quizzes/5001",
+    "shuffle_answers": true,
+    "allowed_attempts": 1,
+    "question_count": 20
+  },
+  {
+    "id": 5002,
+    "title": "Practice: Vocabulary Unit 3",
+    "quiz_type": "practice_quiz",
+    "due_at": null,
+    "points_possible": null,
+    "time_limit": null,
+    "assignment_id": null,
+    "description": null,
+    "html_url": "https://mitty.instructure.com/courses/12345/quizzes/5002",
+    "shuffle_answers": false,
+    "allowed_attempts": -1,
+    "question_count": 10
+  },
+  {
+    "id": 5003,
+    "title": "Midterm Exam",
+    "quiz_type": "assignment",
+    "due_at": "2026-03-20T15:00:00Z",
+    "points_possible": 100.0,
+    "time_limit": 90,
+    "assignment_id": 67905,
+    "description": "<p>Comprehensive midterm covering Units 1-4.</p>",
+    "html_url": "https://mitty.instructure.com/courses/12345/quizzes/5003",
+    "shuffle_answers": true,
+    "allowed_attempts": 1,
+    "question_count": 50
+  }
+]
