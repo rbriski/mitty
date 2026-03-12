@@ -602,7 +602,7 @@ class EvaluateRequest(BaseModel):
     """Request to evaluate a student answer."""
 
     practice_item_id: int
-    student_answer: str = Field(max_length=10000)
+    student_answer: str = Field(max_length=5000)
     confidence_before: float | None = Field(default=None, ge=1.0, le=5.0)
     study_block_id: int | None = None
     time_spent_seconds: int | None = None

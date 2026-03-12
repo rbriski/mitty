@@ -522,10 +522,17 @@ class TestMasteryUpdate:
             next_review_at="2026-03-13T00:00:00",
         )
 
-        with patch(
-            "mitty.api.routers.practice_sessions.update_mastery",
-            new_callable=AsyncMock,
-            return_value=updated_state,
+        with (
+            patch(
+                "mitty.api.routers.practice_sessions._fetch_block_for_user",
+                new_callable=AsyncMock,
+                return_value=SAMPLE_BLOCK,
+            ),
+            patch(
+                "mitty.api.routers.practice_sessions.update_mastery",
+                new_callable=AsyncMock,
+                return_value=updated_state,
+            ),
         ):
             resp = client.post(
                 "/mastery-states/update-from-results",
@@ -605,10 +612,17 @@ class TestMasteryUpdate:
                 return mastery_quad
             return mastery_linear
 
-        with patch(
-            "mitty.api.routers.practice_sessions.update_mastery",
-            new_callable=AsyncMock,
-            side_effect=mock_update,
+        with (
+            patch(
+                "mitty.api.routers.practice_sessions._fetch_block_for_user",
+                new_callable=AsyncMock,
+                return_value=SAMPLE_BLOCK,
+            ),
+            patch(
+                "mitty.api.routers.practice_sessions.update_mastery",
+                new_callable=AsyncMock,
+                side_effect=mock_update,
+            ),
         ):
             resp = client.post(
                 "/mastery-states/update-from-results",

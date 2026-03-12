@@ -270,6 +270,9 @@ async def update_mastery_from_results(
 
     uid = UUID(user_id)
 
+    # Verify block ownership before reading results.
+    await _fetch_block_for_user(client, data.study_block_id, user_id)
+
     # 1. Fetch practice results for the block.
     results_resp = await (
         client.table("practice_results")
@@ -479,7 +482,7 @@ async def _store_practice_result(
         "is_correct": evaluation.is_correct,
         "score": evaluation.score,
         "feedback": evaluation.feedback,
-        "misconceptions_detected": evaluation.misconceptions_detected or None,
+        "misconceptions_detected": evaluation.misconceptions_detected,
         "confidence_before": confidence_before,
         "study_block_id": study_block_id,
         "time_spent_seconds": time_spent_seconds,
