@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from mitty.models import Assignment, Course, Enrollment
+from mitty.models import Assignment, Course, Enrollment, Quiz
 
 if TYPE_CHECKING:
     from mitty.canvas.client import CanvasClient
@@ -85,6 +85,29 @@ async def fetch_enrollments(client: CanvasClient) -> list[Enrollment]:
         {"include[]": "current_points", "per_page": "100"},
     )
     return [Enrollment.model_validate(item) for item in raw]
+
+
+async def fetch_quizzes(
+    client: CanvasClient,
+    course_id: int,
+) -> list[Quiz]:
+    """Fetch all quizzes for a given course.
+
+    Calls ``GET /api/v1/courses/:id/quizzes?per_page=100``
+    and parses each item into a :class:`~mitty.models.Quiz`.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``Quiz`` model instances.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/quizzes",
+        {"per_page": "100"},
+    )
+    return [Quiz.model_validate(item) for item in raw]
 
 
 async def fetch_all(

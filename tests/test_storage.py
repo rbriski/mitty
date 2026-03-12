@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mitty.models import Assignment, Course, Enrollment, Submission, Term
+from mitty.models import Assignment, Course, Enrollment, Quiz, Submission, Term
 from mitty.storage import (
     StorageError,
     _get_latest_snapshots,
@@ -17,6 +17,7 @@ from mitty.storage import (
     upsert_assignments,
     upsert_courses,
     upsert_enrollments,
+    upsert_quizzes_as_assessments,
     upsert_submissions,
 )
 
@@ -567,6 +568,97 @@ class TestUpsertEnrollments:
         assert row["current_grade"] is None
         assert row["final_score"] is None
         assert row["final_grade"] is None
+
+
+# ------------------------------------------------------------------ #
+#  upsert_quizzes_as_assessments
+# ------------------------------------------------------------------ #
+
+
+class TestUpsertQuizzesAsAssessments:
+    """upsert_quizzes_as_assessments maps Quiz models to assessment rows."""
+
+    async def test_upsert_quizzes_maps_to_assessments(self) -> None:
+        """Each quiz becomes an assessment row with correct fields."""
+        client = _mock_client()
+        quizzes = [
+            Quiz(
+                id=5001,
+                title="Chapter 5 Quiz",
+                quiz_type="assignment",
+                due_at=datetime(2026, 4, 10, 23, 59, 59, tzinfo=UTC),
+                points_possible=25.0,
+                time_limit=30,
+                assignment_id=67900,
+                description="<p>Quiz on chapters 4-5.</p>",
+            ),
+        ]
+
+        await upsert_quizzes_as_assessments(client, quizzes, course_id=12345)
+
+        client.table.assert_called_once_with("assessments")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["course_id"] == 12345
+        assert row["name"] == "Chapter 5 Quiz"
+        assert row["assessment_type"] == "quiz"
+        assert row["source"] == "canvas_quiz"
+        assert row["canvas_quiz_id"] == 5001
+        assert row["canvas_assignment_id"] == 67900
+        assert row["scheduled_date"] == "2026-04-10T23:59:59+00:00"
+        assert row["weight"] == 25.0
+        assert row["description"] == "<p>Quiz on chapters 4-5.</p>"
+        assert row["auto_created"] is True
+        assert "created_at" in row
+        assert "updated_at" in row
+
+    async def test_upsert_quizzes_links_assignment_id(self) -> None:
+        """Quiz with assignment_id sets canvas_assignment_id; without omits it."""
+        client = _mock_client()
+        quizzes = [
+            Quiz(id=5001, title="Linked Quiz", assignment_id=67900),
+            Quiz(id=5002, title="Unlinked Quiz", assignment_id=None),
+        ]
+
+        await upsert_quizzes_as_assessments(client, quizzes, course_id=12345)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+
+        linked = next(r for r in rows if r["canvas_quiz_id"] == 5001)
+        unlinked = next(r for r in rows if r["canvas_quiz_id"] == 5002)
+        assert linked["canvas_assignment_id"] == 67900
+        assert "canvas_assignment_id" not in unlinked
+
+    async def test_upsert_quizzes_idempotent_resync(self) -> None:
+        """Upsert uses on_conflict='canvas_quiz_id' for idempotent re-sync."""
+        client = _mock_client()
+        quizzes = [Quiz(id=5001, title="Quiz 1")]
+
+        await upsert_quizzes_as_assessments(client, quizzes, course_id=12345)
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_quiz_id"
+
+    async def test_upsert_quizzes_empty_list(self) -> None:
+        """Empty quiz list short-circuits without API calls."""
+        client = _mock_client()
+
+        await upsert_quizzes_as_assessments(client, [], course_id=12345)
+
+        client.table.assert_not_called()
+
+    async def test_upsert_quizzes_api_failure_raises_storage_error(self) -> None:
+        """Supabase failure is wrapped in StorageError."""
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db timeout")
+        )
+        quizzes = [Quiz(id=5001, title="Quiz 1")]
+
+        with pytest.raises(StorageError, match="db timeout"):
+            await upsert_quizzes_as_assessments(client, quizzes, course_id=12345)
 
 
 # ------------------------------------------------------------------ #

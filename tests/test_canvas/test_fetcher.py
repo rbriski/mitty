@@ -11,8 +11,9 @@ from mitty.canvas.fetcher import (
     fetch_assignments,
     fetch_courses,
     fetch_enrollments,
+    fetch_quizzes,
 )
-from mitty.models import Assignment, Course, Enrollment, Submission, Term
+from mitty.models import Assignment, Course, Enrollment, Quiz, Submission, Term
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 
@@ -133,6 +134,56 @@ class TestFetchAssignments:
 
         call_args = client.get_paginated.call_args
         assert call_args[0][0] == "/api/v1/courses/42/assignments"
+
+
+class TestFetchQuizzes:
+    """fetch_quizzes calls get_paginated with course_id in the path."""
+
+    async def test_fetch_quizzes_parses_fixture(self) -> None:
+        raw = _load_fixture("quizzes.json")
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_quizzes(client, course_id=12345)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/12345/quizzes",
+            {"per_page": "100"},
+        )
+        assert len(result) == 3
+        assert all(isinstance(q, Quiz) for q in result)
+
+        # First quiz: assignment-linked with due date
+        q0 = result[0]
+        assert q0.id == 5001
+        assert q0.title == "Chapter 5 Quiz: The Great Gatsby"
+        assert q0.quiz_type == "assignment"
+        assert q0.points_possible == 25.0
+        assert q0.time_limit == 30
+        assert q0.assignment_id == 67900
+        assert q0.description == "<p>Quiz covering chapters 4-5 themes.</p>"
+
+        # Second quiz: practice quiz with null fields
+        q1 = result[1]
+        assert q1.id == 5002
+        assert q1.quiz_type == "practice_quiz"
+        assert q1.due_at is None
+        assert q1.points_possible is None
+        assert q1.time_limit is None
+        assert q1.assignment_id is None
+        assert q1.description is None
+
+    async def test_fetch_quizzes_empty_list(self) -> None:
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=[])
+
+        result = await fetch_quizzes(client, course_id=99999)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/99999/quizzes",
+            {"per_page": "100"},
+        )
+        assert result == []
 
 
 class TestFetchEnrollments:
