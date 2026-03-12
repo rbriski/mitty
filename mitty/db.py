@@ -193,10 +193,19 @@ assessments = sa.Table(
         sa.ForeignKey("assignments.id"),
         nullable=True,
     ),
+    sa.Column("canvas_quiz_id", sa.Integer, nullable=True, unique=True),
+    sa.Column(
+        "auto_created",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.text("false"),
+    ),
+    sa.Column("source", sa.String, nullable=True),
     sa.Column("created_at", sa.DateTime, nullable=False),
     sa.Column("updated_at", sa.DateTime, nullable=False),
 )
 
+sa.Index("ix_assessments_canvas_quiz_id", assessments.c.canvas_quiz_id)
 sa.Index(
     "ix_assessments_course_scheduled",
     assessments.c.course_id,
@@ -223,10 +232,15 @@ resources = sa.Table(
     sa.Column("source_url", sa.String, nullable=True),
     sa.Column("canvas_module_id", sa.Integer, nullable=True),
     sa.Column("sort_order", sa.Integer, nullable=False, server_default=sa.text("0")),
+    sa.Column("content_text", sa.Text, nullable=True),
+    sa.Column("canvas_item_id", sa.Integer, nullable=True, unique=True),
+    sa.Column("module_name", sa.String, nullable=True),
+    sa.Column("module_position", sa.Integer, nullable=True),
     sa.Column("created_at", sa.DateTime, nullable=False),
     sa.Column("updated_at", sa.DateTime, nullable=False),
 )
 
+sa.Index("ix_resources_canvas_item_id", resources.c.canvas_item_id)
 sa.Index(
     "ix_resources_course_type",
     resources.c.course_id,
