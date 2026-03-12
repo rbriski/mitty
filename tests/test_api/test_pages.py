@@ -174,6 +174,104 @@ class TestResourcesManagePage:
         assert "video" in response.text
 
 
+class TestPracticeSessionPage:
+    """GET /practice returns the practice session HTML page."""
+
+    def test_returns_html(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+        assert "Practice Session" in response.text
+
+    def test_contains_auth_gate(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "Please sign in to start a practice session." in response.text
+
+    def test_contains_back_to_study_plan_link(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert 'href="/study-plan"' in response.text
+        assert "Back to Study Plan" in response.text
+
+    def test_contains_practice_session_app_script(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "practiceSessionApp()" in response.text
+
+    def test_contains_confidence_prompt(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "How confident are you?" in response.text
+
+    def test_contains_check_answer_button(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "Check Answer" in response.text
+
+    def test_contains_session_complete_section(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "Session Complete" in response.text
+
+    def test_contains_progress_bar(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "questions" in response.text
+
+    def test_contains_api_endpoints(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "/practice/generate" in response.text
+        assert "/practice-results/evaluate" in response.text
+        assert "/mastery-states/update-from-results" in response.text
+
+    def test_contains_practice_type_labels(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "Multiple Choice" in response.text
+        assert "Fill in the Blank" in response.text
+        assert "Short Answer" in response.text
+        assert "Flashcard" in response.text
+
+    def test_contains_calibration_message(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "calibrationMessage" in response.text
+
+    def test_contains_concepts_to_review(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "Concepts to Review" in response.text
+
+    def test_contains_mastery_update_section(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert "Mastery Updated" in response.text
+
+    def test_contains_view_mastery_link(self, client: TestClient) -> None:
+        response = client.get("/practice")
+
+        assert 'href="/mastery"' in response.text
+        assert "View Mastery" in response.text
+
+
+class TestStudyPlanPracticeButton:
+    """Study plan page includes Start Practice button for retrieval blocks."""
+
+    def test_contains_start_practice_link(self, client: TestClient) -> None:
+        response = client.get("/study-plan")
+
+        assert "Start Practice" in response.text
+
+    def test_practice_link_targets_retrieval_blocks(self, client: TestClient) -> None:
+        response = client.get("/study-plan")
+
+        assert "block.block_type === 'retrieval'" in response.text
+        assert "/practice?block_id=" in response.text
+
+
 class TestClassDetailPage:
     """GET /class/{course_id} returns the class detail HTML page."""
 

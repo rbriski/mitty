@@ -354,6 +354,15 @@
                   Start
                 </button>
 
+                {# Start Practice button — for retrieval blocks that are pending or in_progress #}
+                <a
+                  x-show="block.block_type === 'retrieval' && (block.status === 'pending' || block.status === 'in_progress')"
+                  :href="'/practice?block_id=' + block.id"
+                  class="px-4 py-1.5 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-colors inline-block"
+                >
+                  Start Practice
+                </a>
+
                 {# Done button — for in_progress blocks #}
                 <button
                   x-show="block.status === 'in_progress'"

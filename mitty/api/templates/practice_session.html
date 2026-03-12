@@ -1,0 +1,750 @@
+{% extends "base.html" %}
+
+{% block title %}Mitty — Practice Session{% endblock %}
+
+{% block nav %}
+{# Hide default nav; Alpine.js controls nav visibility based on auth state #}
+{% endblock %}
+
+{% block content %}
+<div x-data="practiceSessionApp()" x-init="init()" x-cloak>
+
+  {# ── Nav (only when authenticated) ── #}
+  <template x-if="session">
+    <nav class="bg-white shadow-sm border-b border-gray-200 -mx-4 -mt-6 mb-6">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="flex items-center justify-between h-14">
+          <a href="/" class="text-xl font-bold text-mitty-700 hover:text-mitty-600 transition-colors">
+            Mitty
+          </a>
+          <div class="flex items-center space-x-6">
+            <a href="/"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Dashboard
+            </a>
+            <a href="/study-plan"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Study Plan
+            </a>
+            <a href="/mastery"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Mastery
+            </a>
+            <button
+              @click="signOut()"
+              class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </template>
+
+  {# ── Not authenticated ── #}
+  <template x-if="!session">
+    <div class="text-center py-16">
+      <p class="text-gray-500 mb-4">Please sign in to start a practice session.</p>
+      <a href="/" class="text-mitty-600 hover:text-mitty-700 font-medium">Go to Dashboard</a>
+    </div>
+  </template>
+
+  {# ── Authenticated Content ── #}
+  <template x-if="session">
+    <div class="max-w-3xl mx-auto py-8">
+
+      {# Back button #}
+      <a href="/study-plan" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-6 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Study Plan
+      </a>
+
+      {# ════════════════════════════════════════════
+         Loading state
+         ════════════════════════════════════════════ #}
+      <div x-show="step === 'loading'" class="text-center py-16">
+        <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+        <p class="text-sm text-gray-500 mt-3">Generating practice questions...</p>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Error state
+         ════════════════════════════════════════════ #}
+      <div x-show="step === 'error'" class="text-center py-16">
+        <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 mb-3">
+          <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+          </svg>
+        </div>
+        <p class="text-red-700 font-medium mb-2">Failed to load practice session</p>
+        <p class="text-sm text-gray-500 mb-4" x-text="errorMessage"></p>
+        <a href="/study-plan" class="text-mitty-600 hover:text-mitty-700 font-medium">Return to Study Plan</a>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Progress bar (shown during active session)
+         ════════════════════════════════════════════ #}
+      <div x-show="items.length > 0 && step !== 'loading' && step !== 'error' && step !== 'session_complete'">
+        <div class="mb-6">
+          <div class="flex items-center justify-between mb-2">
+            <h1 class="text-lg font-bold text-gray-900">Practice Session</h1>
+            <span class="text-sm text-gray-500">
+              <span x-text="currentIndex + 1"></span>/<span x-text="items.length"></span> questions
+            </span>
+          </div>
+          <div class="w-full bg-gray-100 rounded-full h-2.5">
+            <div
+              class="h-2.5 rounded-full transition-all duration-500 bg-purple-500"
+              :style="'width: ' + progressPercent + '%'"
+            ></div>
+          </div>
+          <p class="text-xs text-gray-400 mt-1" x-text="concept"></p>
+        </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Step: confidence_prompt
+         ════════════════════════════════════════════ #}
+      <div x-show="step === 'confidence_prompt'" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">How confident are you?</h2>
+        <p class="text-sm text-gray-500 mb-5">
+          Before seeing the question, rate your confidence in
+          <span class="font-medium text-gray-700" x-text="concept"></span>.
+        </p>
+
+        <div class="mb-6">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs text-gray-400">Not confident</span>
+            <span class="text-xs text-gray-400">Very confident</span>
+          </div>
+          <div class="flex gap-2">
+            <template x-for="level in [1, 2, 3, 4, 5]" :key="'conf-' + level">
+              <button
+                type="button"
+                @click="confidenceBefore = level"
+                class="flex-1 py-3 rounded-lg text-sm font-medium border transition-colors"
+                :class="confidenceBefore === level
+                  ? 'bg-purple-600 text-white border-purple-600'
+                  : 'bg-white text-gray-700 border-gray-300 hover:border-purple-400'"
+                x-text="level"
+              ></button>
+            </template>
+          </div>
+        </div>
+
+        <button
+          @click="showQuestion()"
+          :disabled="!confidenceBefore"
+          class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+        >
+          Show Question
+        </button>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Step: question
+         ════════════════════════════════════════════ #}
+      <div x-show="step === 'question'" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        {# Question type badge #}
+        <div class="flex items-center gap-2 mb-4">
+          <span
+            class="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium"
+            :class="practiceTypeBadge(currentItem?.practice_type)"
+            x-text="practiceTypeLabel(currentItem?.practice_type)"
+          ></span>
+          <span
+            x-show="currentItem?.difficulty_level !== null && currentItem?.difficulty_level !== undefined"
+            class="text-xs text-gray-400"
+            x-text="'Difficulty: ' + Math.round((currentItem?.difficulty_level || 0) * 100) + '%'"
+          ></span>
+        </div>
+
+        {# Question text #}
+        <div class="mb-6">
+          <p class="text-gray-900 font-medium leading-relaxed" x-text="currentItem?.question_text"></p>
+        </div>
+
+        {# Answer input — varies by type #}
+
+        {# Multiple choice #}
+        <template x-if="currentItem?.practice_type === 'multiple_choice' && currentItem?.options_json">
+          <div class="space-y-2 mb-6">
+            <template x-for="(option, idx) in (Array.isArray(currentItem.options_json) ? currentItem.options_json : [])" :key="'opt-' + idx">
+              <button
+                type="button"
+                @click="studentAnswer = option"
+                class="w-full text-left px-4 py-3 rounded-lg border transition-colors text-sm"
+                :class="studentAnswer === option
+                  ? 'bg-purple-50 border-purple-400 text-purple-900'
+                  : 'bg-white border-gray-200 text-gray-700 hover:border-purple-300'"
+                x-text="option"
+              ></button>
+            </template>
+          </div>
+        </template>
+
+        {# Fill-in-the-blank / short answer / explanation #}
+        <template x-if="currentItem?.practice_type !== 'multiple_choice' && currentItem?.practice_type !== 'flashcard'">
+          <div class="mb-6">
+            <textarea
+              x-model="studentAnswer"
+              rows="3"
+              maxlength="10000"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none text-sm resize-none"
+              :placeholder="answerPlaceholder"
+            ></textarea>
+          </div>
+        </template>
+
+        {# Flashcard — show/hide answer #}
+        <template x-if="currentItem?.practice_type === 'flashcard'">
+          <div class="mb-6">
+            <div x-show="!flashcardRevealed" class="text-center py-6">
+              <button
+                @click="flashcardRevealed = true"
+                class="px-6 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+              >
+                Reveal Answer
+              </button>
+            </div>
+            <div x-show="flashcardRevealed" class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <p class="text-sm text-gray-500 mb-1">Answer:</p>
+              <p class="text-gray-900" x-text="currentItem?.correct_answer"></p>
+            </div>
+            <div x-show="flashcardRevealed" class="mt-4">
+              <p class="text-sm text-gray-500 mb-2">How well did you know this?</p>
+              <div class="flex gap-2">
+                <button
+                  @click="studentAnswer = 'incorrect'"
+                  class="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
+                  :class="studentAnswer === 'incorrect'
+                    ? 'bg-red-50 border-red-400 text-red-700'
+                    : 'bg-white border-gray-300 text-gray-600 hover:border-red-300'"
+                >
+                  Didn't know
+                </button>
+                <button
+                  @click="studentAnswer = 'partial'"
+                  class="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
+                  :class="studentAnswer === 'partial'
+                    ? 'bg-yellow-50 border-yellow-400 text-yellow-700'
+                    : 'bg-white border-gray-300 text-gray-600 hover:border-yellow-300'"
+                >
+                  Partially
+                </button>
+                <button
+                  @click="studentAnswer = 'correct'"
+                  class="flex-1 py-2 rounded-lg text-sm font-medium border transition-colors"
+                  :class="studentAnswer === 'correct'
+                    ? 'bg-emerald-50 border-emerald-400 text-emerald-700'
+                    : 'bg-white border-gray-300 text-gray-600 hover:border-emerald-300'"
+                >
+                  Knew it
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        {# Submit button #}
+        <button
+          @click="submitAnswer()"
+          :disabled="!studentAnswer || evaluating"
+          class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+        >
+          <span x-show="!evaluating">Check Answer</span>
+          <span x-show="evaluating" class="flex items-center justify-center gap-2">
+            <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+            Evaluating...
+          </span>
+        </button>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Step: feedback
+         ════════════════════════════════════════════ #}
+      <div x-show="step === 'feedback'" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+        {# Result indicator #}
+        <div class="flex items-center gap-3 mb-4">
+          <div
+            class="w-10 h-10 rounded-full flex items-center justify-center text-lg"
+            :class="lastResult?.is_correct ? 'bg-emerald-100' : 'bg-red-100'"
+          >
+            <span x-text="lastResult?.is_correct ? '\u2713' : '\u2717'"></span>
+          </div>
+          <div>
+            <p
+              class="font-semibold"
+              :class="lastResult?.is_correct ? 'text-emerald-700' : 'text-red-700'"
+              x-text="lastResult?.is_correct ? 'Correct!' : 'Incorrect'"
+            ></p>
+            <p
+              x-show="lastResult?.score !== null && lastResult?.score !== undefined && !lastResult?.is_correct"
+              class="text-xs text-gray-500"
+              x-text="'Score: ' + Math.round((lastResult?.score || 0) * 100) + '%'"
+            ></p>
+          </div>
+        </div>
+
+        {# Feedback text #}
+        <div class="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4">
+          <p class="text-sm text-gray-700 leading-relaxed" x-text="lastResult?.feedback"></p>
+        </div>
+
+        {# Misconceptions #}
+        <template x-if="lastResult?.misconceptions_detected && lastResult.misconceptions_detected.length > 0">
+          <div class="mb-4">
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Misconceptions detected</p>
+            <div class="space-y-1">
+              <template x-for="m in lastResult.misconceptions_detected" :key="m">
+                <div class="flex items-start gap-2">
+                  <svg class="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                  </svg>
+                  <p class="text-sm text-gray-600" x-text="m"></p>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        {# Your answer vs correct answer (when wrong) #}
+        <template x-if="!lastResult?.is_correct && currentItem?.correct_answer">
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            <div class="bg-red-50 rounded-lg p-3 border border-red-100">
+              <p class="text-xs text-red-500 font-medium mb-1">Your answer</p>
+              <p class="text-sm text-red-800" x-text="studentAnswer"></p>
+            </div>
+            <div class="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
+              <p class="text-xs text-emerald-500 font-medium mb-1">Correct answer</p>
+              <p class="text-sm text-emerald-800" x-text="currentItem?.correct_answer"></p>
+            </div>
+          </div>
+        </template>
+
+        {# Explanation (if available) #}
+        <template x-if="currentItem?.explanation">
+          <div class="bg-blue-50 rounded-lg p-4 border border-blue-100 mb-4">
+            <p class="text-xs text-blue-500 font-medium mb-1">Explanation</p>
+            <p class="text-sm text-blue-800 leading-relaxed" x-text="currentItem.explanation"></p>
+          </div>
+        </template>
+
+        {# Next / Finish button #}
+        <button
+          @click="nextQuestion()"
+          class="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
+          x-text="currentIndex < items.length - 1 ? 'Next Question' : 'Finish Session'"
+        ></button>
+      </div>
+
+      {# ════════════════════════════════════════════
+         Step: session_complete
+         ════════════════════════════════════════════ #}
+      <div x-show="step === 'session_complete'">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 text-center mb-6">
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-full mb-4"
+               :class="correctCount >= Math.ceil(items.length * 0.7) ? 'bg-emerald-100' : 'bg-amber-100'">
+            <span class="text-3xl" x-text="correctCount >= Math.ceil(items.length * 0.7) ? '\u2713' : '\u270F'"></span>
+          </div>
+          <h2 class="text-xl font-bold text-gray-900 mb-1">Session Complete</h2>
+          <p class="text-gray-500 mb-4" x-text="concept"></p>
+
+          {# Score summary #}
+          <div class="inline-flex items-center gap-4 bg-gray-50 rounded-xl px-6 py-4 mb-6">
+            <div class="text-center">
+              <p class="text-2xl font-bold" :class="correctCount >= Math.ceil(items.length * 0.7) ? 'text-emerald-600' : 'text-amber-600'"
+                 x-text="correctCount + '/' + items.length"></p>
+              <p class="text-xs text-gray-500">Correct</p>
+            </div>
+            <div class="w-px h-10 bg-gray-200"></div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-gray-700" x-text="Math.round(averageScore * 100) + '%'"></p>
+              <p class="text-xs text-gray-500">Avg Score</p>
+            </div>
+          </div>
+
+          {# Calibration message #}
+          <div
+            class="rounded-lg p-3 mb-6 text-sm"
+            :class="calibrationMessageStyle"
+          >
+            <p x-text="calibrationMessage"></p>
+          </div>
+        </div>
+
+        {# Concepts to review #}
+        <template x-if="conceptsToReview.length > 0">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h3 class="text-sm font-semibold text-gray-900 mb-3">Concepts to Review</h3>
+            <div class="space-y-2">
+              <template x-for="c in conceptsToReview" :key="c">
+                <div class="flex items-center gap-2 text-sm">
+                  <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                  </svg>
+                  <span class="text-gray-700" x-text="c"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        {# Mastery update (if available) #}
+        <template x-if="masteryStates.length > 0">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h3 class="text-sm font-semibold text-gray-900 mb-3">Mastery Updated</h3>
+            <div class="space-y-3">
+              <template x-for="ms in masteryStates" :key="ms.concept">
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm text-gray-700" x-text="ms.concept"></span>
+                    <span class="text-xs font-medium text-gray-500" x-text="Math.round(ms.mastery_level * 100) + '%'"></span>
+                  </div>
+                  <div class="w-full bg-gray-100 rounded-full h-2">
+                    <div
+                      class="h-2 rounded-full transition-all duration-500"
+                      :class="ms.mastery_level >= 0.8 ? 'bg-emerald-500' : ms.mastery_level >= 0.5 ? 'bg-yellow-500' : 'bg-red-400'"
+                      :style="'width: ' + Math.round(ms.mastery_level * 100) + '%'"
+                    ></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        {# Action buttons #}
+        <div class="flex gap-3">
+          <a
+            href="/study-plan"
+            class="flex-1 py-2.5 text-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
+          >
+            Back to Study Plan
+          </a>
+          <a
+            href="/mastery"
+            class="flex-1 py-2.5 text-center bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-lg transition-colors"
+          >
+            View Mastery
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
+
+  function practiceSessionApp() {
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const params = new URLSearchParams(window.location.search);
+    const blockId = params.get('block_id');
+
+    return {
+      session: null,
+
+      // Session state machine
+      step: 'loading', // loading | error | confidence_prompt | question | feedback | session_complete
+      errorMessage: '',
+
+      // Practice data
+      blockId: blockId ? parseInt(blockId) : null,
+      concept: '',
+      courseId: null,
+      items: [],
+      currentIndex: 0,
+
+      // Per-question state
+      confidenceBefore: null,
+      studentAnswer: '',
+      flashcardRevealed: false,
+      evaluating: false,
+      questionStartTime: null,
+
+      // Results tracking
+      lastResult: null,
+      results: [], // { is_correct, score, feedback, misconceptions_detected, practice_result_id }
+
+      // Session summary
+      masteryStates: [],
+      masteryUpdating: false,
+
+      get currentItem() {
+        return this.items[this.currentIndex] || null;
+      },
+
+      get progressPercent() {
+        if (this.items.length === 0) return 0;
+        return Math.round(((this.currentIndex) / this.items.length) * 100);
+      },
+
+      get correctCount() {
+        return this.results.filter(r => r.is_correct).length;
+      },
+
+      get averageScore() {
+        if (this.results.length === 0) return 0;
+        const sum = this.results.reduce((s, r) => s + (r.score || 0), 0);
+        return sum / this.results.length;
+      },
+
+      get conceptsToReview() {
+        // Collect unique misconceptions from all results
+        const misconceptions = new Set();
+        for (const r of this.results) {
+          if (r.misconceptions_detected) {
+            for (const m of r.misconceptions_detected) {
+              misconceptions.add(m);
+            }
+          }
+        }
+        return [...misconceptions];
+      },
+
+      get calibrationMessage() {
+        if (this.results.length === 0) return '';
+        const avgConfidence = this.results.reduce((s, r) => s + (r.confidence_before || 3), 0) / this.results.length;
+        const normalizedConfidence = (avgConfidence - 1) / 4; // 1-5 -> 0-1
+        const gap = normalizedConfidence - this.averageScore;
+
+        if (Math.abs(gap) < 0.15) {
+          return 'Your confidence closely matches your performance. Great self-awareness!';
+        } else if (gap > 0) {
+          return 'You were more confident than your results suggest. Consider reviewing this material more carefully.';
+        } else {
+          return 'You performed better than expected! You may know more than you think.';
+        }
+      },
+
+      get calibrationMessageStyle() {
+        if (this.results.length === 0) return 'bg-gray-50 text-gray-600';
+        const avgConfidence = this.results.reduce((s, r) => s + (r.confidence_before || 3), 0) / this.results.length;
+        const normalizedConfidence = (avgConfidence - 1) / 4;
+        const gap = normalizedConfidence - this.averageScore;
+
+        if (Math.abs(gap) < 0.15) {
+          return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+        } else if (gap > 0) {
+          return 'bg-amber-50 text-amber-700 border border-amber-200';
+        } else {
+          return 'bg-blue-50 text-blue-700 border border-blue-200';
+        }
+      },
+
+      get answerPlaceholder() {
+        const type = this.currentItem?.practice_type;
+        if (type === 'fill_in_blank') return 'Type the missing word or phrase...';
+        if (type === 'short_answer') return 'Type your answer...';
+        if (type === 'explanation') return 'Write your explanation...';
+        if (type === 'worked_example') return 'Show your work step by step...';
+        return 'Type your answer...';
+      },
+
+      async init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        this.session = session;
+
+        supabase.auth.onAuthStateChange((_event, session) => {
+          this.session = session;
+          if (session && this.step === 'loading') this.generateItems();
+        });
+
+        if (!this.blockId) {
+          this.step = 'error';
+          this.errorMessage = 'No block_id provided. Please start a practice session from the Study Plan.';
+          return;
+        }
+
+        if (this.session) this.generateItems();
+      },
+
+      async signOut() {
+        await supabase.auth.signOut();
+        this.session = null;
+        window.location.href = '/';
+      },
+
+      // ── Generate practice items ──
+
+      async generateItems() {
+        this.step = 'loading';
+        this.errorMessage = '';
+
+        try {
+          const token = this.session?.access_token;
+          if (!token) {
+            this.step = 'error';
+            this.errorMessage = 'Not authenticated.';
+            return;
+          }
+
+          const resp = await fetch(`/study-blocks/${this.blockId}/practice/generate`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            const msg = errData?.detail?.message || errData?.detail || 'Failed to generate practice items';
+            this.errorMessage = typeof msg === 'string' ? msg : JSON.stringify(msg);
+            this.step = 'error';
+            return;
+          }
+
+          const data = await resp.json();
+          this.concept = data.concept || '';
+          this.courseId = data.course_id;
+          this.items = data.items || [];
+
+          if (this.items.length === 0) {
+            this.step = 'error';
+            this.errorMessage = 'No practice items were generated for this block.';
+            return;
+          }
+
+          this.currentIndex = 0;
+          this.resetQuestionState();
+          this.step = 'confidence_prompt';
+        } catch (err) {
+          this.step = 'error';
+          this.errorMessage = 'Failed to start practice session: ' + err.message;
+        }
+      },
+
+      // ── Question flow ──
+
+      showQuestion() {
+        this.questionStartTime = Date.now();
+        this.step = 'question';
+      },
+
+      async submitAnswer() {
+        if (!this.studentAnswer || this.evaluating) return;
+        this.evaluating = true;
+
+        try {
+          const token = this.session?.access_token;
+          const timeSpent = this.questionStartTime
+            ? Math.round((Date.now() - this.questionStartTime) / 1000)
+            : null;
+
+          const body = {
+            practice_item_id: this.currentItem.id,
+            student_answer: this.studentAnswer,
+            confidence_before: this.confidenceBefore,
+            study_block_id: this.blockId,
+            time_spent_seconds: timeSpent,
+          };
+
+          const resp = await fetch('/practice-results/evaluate', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            const msg = errData?.detail?.message || errData?.detail || 'Evaluation failed';
+            alert(typeof msg === 'string' ? msg : JSON.stringify(msg));
+            return;
+          }
+
+          const result = await resp.json();
+          this.lastResult = result;
+          this.results.push({
+            ...result,
+            confidence_before: this.confidenceBefore,
+          });
+          this.step = 'feedback';
+        } catch (err) {
+          alert('Evaluation failed: ' + err.message);
+        } finally {
+          this.evaluating = false;
+        }
+      },
+
+      nextQuestion() {
+        if (this.currentIndex < this.items.length - 1) {
+          this.currentIndex++;
+          this.resetQuestionState();
+          this.step = 'confidence_prompt';
+        } else {
+          this.finishSession();
+        }
+      },
+
+      resetQuestionState() {
+        this.confidenceBefore = null;
+        this.studentAnswer = '';
+        this.flashcardRevealed = false;
+        this.lastResult = null;
+        this.questionStartTime = null;
+      },
+
+      // ── Session completion ──
+
+      async finishSession() {
+        this.step = 'session_complete';
+
+        // Update mastery states
+        try {
+          const token = this.session?.access_token;
+          const resp = await fetch('/mastery-states/update-from-results', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ study_block_id: this.blockId }),
+          });
+
+          if (resp.ok) {
+            const data = await resp.json();
+            this.masteryStates = data.mastery_states || [];
+          }
+        } catch (err) {
+          console.warn('Failed to update mastery:', err.message);
+        }
+      },
+
+      // ── Badge helpers ──
+
+      practiceTypeBadge(type) {
+        const map = {
+          multiple_choice: 'bg-blue-100 text-blue-700',
+          fill_in_blank: 'bg-indigo-100 text-indigo-700',
+          short_answer: 'bg-purple-100 text-purple-700',
+          flashcard: 'bg-amber-100 text-amber-700',
+          worked_example: 'bg-teal-100 text-teal-700',
+          explanation: 'bg-pink-100 text-pink-700',
+        };
+        return map[type] || 'bg-gray-100 text-gray-600';
+      },
+
+      practiceTypeLabel(type) {
+        const map = {
+          multiple_choice: 'Multiple Choice',
+          fill_in_blank: 'Fill in the Blank',
+          short_answer: 'Short Answer',
+          flashcard: 'Flashcard',
+          worked_example: 'Worked Example',
+          explanation: 'Explanation',
+        };
+        return map[type] || type;
+      },
+    };
+  }
+</script>
+{% endblock %}
