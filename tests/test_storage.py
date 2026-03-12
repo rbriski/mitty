@@ -11,6 +11,7 @@ from mitty.models import (
     Assignment,
     Course,
     Enrollment,
+    FileMetadata,
     ModuleItem,
     Page,
     Quiz,
@@ -26,6 +27,7 @@ from mitty.storage import (
     upsert_assignments,
     upsert_courses,
     upsert_enrollments,
+    upsert_files_as_resources,
     upsert_module_items_as_resources,
     upsert_pages_as_resources,
     upsert_quizzes_as_assessments,
@@ -1539,3 +1541,107 @@ class TestUpsertPagesAsResources:
         assert len(rows) == 2
         ids = {r["canvas_item_id"] for r in rows}
         assert ids == {9_000_000 + 8001, 9_000_000 + 8002}
+
+
+# ------------------------------------------------------------------ #
+#  upsert_files_as_resources
+# ------------------------------------------------------------------ #
+
+
+class TestUpsertFilesAsResources:
+    """upsert_files_as_resources maps FileMetadata models to resource rows."""
+
+    async def test_upsert_files_stores_metadata_only(self) -> None:
+        """File metadata is stored as resource rows without content."""
+        client = _mock_client()
+        files = [
+            FileMetadata(
+                id=9001,
+                display_name="Unit1_Study_Guide.pdf",
+                content_type="application/pdf",
+                size=245760,
+                url="https://mitty.instructure.com/files/9001/download",
+                folder_id=4001,
+            ),
+        ]
+
+        await upsert_files_as_resources(client, files, course_id=12345)
+
+        client.table.assert_called_once_with("resources")
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["course_id"] == 12345
+        assert row["title"] == "Unit1_Study_Guide.pdf"
+        assert row["resource_type"] == "file"
+        assert row["source_url"] == "https://mitty.instructure.com/files/9001/download"
+        assert row["canvas_item_id"] == 9001
+        assert "updated_at" in row
+        assert "created_at" in row
+        # No content_text key — metadata only
+        assert "content_text" not in row
+
+    async def test_upsert_files_empty_list(self) -> None:
+        """Empty files list does not call upsert."""
+        client = _mock_client()
+
+        await upsert_files_as_resources(client, [], course_id=12345)
+
+        client.table.assert_not_called()
+
+    async def test_upsert_files_on_conflict_canvas_item_id(self) -> None:
+        """Upsert uses on_conflict='canvas_item_id' for dedup."""
+        client = _mock_client()
+        files = [
+            FileMetadata(id=9001, display_name="test.pdf"),
+        ]
+
+        await upsert_files_as_resources(client, files, course_id=1)
+
+        kwargs = client.table.return_value.upsert.call_args[1]
+        assert kwargs.get("on_conflict") == "canvas_item_id"
+
+    async def test_upsert_files_empty_url_becomes_none(self) -> None:
+        """Files with empty URL string get source_url=None."""
+        client = _mock_client()
+        files = [
+            FileMetadata(id=9003, display_name="sample.txt", url=""),
+        ]
+
+        await upsert_files_as_resources(client, files, course_id=12345)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert rows[0]["source_url"] is None
+
+    async def test_upsert_files_multiple(self) -> None:
+        """Multiple files are batched into a single upsert."""
+        client = _mock_client()
+        files = [
+            FileMetadata(
+                id=9001,
+                display_name="file_a.pdf",
+                url="https://example.com/a",
+            ),
+            FileMetadata(
+                id=9002,
+                display_name="file_b.docx",
+                url="https://example.com/b",
+            ),
+        ]
+
+        await upsert_files_as_resources(client, files, course_id=42)
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        ids = {r["canvas_item_id"] for r in rows}
+        assert ids == {9001, 9002}
+
+    async def test_upsert_files_api_failure_raises_storage_error(self) -> None:
+        client = _mock_client()
+        client.table.return_value.upsert.return_value.execute = AsyncMock(
+            side_effect=Exception("db error")
+        )
+        files = [FileMetadata(id=9001, display_name="test.pdf")]
+
+        with pytest.raises(StorageError, match="db error"):
+            await upsert_files_as_resources(client, files, course_id=1)

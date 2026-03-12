@@ -14,7 +14,15 @@ from typing import TYPE_CHECKING
 from supabase import AsyncClient, acreate_client
 
 if TYPE_CHECKING:
-    from mitty.models import Assignment, Course, Enrollment, ModuleItem, Page, Quiz
+    from mitty.models import (
+        Assignment,
+        Course,
+        Enrollment,
+        FileMetadata,
+        ModuleItem,
+        Page,
+        Quiz,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -559,6 +567,64 @@ async def upsert_pages_as_resources(
         raise StorageError(msg) from exc
 
     logger.info("Upserted %d pages as resources", len(rows))
+
+
+# ------------------------------------------------------------------ #
+#  Files → Resources
+# ------------------------------------------------------------------ #
+
+
+async def upsert_files_as_resources(
+    client: AsyncClient,
+    files: list[FileMetadata],
+    course_id: int,
+) -> None:
+    """Upsert Canvas file metadata as resource rows.
+
+    Each file is mapped to a resource with ``resource_type='file'``,
+    ``source_url`` set to the file's download URL, and ``title`` set
+    to ``display_name``.  No file content is downloaded or stored.
+
+    Deduplication uses the ``canvas_item_id`` column, set to the
+    file's Canvas ID.
+
+    Args:
+        client: Async Supabase client.
+        files: List of FileMetadata models to upsert.
+        course_id: The Canvas course ID these files belong to.
+
+    Raises:
+        StorageError: If the Supabase upsert fails.
+    """
+    if not files:
+        return
+
+    now = _now_iso()
+    rows: list[dict] = []
+    for file in files:
+        row: dict = {
+            "course_id": course_id,
+            "title": file.display_name,
+            "resource_type": "file",
+            "source_url": file.url or None,
+            "canvas_item_id": file.id,
+            "sort_order": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        rows.append(row)
+
+    try:
+        await (
+            client.table("resources")
+            .upsert(rows, on_conflict="canvas_item_id")
+            .execute()
+        )
+    except Exception as exc:
+        msg = f"Failed to upsert files as resources: {exc}"
+        raise StorageError(msg) from exc
+
+    logger.info("Upserted %d files as resources", len(rows))
 
 
 # ------------------------------------------------------------------ #

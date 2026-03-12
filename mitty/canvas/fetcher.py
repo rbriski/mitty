@@ -13,7 +13,16 @@ from typing import TYPE_CHECKING
 
 from bs4 import BeautifulSoup
 
-from mitty.models import Assignment, Course, Enrollment, Module, ModuleItem, Page, Quiz
+from mitty.models import (
+    Assignment,
+    Course,
+    Enrollment,
+    FileMetadata,
+    Module,
+    ModuleItem,
+    Page,
+    Quiz,
+)
 
 if TYPE_CHECKING:
     from mitty.canvas.client import CanvasClient
@@ -176,6 +185,30 @@ def strip_html(html: str) -> str:
     for tag in soup(["script", "style"]):
         tag.decompose()
     return soup.get_text(separator="\n", strip=True)
+
+
+async def fetch_files(
+    client: CanvasClient,
+    course_id: int,
+) -> list[FileMetadata]:
+    """Fetch all file metadata for a given course.
+
+    Calls ``GET /api/v1/courses/:id/files?per_page=100``
+    and parses each item into a :class:`~mitty.models.FileMetadata`.
+    No file content is downloaded.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``FileMetadata`` model instances.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/files",
+        {"per_page": "100"},
+    )
+    return [FileMetadata.model_validate(item) for item in raw]
 
 
 async def fetch_pages(

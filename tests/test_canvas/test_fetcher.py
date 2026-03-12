@@ -11,6 +11,7 @@ from mitty.canvas.fetcher import (
     fetch_assignments,
     fetch_courses,
     fetch_enrollments,
+    fetch_files,
     fetch_module_items,
     fetch_modules,
     fetch_pages,
@@ -21,6 +22,7 @@ from mitty.models import (
     Assignment,
     Course,
     Enrollment,
+    FileMetadata,
     Module,
     ModuleItem,
     Page,
@@ -531,6 +533,57 @@ class TestFetchPages:
 
         result = await fetch_pages(client, course_id=12345)
 
+        assert result == []
+
+
+class TestFetchFiles:
+    """fetch_files calls get_paginated with course_id in the path."""
+
+    async def test_fetch_files_parses_fixture(self) -> None:
+        raw = _load_fixture("files.json")
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_files(client, course_id=12345)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/12345/files",
+            {"per_page": "100"},
+        )
+        assert len(result) == 3
+        assert all(isinstance(f, FileMetadata) for f in result)
+
+        # First file: PDF with full metadata
+        f0 = result[0]
+        assert f0.id == 9001
+        assert f0.display_name == "Unit1_Study_Guide.pdf"
+        assert f0.content_type == "application/pdf"
+        assert f0.size == 245760
+        assert f0.url == "https://mitty.instructure.com/files/9001/download"
+        assert f0.folder_id == 4001
+
+        # Second file: DOCX
+        f1 = result[1]
+        assert f1.id == 9002
+        assert f1.display_name == "lecture_notes_week3.docx"
+
+        # Third file: empty URL and null folder
+        f2 = result[2]
+        assert f2.id == 9003
+        assert f2.url == ""
+        assert f2.folder_id is None
+        assert f2.size == 0
+
+    async def test_fetch_files_empty_list(self) -> None:
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=[])
+
+        result = await fetch_files(client, course_id=99999)
+
+        client.get_paginated.assert_called_once_with(
+            "/api/v1/courses/99999/files",
+            {"per_page": "100"},
+        )
         assert result == []
 
 
