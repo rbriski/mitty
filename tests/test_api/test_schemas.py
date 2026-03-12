@@ -22,6 +22,9 @@ from mitty.api.schemas import (
     MasteryStateCreate,
     MasteryStateResponse,
     MasteryStateUpdate,
+    PracticeItemCreate,
+    PracticeItemResponse,
+    PracticeItemUpdate,
     PracticeResultCreate,
     PracticeResultResponse,
     PracticeResultUpdate,
@@ -195,6 +198,7 @@ class TestResourceCreate:
             "link",
             "notes",
             "video",
+            "discussion",
         ):
             obj = ResourceCreate.model_validate(
                 {"course_id": 1, "title": "X", "resource_type": t}
@@ -724,6 +728,158 @@ class TestMasteryStateResponse:
 # ---------------------------------------------------------------------------
 
 
+class TestPracticeItemCreate:
+    def test_valid(self) -> None:
+        uid = uuid4()
+        obj = PracticeItemCreate.model_validate(
+            {
+                "user_id": str(uid),
+                "course_id": 1,
+                "concept": "Photosynthesis",
+                "practice_type": "multiple_choice",
+                "question_text": "What is photosynthesis?",
+            }
+        )
+        assert obj.practice_type == "multiple_choice"
+        assert obj.concept == "Photosynthesis"
+
+    def test_all_practice_types(self) -> None:
+        uid = uuid4()
+        for pt in (
+            "multiple_choice",
+            "fill_in_blank",
+            "short_answer",
+            "flashcard",
+            "worked_example",
+            "explanation",
+        ):
+            obj = PracticeItemCreate.model_validate(
+                {
+                    "user_id": str(uid),
+                    "course_id": 1,
+                    "concept": "X",
+                    "practice_type": pt,
+                    "question_text": "Q?",
+                }
+            )
+            assert obj.practice_type == pt
+
+    def test_invalid_practice_type(self) -> None:
+        with pytest.raises(ValueError):
+            PracticeItemCreate.model_validate(
+                {
+                    "user_id": str(uuid4()),
+                    "course_id": 1,
+                    "concept": "X",
+                    "practice_type": "meditation",
+                    "question_text": "Q?",
+                }
+            )
+
+    def test_difficulty_level_range(self) -> None:
+        uid = uuid4()
+        for val in (0.0, 0.5, 1.0):
+            obj = PracticeItemCreate.model_validate(
+                {
+                    "user_id": str(uid),
+                    "course_id": 1,
+                    "concept": "X",
+                    "practice_type": "flashcard",
+                    "question_text": "Q?",
+                    "difficulty_level": val,
+                }
+            )
+            assert obj.difficulty_level == val
+
+    def test_difficulty_level_too_high(self) -> None:
+        with pytest.raises(ValueError):
+            PracticeItemCreate.model_validate(
+                {
+                    "user_id": str(uuid4()),
+                    "course_id": 1,
+                    "concept": "X",
+                    "practice_type": "flashcard",
+                    "question_text": "Q?",
+                    "difficulty_level": 1.1,
+                }
+            )
+
+    def test_difficulty_level_too_low(self) -> None:
+        with pytest.raises(ValueError):
+            PracticeItemCreate.model_validate(
+                {
+                    "user_id": str(uuid4()),
+                    "course_id": 1,
+                    "concept": "X",
+                    "practice_type": "flashcard",
+                    "question_text": "Q?",
+                    "difficulty_level": -0.1,
+                }
+            )
+
+    def test_with_options_json(self) -> None:
+        uid = uuid4()
+        obj = PracticeItemCreate.model_validate(
+            {
+                "user_id": str(uid),
+                "course_id": 1,
+                "concept": "X",
+                "practice_type": "multiple_choice",
+                "question_text": "Q?",
+                "options_json": {"A": "Option A", "B": "Option B"},
+            }
+        )
+        assert obj.options_json == {"A": "Option A", "B": "Option B"}
+
+    def test_with_source_chunk_ids(self) -> None:
+        uid = uuid4()
+        obj = PracticeItemCreate.model_validate(
+            {
+                "user_id": str(uid),
+                "course_id": 1,
+                "concept": "X",
+                "practice_type": "flashcard",
+                "question_text": "Q?",
+                "source_chunk_ids": [1, 2, 3],
+            }
+        )
+        assert obj.source_chunk_ids == [1, 2, 3]
+
+
+class TestPracticeItemUpdate:
+    def test_all_none(self) -> None:
+        obj = PracticeItemUpdate.model_validate({})
+        for field_name in PracticeItemUpdate.model_fields:
+            assert getattr(obj, field_name) is None
+
+
+class TestPracticeItemResponse:
+    def test_valid(self) -> None:
+        uid = uuid4()
+        now = datetime(2026, 3, 1, tzinfo=UTC)
+        obj = PracticeItemResponse.model_validate(
+            {
+                "id": 1,
+                "user_id": str(uid),
+                "course_id": 1,
+                "concept": "Photosynthesis",
+                "practice_type": "multiple_choice",
+                "question_text": "What is it?",
+                "correct_answer": "A process of...",
+                "options_json": ["A", "B", "C"],
+                "explanation": "Plants use sunlight...",
+                "source_chunk_ids": [1, 2],
+                "difficulty_level": 0.5,
+                "generation_model": "gpt-4o-mini",
+                "times_used": 3,
+                "last_used_at": now,
+                "created_at": now,
+            }
+        )
+        assert obj.id == 1
+        assert obj.times_used == 3
+
+
 class TestPracticeResultCreate:
     def test_valid(self) -> None:
         uid = uuid4()
@@ -731,19 +887,20 @@ class TestPracticeResultCreate:
             {
                 "user_id": str(uid),
                 "course_id": 1,
-                "practice_type": "quiz",
+                "practice_type": "multiple_choice",
                 "question_text": "What is photosynthesis?",
             }
         )
-        assert obj.practice_type == "quiz"
+        assert obj.practice_type == "multiple_choice"
 
     def test_all_practice_types(self) -> None:
         uid = uuid4()
         for pt in (
-            "quiz",
+            "multiple_choice",
+            "fill_in_blank",
+            "short_answer",
             "flashcard",
             "worked_example",
-            "reflection",
             "explanation",
         ):
             obj = PracticeResultCreate.model_validate(
@@ -767,6 +924,18 @@ class TestPracticeResultCreate:
                 }
             )
 
+    def test_old_practice_type_quiz_rejected(self) -> None:
+        """The old 'quiz' type is no longer valid."""
+        with pytest.raises(ValueError):
+            PracticeResultCreate.model_validate(
+                {
+                    "user_id": str(uuid4()),
+                    "course_id": 1,
+                    "practice_type": "quiz",
+                    "question_text": "Q?",
+                }
+            )
+
     def test_confidence_before_range(self) -> None:
         uid = uuid4()
         for val in (1, 3, 5):
@@ -774,7 +943,7 @@ class TestPracticeResultCreate:
                 {
                     "user_id": str(uid),
                     "course_id": 1,
-                    "practice_type": "quiz",
+                    "practice_type": "multiple_choice",
                     "question_text": "Q?",
                     "confidence_before": float(val),
                 }
@@ -787,7 +956,7 @@ class TestPracticeResultCreate:
                 {
                     "user_id": str(uuid4()),
                     "course_id": 1,
-                    "practice_type": "quiz",
+                    "practice_type": "multiple_choice",
                     "question_text": "Q?",
                     "confidence_before": 0.5,
                 }
@@ -799,7 +968,7 @@ class TestPracticeResultCreate:
                 {
                     "user_id": str(uuid4()),
                     "course_id": 1,
-                    "practice_type": "quiz",
+                    "practice_type": "multiple_choice",
                     "question_text": "Q?",
                     "confidence_before": 5.1,
                 }
@@ -811,7 +980,7 @@ class TestPracticeResultCreate:
                 {
                     "user_id": str(uuid4()),
                     "course_id": 1,
-                    "practice_type": "quiz",
+                    "practice_type": "multiple_choice",
                     "question_text": "x" * 5001,
                 }
             )
@@ -822,7 +991,7 @@ class TestPracticeResultCreate:
                 {
                     "user_id": str(uuid4()),
                     "course_id": 1,
-                    "practice_type": "quiz",
+                    "practice_type": "multiple_choice",
                     "question_text": "Q?",
                     "student_answer": "x" * 5001,
                 }
@@ -834,11 +1003,28 @@ class TestPracticeResultCreate:
                 {
                     "user_id": str(uuid4()),
                     "course_id": 1,
-                    "practice_type": "quiz",
+                    "practice_type": "multiple_choice",
                     "question_text": "Q?",
                     "correct_answer": "x" * 5001,
                 }
             )
+
+    def test_score_and_feedback(self) -> None:
+        uid = uuid4()
+        obj = PracticeResultCreate.model_validate(
+            {
+                "user_id": str(uid),
+                "course_id": 1,
+                "practice_type": "short_answer",
+                "question_text": "Q?",
+                "score": 0.85,
+                "feedback": "Good job!",
+                "misconceptions_detected": ["confuses X with Y"],
+            }
+        )
+        assert obj.score == 0.85
+        assert obj.feedback == "Good job!"
+        assert obj.misconceptions_detected == ["confuses X with Y"]
 
 
 class TestPracticeResultUpdate:
@@ -846,6 +1032,9 @@ class TestPracticeResultUpdate:
         obj = PracticeResultUpdate.model_validate({})
         assert obj.student_answer is None
         assert obj.is_correct is None
+        assert obj.score is None
+        assert obj.feedback is None
+        assert obj.misconceptions_detected is None
 
 
 class TestPracticeResultResponse:
@@ -859,18 +1048,23 @@ class TestPracticeResultResponse:
                 "study_block_id": None,
                 "course_id": 1,
                 "concept": "Photosynthesis",
-                "practice_type": "quiz",
+                "practice_type": "multiple_choice",
                 "question_text": "What is it?",
                 "student_answer": "A process",
                 "correct_answer": "A process of...",
                 "is_correct": True,
                 "confidence_before": 3.0,
                 "time_spent_seconds": 45,
+                "score": 1.0,
+                "feedback": "Correct!",
+                "misconceptions_detected": None,
                 "created_at": now,
             }
         )
         assert obj.id == 1
         assert obj.is_correct is True
+        assert obj.score == 1.0
+        assert obj.feedback == "Correct!"
 
 
 # ---------------------------------------------------------------------------

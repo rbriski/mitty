@@ -27,6 +27,7 @@ from mitty.api.schemas import (
     MasteryStateCreate,
     MasteryStateResponse,
     MasteryStateUpdate,
+    PracticeItemUpdate,
     PracticeResultCreate,
     PracticeResultResponse,
     PracticeResultUpdate,
@@ -155,6 +156,10 @@ class TestForeignKeyCounts:
     def test_mastery_states_fk_count(self) -> None:
         assert len(_table("mastery_states").foreign_keys) == 1
 
+    def test_practice_items_fk_count(self) -> None:
+        # course_id -> courses.id
+        assert len(_table("practice_items").foreign_keys) == 1
+
     def test_practice_results_fk_count(self) -> None:
         # study_block_id -> study_blocks.id, course_id -> courses.id
         assert len(_table("practice_results").foreign_keys) == 2
@@ -218,6 +223,11 @@ class TestIndexNames:
     def test_mastery_states_unique_index_name(self) -> None:
         assert "ix_mastery_states_user_course_concept" in _index_names(
             _table("mastery_states")
+        )
+
+    def test_practice_items_user_course_concept_index_name(self) -> None:
+        assert "ix_practice_items_user_course_concept" in _index_names(
+            _table("practice_items")
         )
 
     def test_practice_results_user_course_index_name(self) -> None:
@@ -377,7 +387,7 @@ class TestPracticeResultBoundaryValues:
             {
                 "user_id": str(uuid4()),
                 "course_id": 1,
-                "practice_type": "quiz",
+                "practice_type": "multiple_choice",
                 "question_text": "Q?",
                 "confidence_before": 1.0,
             }
@@ -389,7 +399,7 @@ class TestPracticeResultBoundaryValues:
             {
                 "user_id": str(uuid4()),
                 "course_id": 1,
-                "practice_type": "quiz",
+                "practice_type": "multiple_choice",
                 "question_text": "Q?",
                 "confidence_before": 5.0,
             }
@@ -401,7 +411,7 @@ class TestPracticeResultBoundaryValues:
             {
                 "user_id": str(uuid4()),
                 "course_id": 1,
-                "practice_type": "quiz",
+                "practice_type": "multiple_choice",
                 "question_text": "x" * 5000,
             }
         )
@@ -449,6 +459,11 @@ class TestAllUpdateFieldsOptional:
     def test_mastery_state_update_empty(self) -> None:
         obj = MasteryStateUpdate.model_validate({})
         for field_name in MasteryStateUpdate.model_fields:
+            assert getattr(obj, field_name) is None
+
+    def test_practice_item_update_empty(self) -> None:
+        obj = PracticeItemUpdate.model_validate({})
+        for field_name in PracticeItemUpdate.model_fields:
             assert getattr(obj, field_name) is None
 
     def test_practice_result_update_empty(self) -> None:
@@ -699,18 +714,24 @@ class TestResponseSchemasWithNulls:
                 "study_block_id": None,
                 "course_id": 1,
                 "concept": None,
-                "practice_type": "reflection",
+                "practice_type": "explanation",
                 "question_text": "What did you learn?",
                 "student_answer": None,
                 "correct_answer": None,
                 "is_correct": None,
                 "confidence_before": None,
                 "time_spent_seconds": None,
+                "score": None,
+                "feedback": None,
+                "misconceptions_detected": None,
                 "created_at": now,
             }
         )
         assert obj.study_block_id is None
         assert obj.is_correct is None
+        assert obj.score is None
+        assert obj.feedback is None
+        assert obj.misconceptions_detected is None
 
     def test_mastery_state_response_all_nulls(self) -> None:
         now = datetime(2026, 3, 1, tzinfo=UTC)

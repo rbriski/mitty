@@ -124,7 +124,13 @@ class AssessmentResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 ResourceType = Literal[
-    "textbook_chapter", "canvas_page", "file", "link", "notes", "video"
+    "textbook_chapter",
+    "canvas_page",
+    "file",
+    "link",
+    "notes",
+    "video",
+    "discussion",
 ]
 
 
@@ -438,8 +444,79 @@ class MasteryStateResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 PracticeType = Literal[
-    "quiz", "flashcard", "worked_example", "reflection", "explanation"
+    "multiple_choice",
+    "fill_in_blank",
+    "short_answer",
+    "flashcard",
+    "worked_example",
+    "explanation",
 ]
+
+
+# ---------------------------------------------------------------------------
+# PracticeItem
+# ---------------------------------------------------------------------------
+
+
+class PracticeItemCreate(BaseModel):
+    """Create a new practice item."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: UUID
+    course_id: int
+    concept: str
+    practice_type: PracticeType
+    question_text: str = Field(max_length=10000)
+    correct_answer: str | None = Field(default=None, max_length=10000)
+    options_json: dict | list | None = None
+    explanation: str | None = Field(default=None, max_length=10000)
+    source_chunk_ids: list[int] | None = None
+    difficulty_level: float | None = Field(default=None, ge=0.0, le=1.0)
+    generation_model: str | None = Field(default=None, max_length=255)
+
+
+class PracticeItemUpdate(BaseModel):
+    """Partial update for a practice item."""
+
+    concept: str | None = None
+    practice_type: PracticeType | None = None
+    question_text: str | None = Field(default=None, max_length=10000)
+    correct_answer: str | None = Field(default=None, max_length=10000)
+    options_json: dict | list | None = None
+    explanation: str | None = Field(default=None, max_length=10000)
+    source_chunk_ids: list[int] | None = None
+    difficulty_level: float | None = Field(default=None, ge=0.0, le=1.0)
+    generation_model: str | None = Field(default=None, max_length=255)
+    times_used: int | None = None
+    last_used_at: datetime | None = None
+
+
+class PracticeItemResponse(BaseModel):
+    """Full practice_item record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: UUID
+    course_id: int
+    concept: str
+    practice_type: PracticeType
+    question_text: str
+    correct_answer: str | None
+    options_json: dict | list | None
+    explanation: str | None
+    source_chunk_ids: list[int] | None
+    difficulty_level: float | None
+    generation_model: str | None
+    times_used: int
+    last_used_at: datetime | None
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# PracticeResult
+# ---------------------------------------------------------------------------
 
 
 class PracticeResultCreate(BaseModel):
@@ -458,6 +535,9 @@ class PracticeResultCreate(BaseModel):
     is_correct: bool | None = None
     confidence_before: float | None = Field(default=None, ge=1.0, le=5.0)
     time_spent_seconds: int | None = None
+    score: float | None = None
+    feedback: str | None = Field(default=None, max_length=10000)
+    misconceptions_detected: list[str] | None = None
 
 
 class PracticeResultUpdate(BaseModel):
@@ -468,6 +548,9 @@ class PracticeResultUpdate(BaseModel):
     is_correct: bool | None = None
     confidence_before: float | None = Field(default=None, ge=1.0, le=5.0)
     time_spent_seconds: int | None = None
+    score: float | None = None
+    feedback: str | None = Field(default=None, max_length=10000)
+    misconceptions_detected: list[str] | None = None
 
 
 class PracticeResultResponse(BaseModel):
@@ -487,4 +570,7 @@ class PracticeResultResponse(BaseModel):
     is_correct: bool | None
     confidence_before: float | None
     time_spent_seconds: int | None
+    score: float | None
+    feedback: str | None
+    misconceptions_detected: list[str] | None
     created_at: datetime

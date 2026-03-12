@@ -296,7 +296,8 @@ def _build_opportunities(
             except (ValueError, TypeError):
                 logger.warning(
                     "Malformed due_at for assignment %s: %r",
-                    asn.get("name"), due_at_raw,
+                    asn.get("name"),
+                    due_at_raw,
                 )
                 due_at = None
             # Ensure timezone-aware for scoring arithmetic
@@ -346,7 +347,8 @@ def _build_opportunities(
             except (ValueError, TypeError):
                 logger.warning(
                     "Malformed scheduled_date for assessment %s: %r",
-                    assess.get("name"), scheduled_raw,
+                    assess.get("name"),
+                    scheduled_raw,
                 )
                 scheduled_at = None
             if scheduled_at is not None and scheduled_at.tzinfo is None:
@@ -566,7 +568,8 @@ async def generate_plan(
     except Exception as exc:
         logger.error(
             "Failed to write blocks for plan %d, cleaning up: %s",
-            plan_id, exc,
+            plan_id,
+            exc,
         )
         await client.table("study_plans").delete().eq("id", plan_id).execute()
         raise PlanGenerationError(f"Failed to write study blocks: {exc}") from exc
