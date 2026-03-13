@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from supabase import AsyncClient
 
 from mitty.api.auth import get_current_user
 from mitty.api.dependencies import get_user_client
@@ -15,6 +14,7 @@ from mitty.api.schemas import (
     ResourceResponse,
     ResourceUpdate,
 )
+from supabase import AsyncClient
 
 router = APIRouter(prefix="/resources", tags=["resources"])
 

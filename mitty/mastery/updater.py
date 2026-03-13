@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-from uuid import UUID  # noqa: TC003 — needed at runtime by Pydantic
+from uuid import UUID  # noqa: TCH003 — needed at runtime by Pydantic
 
 from pydantic import BaseModel, ConfigDict
 
