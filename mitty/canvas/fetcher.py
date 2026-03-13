@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from bs4 import BeautifulSoup
 
 from mitty.canvas.client import CanvasAPIError, CanvasAuthError
+from mitty.canvas.extract import download_file_content, extract_text
 from mitty.models import (
     Assignment,
     CalendarEvent,
@@ -283,6 +284,112 @@ async def fetch_files(
     return [FileMetadata.model_validate(item) for item in raw]
 
 
+# Content types eligible for text extraction.
+_EXTRACTABLE_CONTENT_TYPES = {"application/pdf"}
+_EXTRACTABLE_EXTENSIONS = {".pdf", ".docx"}
+
+
+def _is_extractable_file(file: FileMetadata) -> bool:
+    """Return True if the file's content type or extension is extractable."""
+    if file.content_type in _EXTRACTABLE_CONTENT_TYPES:
+        return True
+    name_lower = file.display_name.lower()
+    return any(name_lower.endswith(ext) for ext in _EXTRACTABLE_EXTENSIONS)
+
+
+async def fetch_file_contents(
+    client: CanvasClient,
+    files: list[FileMetadata],
+) -> dict[int, str]:
+    """Download and extract text from extractable files (PDF, DOCX).
+
+    For each file whose content type or filename extension indicates a
+    supported format, downloads the file content and extracts plain text.
+    Unsupported file types are skipped.  Failures on individual files are
+    logged as warnings and skipped so the pipeline continues.
+
+    A small delay (0.5s) between downloads rate-limits Canvas API usage.
+
+    Args:
+        client: An authenticated Canvas API client.
+        files: List of FileMetadata models to process.
+
+    Returns:
+        Mapping of ``file.id`` to extracted plain text for files that
+        were successfully processed.  Files with empty extracted text
+        are excluded.
+    """
+    extractable = [f for f in files if _is_extractable_file(f)]
+    if not extractable:
+        return {}
+
+    result: dict[int, str] = {}
+    for file in extractable:
+        if not file.url:
+            logger.debug(
+                "File %d (%s) has no download URL, skipping",
+                file.id,
+                file.display_name,
+            )
+            continue
+
+        try:
+            content = await download_file_content(client._http, file.url)
+            if content is None:
+                logger.warning(
+                    "Download returned no content for file %d (%s)",
+                    file.id,
+                    file.display_name,
+                )
+                continue
+
+            # Determine content type for extraction dispatch.
+            # Prefer the file's declared content_type; fall back to
+            # guessing from the filename extension.
+            ct = file.content_type
+            if not ct or ct == "application/octet-stream":
+                if file.display_name.lower().endswith(".pdf"):
+                    ct = "application/pdf"
+                elif file.display_name.lower().endswith(".docx"):
+                    ct = (
+                        "application/vnd.openxmlformats-officedocument"
+                        ".wordprocessingml.document"
+                    )
+
+            text = extract_text(content, ct)
+            if text and text.strip():
+                result[file.id] = text
+                logger.debug(
+                    "Extracted %d chars from file %d (%s)",
+                    len(text),
+                    file.id,
+                    file.display_name,
+                )
+            else:
+                logger.debug(
+                    "No text extracted from file %d (%s)",
+                    file.id,
+                    file.display_name,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to extract content from file %d (%s): %s",
+                file.id,
+                file.display_name,
+                exc,
+            )
+
+        # Rate limit between downloads
+        await asyncio.sleep(0.5)
+
+    logger.info(
+        "Extracted text from %d of %d extractable files",
+        len(result),
+        len(extractable),
+    )
+    return result
+
+
 async def fetch_pages(
     client: CanvasClient,
     course_id: int,
@@ -422,7 +529,7 @@ async def fetch_all(
 
     Returns:
         A dict with keys ``courses``, ``assignments``, ``enrollments``,
-        ``quizzes``, ``modules``, ``pages``, ``files``,
+        ``quizzes``, ``modules``, ``pages``, ``files``, ``file_contents``,
         ``discussion_topics``, ``calendar_events``, and ``errors``.
 
         Per-course data (assignments, quizzes, modules, pages, files,
@@ -442,6 +549,7 @@ async def fetch_all(
     modules: dict[str, dict] = {}
     pages: dict[str, list[Page]] = {}
     files: dict[str, list[FileMetadata]] = {}
+    file_contents: dict[str, dict[int, str]] = {}
     discussion_topics: dict[str, list[DiscussionTopic]] = {}
     semaphore = asyncio.Semaphore(settings.max_concurrent)
 
@@ -509,6 +617,20 @@ async def fetch_all(
             course_files = await _fetch_or_empty(
                 fetch_files(client, course.id), "files", course
             )
+
+            # Download and extract text from PDF/DOCX files
+            file_contents: dict[int, str] = {}
+            if course_files:
+                try:
+                    file_contents = await fetch_file_contents(client, course_files)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to extract file contents for course %d (%s): %s",
+                        course.id,
+                        course.name,
+                        exc,
+                    )
+
             course_discussions = await _fetch_or_empty(
                 fetch_discussion_topics(client, course.id),
                 "discussion_topics",
@@ -524,6 +646,7 @@ async def fetch_all(
                 "resolved_page_content": resolved_pages,
                 "pages": course_pages,
                 "files": course_files,
+                "file_contents": file_contents,
                 "discussion_topics": course_discussions,
             }
 
@@ -551,6 +674,7 @@ async def fetch_all(
             }
             pages[cid] = result["pages"]
             files[cid] = result["files"]
+            file_contents[cid] = result["file_contents"]
             discussion_topics[cid] = result["discussion_topics"]
 
     # Calendar events: fetch once globally for all courses
@@ -572,6 +696,7 @@ async def fetch_all(
         "modules": modules,
         "pages": pages,
         "files": files,
+        "file_contents": file_contents,
         "discussion_topics": discussion_topics,
         "calendar_events": calendar_events,
         "errors": errors,

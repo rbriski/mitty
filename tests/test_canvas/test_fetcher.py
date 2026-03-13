@@ -12,6 +12,7 @@ from mitty.canvas.fetcher import (
     fetch_calendar_events,
     fetch_courses,
     fetch_enrollments,
+    fetch_file_contents,
     fetch_files,
     fetch_module_items,
     fetch_modules,
@@ -350,6 +351,7 @@ def _patch_all_fetchers(**overrides):
         "resolve_module_item_pages": {},
         "fetch_pages": [],
         "fetch_files": [],
+        "fetch_file_contents": {},
         "fetch_discussion_topics": [],
         "fetch_calendar_events": [],
     }
@@ -421,6 +423,7 @@ class TestFetchAll:
             patches["resolve_module_item_pages"],
             patches["fetch_pages"] as mock_pages,
             patches["fetch_files"] as mock_files,
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"] as mock_disc,
             patches["fetch_calendar_events"] as mock_cal,
         ):
@@ -439,6 +442,7 @@ class TestFetchAll:
         assert result["modules"]["1"]["module_items"][30] == items_1_30
         assert result["pages"]["1"] == pages_1
         assert result["files"]["1"] == files_1
+        assert result["file_contents"]["1"] == {}
         assert result["discussion_topics"]["1"] == discussions_1
         assert result["calendar_events"] == cal_events
         assert mock_assign.call_count == 2
@@ -486,6 +490,7 @@ class TestFetchAll:
             patches["resolve_module_item_pages"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
@@ -524,6 +529,7 @@ class TestFetchAll:
             patches["resolve_module_item_pages"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
@@ -537,6 +543,7 @@ class TestFetchAll:
         assert result["modules"] == {}
         assert result["pages"] == {}
         assert result["files"] == {}
+        assert result["file_contents"] == {}
         assert result["discussion_topics"] == {}
         assert result["calendar_events"] == []
         assert result["enrollments"] == [_make_enrollment(100, 1)]
@@ -570,6 +577,7 @@ class TestFetchAll:
             patches["resolve_module_item_pages"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
@@ -597,6 +605,7 @@ class TestFetchAll:
             patches["resolve_module_item_pages"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
@@ -612,6 +621,7 @@ class TestFetchAll:
             "modules",
             "pages",
             "files",
+            "file_contents",
             "discussion_topics",
             "calendar_events",
             "errors",
@@ -1153,3 +1163,185 @@ class TestFetchAssignmentDescriptions:
         result = await fetch_assignments(client, course_id=100)
 
         assert result[0].description is None
+
+
+# ------------------------------------------------------------------ #
+#  fetch_file_contents
+# ------------------------------------------------------------------ #
+
+
+class TestFetchFileContents:
+    """fetch_file_contents downloads and extracts text from PDF/DOCX files."""
+
+    async def test_fetch_file_contents_extracts_pdf(self) -> None:
+        """PDF files are downloaded and their text extracted."""
+        file = FileMetadata(
+            id=9001,
+            display_name="study_guide.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9001/download",
+        )
+        client = AsyncMock()
+
+        with (
+            patch(
+                f"{FETCHER_MODULE}.download_file_content",
+                new_callable=AsyncMock,
+                return_value=b"fake-pdf-bytes",
+            ) as mock_download,
+            patch(
+                f"{FETCHER_MODULE}.extract_text",
+                return_value="Extracted PDF text content",
+            ) as mock_extract,
+        ):
+            result = await fetch_file_contents(client, [file])
+
+        mock_download.assert_awaited_once_with(
+            client._http,
+            "https://mitty.instructure.com/files/9001/download",
+        )
+        mock_extract.assert_called_once_with(b"fake-pdf-bytes", "application/pdf")
+        assert result == {9001: "Extracted PDF text content"}
+
+    async def test_fetch_file_contents_skips_unsupported(self) -> None:
+        """Non-PDF/DOCX files are skipped entirely."""
+        txt_file = FileMetadata(
+            id=9002,
+            display_name="notes.txt",
+            content_type="text/plain",
+            url="https://mitty.instructure.com/files/9002/download",
+        )
+        png_file = FileMetadata(
+            id=9003,
+            display_name="diagram.png",
+            content_type="image/png",
+            url="https://mitty.instructure.com/files/9003/download",
+        )
+
+        client = AsyncMock()
+
+        with patch(
+            f"{FETCHER_MODULE}.download_file_content",
+            new_callable=AsyncMock,
+        ) as mock_download:
+            result = await fetch_file_contents(client, [txt_file, png_file])
+
+        mock_download.assert_not_called()
+        assert result == {}
+
+    async def test_fetch_file_contents_handles_download_failure(self) -> None:
+        """Download failure for one file does not stop others."""
+        file_ok = FileMetadata(
+            id=9001,
+            display_name="good.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9001/download",
+        )
+        file_bad = FileMetadata(
+            id=9002,
+            display_name="bad.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9002/download",
+        )
+        client = AsyncMock()
+
+        call_count = {"n": 0}
+
+        async def _download_side_effect(_client, url, **kwargs):
+            call_count["n"] += 1
+            if "9002" in url:
+                raise RuntimeError("Network error")
+            return b"pdf-bytes"
+
+        with (
+            patch(
+                f"{FETCHER_MODULE}.download_file_content",
+                new_callable=AsyncMock,
+                side_effect=_download_side_effect,
+            ),
+            patch(
+                f"{FETCHER_MODULE}.extract_text",
+                return_value="Good PDF text",
+            ),
+        ):
+            result = await fetch_file_contents(client, [file_ok, file_bad])
+
+        # The good file succeeded, the bad one was skipped
+        assert 9001 in result
+        assert 9002 not in result
+        assert result[9001] == "Good PDF text"
+
+    async def test_fetch_file_contents_skips_empty_extraction(self) -> None:
+        """Files that produce empty extracted text are excluded."""
+        file = FileMetadata(
+            id=9001,
+            display_name="empty.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9001/download",
+        )
+        client = AsyncMock()
+
+        with (
+            patch(
+                f"{FETCHER_MODULE}.download_file_content",
+                new_callable=AsyncMock,
+                return_value=b"fake-bytes",
+            ),
+            patch(
+                f"{FETCHER_MODULE}.extract_text",
+                return_value="",
+            ),
+        ):
+            result = await fetch_file_contents(client, [file])
+
+        assert result == {}
+
+    async def test_fetch_file_contents_docx_by_extension(self) -> None:
+        """DOCX files detected by extension are processed."""
+        file = FileMetadata(
+            id=9004,
+            display_name="essay.docx",
+            content_type="application/octet-stream",
+            url="https://mitty.instructure.com/files/9004/download",
+        )
+        client = AsyncMock()
+
+        with (
+            patch(
+                f"{FETCHER_MODULE}.download_file_content",
+                new_callable=AsyncMock,
+                return_value=b"docx-bytes",
+            ) as mock_download,
+            patch(
+                f"{FETCHER_MODULE}.extract_text",
+                return_value="Essay content here",
+            ) as mock_extract,
+        ):
+            result = await fetch_file_contents(client, [file])
+
+        mock_download.assert_awaited_once()
+        # When content_type is generic, should guess from extension
+        expected_ct = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        mock_extract.assert_called_once_with(b"docx-bytes", expected_ct)
+        assert result == {9004: "Essay content here"}
+
+    async def test_fetch_file_contents_download_returns_none(self) -> None:
+        """When download returns None (rejected/oversized), file is skipped."""
+        file = FileMetadata(
+            id=9005,
+            display_name="huge.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9005/download",
+        )
+        client = AsyncMock()
+
+        with patch(
+            f"{FETCHER_MODULE}.download_file_content",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await fetch_file_contents(client, [file])
+
+        assert result == {}

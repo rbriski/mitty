@@ -15,6 +15,7 @@ Errors:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -29,12 +30,16 @@ from mitty.planner.scoring import (
 )
 
 if TYPE_CHECKING:
+    from mitty.ai.client import AIClient
     from supabase import AsyncClient
 
 logger = logging.getLogger(__name__)
 
 # Maximum age of a student signal for it to be usable.
 _SIGNAL_MAX_AGE = timedelta(hours=24)
+
+# Per-block timeout for guide compilation (seconds).
+_GUIDE_TIMEOUT_S: float = 4.0
 
 
 # ---------------------------------------------------------------------------
@@ -482,10 +487,14 @@ async def _write_blocks(
     plan_id: int,
     blocks: list[StudyBlock],
     course_id_lookup: dict[str, int],
-) -> None:
-    """Insert study_block rows for a plan."""
+) -> list[dict[str, Any]]:
+    """Insert study_block rows for a plan.
+
+    Returns:
+        The inserted rows (with server-assigned ``id`` values).
+    """
     if not blocks:
-        return
+        return []
 
     rows: list[dict[str, Any]] = []
     for idx, block in enumerate(blocks):
@@ -503,7 +512,105 @@ async def _write_blocks(
             row["course_id"] = course_id_lookup[block.course_name]
         rows.append(row)
 
-    await client.table("study_blocks").insert(rows).execute()
+    response = await client.table("study_blocks").insert(rows).execute()
+    return response.data or []
+
+
+# ---------------------------------------------------------------------------
+# Guide compilation helpers (DEC-003, DEC-005)
+# ---------------------------------------------------------------------------
+
+
+async def _compile_and_persist_guide(
+    ai_client: AIClient | None,
+    client: AsyncClient,
+    block_row: dict[str, Any],
+    user_id: str,
+) -> None:
+    """Compile a single block guide and persist it to study_block_guides.
+
+    Wrapped by asyncio.wait_for in the caller so it respects the per-block
+    timeout.  Any exception is caught by the caller's gather(return_exceptions).
+    """
+    from mitty.guides.compiler import compile_block_guide
+
+    block_id = block_row["id"]
+    block_type = block_row.get("block_type", "homework")
+    course_id = block_row.get("course_id")
+
+    if course_id is None:
+        logger.debug(
+            "Skipping guide for block %d — no course_id",
+            block_id,
+        )
+        return
+
+    guide = await compile_block_guide(
+        ai_client=ai_client,
+        client=client,
+        block_type=block_type,
+        course_id=course_id,
+        user_id=user_id,
+        block_id=block_id,
+    )
+
+    # Persist to study_block_guides.
+    now_iso = datetime.now(UTC).isoformat()
+    row: dict[str, Any] = {
+        "block_id": guide.block_id,
+        "concepts_json": guide.concepts_json,
+        "source_bundle_json": guide.source_bundle_json,
+        "steps_json": guide.steps_json,
+        "warmup_items_json": guide.warmup_items_json,
+        "exit_items_json": guide.exit_items_json,
+        "completion_criteria_json": guide.completion_criteria_json,
+        "success_criteria_json": guide.success_criteria_json,
+        "guide_version": guide.guide_version,
+        "generated_at": now_iso,
+    }
+    await client.table("study_block_guides").insert(row).execute()
+
+
+async def _compile_block_guides(
+    ai_client: AIClient | None,
+    client: AsyncClient,
+    block_rows: list[dict[str, Any]],
+    user_id: str,
+) -> None:
+    """Compile guides for all blocks in parallel with per-block timeout.
+
+    Uses ``asyncio.gather(return_exceptions=True)`` so individual failures
+    never fail plan generation (DEC-005).
+    """
+    if not block_rows:
+        return
+
+    tasks = [
+        asyncio.wait_for(
+            _compile_and_persist_guide(ai_client, client, row, user_id),
+            timeout=_GUIDE_TIMEOUT_S,
+        )
+        for row in block_rows
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    succeeded = 0
+    for row, result in zip(block_rows, results, strict=True):
+        if isinstance(result, BaseException):
+            logger.warning(
+                "Guide compilation failed for block %d: %s",
+                row.get("id", "?"),
+                result,
+            )
+        else:
+            succeeded += 1
+
+    logger.info(
+        "Guide compilation: %d/%d succeeded",
+        succeeded,
+        len(block_rows),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +622,8 @@ async def generate_plan(
     client: AsyncClient,
     user_id: str,
     plan_date: date,
+    *,
+    ai_client: AIClient | None = None,
 ) -> StudyPlan:
     """Orchestrate full study plan generation.
 
@@ -528,11 +637,14 @@ async def generate_plan(
         7. Score opportunities via scoring engine.
         8. Allocate blocks via allocator.
         9. Write study_plan row, then study_block rows.
+        10. Compile block guides in parallel (non-blocking, DEC-003/DEC-005).
 
     Args:
         client: Async Supabase client (service-role recommended).
         user_id: The user's UUID string.
         plan_date: The date to generate the plan for.
+        ai_client: Optional AIClient for guide compilation.  When ``None``,
+            guide compilation is skipped entirely.
 
     Returns:
         A ``StudyPlan`` with the persisted plan_id and blocks.
@@ -635,7 +747,7 @@ async def generate_plan(
     # Build course_name -> course_id reverse lookup for block writes.
     course_id_lookup: dict[str, int] = {v: k for k, v in course_names.items()}
     try:
-        await _write_blocks(client, plan_id, blocks, course_id_lookup)
+        block_rows = await _write_blocks(client, plan_id, blocks, course_id_lookup)
     except Exception as exc:
         logger.error(
             "Failed to write blocks for plan %d, cleaning up: %s",
@@ -644,6 +756,10 @@ async def generate_plan(
         )
         await client.table("study_plans").delete().eq("id", plan_id).execute()
         raise PlanGenerationError(f"Failed to write study blocks: {exc}") from exc
+
+    # 10. Compile block guides in parallel (non-blocking).
+    if ai_client is not None and block_rows:
+        await _compile_block_guides(ai_client, client, block_rows, user_id)
 
     elapsed = time.monotonic() - t_start
     logger.info(
