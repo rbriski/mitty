@@ -243,6 +243,22 @@ async def evaluate_practice_answer(
         time_spent_seconds=data.time_spent_seconds,
     )
 
+    # Fire-and-forget escalation check after storing the result.
+    try:
+        from mitty.ai.escalation import check_escalations
+
+        concept = item_data.get("concept")
+        course_id = item_data.get("course_id")
+        if course_id is not None:
+            await check_escalations(
+                client=client,
+                user_id=user_id,
+                course_id=course_id,
+                concept=concept,
+            )
+    except Exception:
+        logger.warning("Escalation check failed after evaluate", exc_info=True)
+
     return EvaluateResponse(
         practice_result_id=practice_result["id"],
         is_correct=result.is_correct,
@@ -322,6 +338,20 @@ async def update_mastery_from_results(
                 next_review_at=state.next_review_at,
             )
         )
+
+    # Fire-and-forget escalation check for each concept updated.
+    try:
+        from mitty.ai.escalation import check_escalations
+
+        for (esc_course_id, esc_concept), _ in grouped.items():
+            await check_escalations(
+                client=client,
+                user_id=user_id,
+                course_id=esc_course_id,
+                concept=esc_concept,
+            )
+    except Exception:
+        logger.warning("Escalation check failed after mastery update", exc_info=True)
 
     return MasteryUpdateResponse(
         study_block_id=data.study_block_id,

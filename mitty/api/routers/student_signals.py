@@ -6,10 +6,10 @@ and belt-and-suspenders user_id filters in queries.
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from supabase import AsyncClient
 
 from mitty.api.auth import get_current_user
 from mitty.api.dependencies import get_user_client
@@ -19,6 +19,9 @@ from mitty.api.schemas import (
     StudentSignalResponse,
     StudentSignalUpdate,
 )
+from supabase import AsyncClient
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/student-signals", tags=["student_signals"])
 
@@ -36,7 +39,22 @@ async def create_signal(
     row = data.model_dump(exclude_none=True, mode="json")
     row["user_id"] = current_user["user_id"]
     result = await client.table("student_signals").insert(row).execute()
-    return StudentSignalResponse.model_validate(result.data[0])
+    response = StudentSignalResponse.model_validate(result.data[0])
+
+    # Fire-and-forget avoidance escalation check (concept=None).
+    try:
+        from mitty.ai.escalation import check_escalations
+
+        await check_escalations(
+            client=client,
+            user_id=current_user["user_id"],
+            course_id=0,
+            concept=None,
+        )
+    except Exception:
+        logger.warning("Escalation check failed after signal creation", exc_info=True)
+
+    return response
 
 
 @router.get("/", response_model=ListResponse[StudentSignalResponse])
