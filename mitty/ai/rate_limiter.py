@@ -85,6 +85,7 @@ class RateLimiter:
             tokens: Total tokens consumed (input + output).
         """
         now = time.monotonic()
+        self._prune_old_entries(user_id, now)
 
         if user_id not in self._request_log:
             self._request_log[user_id] = []

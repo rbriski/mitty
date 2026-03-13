@@ -105,6 +105,8 @@ class AIClient:
         self._session_cost: float = 0.0
         # Cache for daily cost total: (date_str, cached_total)
         self._daily_cost_cache: tuple[str, float] | None = None
+        # Hold references to background audit tasks to prevent GC.
+        self._bg_tasks: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------
     # Public API
@@ -227,7 +229,7 @@ class AIClient:
 
                     # Fire-and-forget audit write
                     if supabase_client and user_id:
-                        asyncio.create_task(
+                        task = asyncio.create_task(
                             self._write_audit_row(
                                 supabase_client=supabase_client,
                                 user_id=user_id,
@@ -242,6 +244,8 @@ class AIClient:
                                 error_msg=None,
                             )
                         )
+                        self._bg_tasks.add(task)
+                        task.add_done_callback(self._bg_tasks.discard)
 
                     return result
 
@@ -255,7 +259,7 @@ class AIClient:
 
             # Fire-and-forget audit write on error
             if supabase_client and user_id:
-                asyncio.create_task(
+                task = asyncio.create_task(
                     self._write_audit_row(
                         supabase_client=supabase_client,
                         user_id=user_id,
@@ -270,6 +274,8 @@ class AIClient:
                         error_msg=error_msg,
                     )
                 )
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
 
             raise
 

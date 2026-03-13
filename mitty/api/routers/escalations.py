@@ -153,8 +153,8 @@ async def flag_coach_message(
 ) -> FlaggedResponseResponse:
     """Flag a coach message for review.
 
-    Verifies the coach message exists and belongs to the user
-    (via study_block ownership), then creates a flagged_responses row.
+    Verifies the coach message exists and belongs to the user,
+    then creates a flagged_responses row.
     """
     user_id = current_user["user_id"]
 

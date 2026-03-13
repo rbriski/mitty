@@ -100,11 +100,13 @@ async def _load_chat_history(
         .select("role, content")
         .eq("user_id", user_id)
         .eq("study_block_id", study_block_id)
-        .order("created_at", desc=False)
+        .order("created_at", desc=True)
         .limit(_MAX_HISTORY)
         .execute()
     )
-    return result.data or []
+    # Reverse to chronological order (oldest first) for conversation context.
+    data = result.data or []
+    return list(reversed(data))
 
 
 async def _store_message(

@@ -243,7 +243,7 @@ async def evaluate_practice_answer(
         time_spent_seconds=data.time_spent_seconds,
     )
 
-    # Fire-and-forget escalation check after storing the result.
+    # Escalation check after storing the result (awaited to ensure completion).
     try:
         from mitty.ai.escalation import check_escalations
 
@@ -339,7 +339,7 @@ async def update_mastery_from_results(
             )
         )
 
-    # Fire-and-forget escalation check for each concept updated.
+    # Escalation check for each concept updated (awaited to ensure completion).
     try:
         from mitty.ai.escalation import check_escalations
 
