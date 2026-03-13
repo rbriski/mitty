@@ -14,9 +14,8 @@ from fastapi import (  # noqa: TCH002 - FastAPI needs runtime type for DI
 from mitty.api.auth import get_current_user  # noqa: TCH001
 
 if TYPE_CHECKING:
-    from supabase import AsyncClient
-
     from mitty.ai.client import AIClient
+    from supabase import AsyncClient
 
 logger = logging.getLogger("mitty.api.dependencies")
 
@@ -38,6 +37,7 @@ async def get_ai_client(request: Request) -> AIClient | None:
 
     try:
         from mitty.ai.client import AIClient as _AIClient
+        from mitty.ai.rate_limiter import RateLimiter
         from mitty.config import load_settings
 
         settings = load_settings()
@@ -46,9 +46,16 @@ async def get_ai_client(request: Request) -> AIClient | None:
             request.app.state.ai_client = _NOT_CONFIGURED
             return None
 
+        rate_limiter = RateLimiter(
+            requests_per_minute=settings.ai_rate_limit_rpm,
+            tokens_per_minute=settings.ai_rate_limit_tpm,
+        )
         client = _AIClient(
             api_key=settings.anthropic_api_key.get_secret_value(),
             model=settings.anthropic_model,
+            rate_limiter=rate_limiter,
+            budget_per_session=settings.ai_budget_per_session,
+            budget_per_day=settings.ai_budget_per_day,
         )
         request.app.state.ai_client = client
         return client

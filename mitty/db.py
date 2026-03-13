@@ -1,6 +1,6 @@
 """SQLAlchemy Core table definitions for the Mitty database schema.
 
-Defines 15 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
+Defines 19 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
 
 - **courses**: Canvas LMS courses with optional term info.
 - **assignments**: Assignments belonging to a course (FK -> courses).
@@ -17,6 +17,10 @@ Defines 15 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
 - **mastery_states**: Per-concept mastery tracking (FK -> courses).
 - **practice_items**: Generated practice questions/items (FKs -> courses).
 - **practice_results**: Practice item outcomes (FKs -> study_blocks, courses).
+- **ai_audit_log**: AI/LLM call audit trail (FK -> auth.users).
+- **coach_messages**: Student-coach chat history (FKs -> auth.users, study_blocks).
+- **escalation_log**: Detected escalation signals (FK -> auth.users).
+- **flagged_responses**: Flagged coach responses for review (FKs -> coach_messages).
 
 All nullable columns are explicitly marked per the project schema specification.
 """
@@ -519,4 +523,157 @@ sa.Index(
     "ix_practice_results_user_created",
     practice_results.c.user_id,
     practice_results.c.created_at.desc(),
+)
+# Escalation detection: repeated-failure queries
+sa.Index(
+    "ix_practice_results_user_concept_correct",
+    practice_results.c.user_id,
+    practice_results.c.concept,
+    practice_results.c.is_correct,
+)
+
+# Escalation detection: avoidance queries on study_blocks
+sa.Index(
+    "ix_study_blocks_plan_status",
+    study_blocks.c.plan_id,
+    study_blocks.c.status,
+)
+
+# ---------------------------------------------------------------------------
+# ai_audit_log
+# ---------------------------------------------------------------------------
+
+ai_audit_log = sa.Table(
+    "ai_audit_log",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("user_id", sa.Uuid, nullable=False),
+    sa.Column("call_type", sa.String, nullable=False),
+    sa.Column("model", sa.String, nullable=False),
+    sa.Column(
+        "prompt_version", sa.String, nullable=False, server_default=sa.text("''")
+    ),
+    sa.Column("input_tokens", sa.Integer, nullable=False),
+    sa.Column("output_tokens", sa.Integer, nullable=False),
+    sa.Column("cost_usd", sa.Numeric(10, 8), nullable=False),
+    sa.Column("duration_ms", sa.Integer, nullable=False),
+    sa.Column("status", sa.String, nullable=False),
+    sa.Column("error_msg", sa.String, nullable=True),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
+sa.Index(
+    "ix_ai_audit_log_user_created",
+    ai_audit_log.c.user_id,
+    ai_audit_log.c.created_at.desc(),
+)
+sa.Index(
+    "ix_ai_audit_log_call_type_created",
+    ai_audit_log.c.call_type,
+    ai_audit_log.c.created_at.desc(),
+)
+
+# ---------------------------------------------------------------------------
+# coach_messages
+# ---------------------------------------------------------------------------
+
+coach_messages = sa.Table(
+    "coach_messages",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("user_id", sa.Uuid, nullable=False),
+    sa.Column(
+        "study_block_id",
+        sa.Integer,
+        sa.ForeignKey("study_blocks.id"),
+        nullable=False,
+    ),
+    sa.Column("role", sa.String, nullable=False),
+    sa.Column("content", sa.Text, nullable=False),
+    sa.Column("sources_cited", sa.JSON, nullable=True),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
+sa.Index(
+    "ix_coach_messages_user_block_created",
+    coach_messages.c.user_id,
+    coach_messages.c.study_block_id,
+    coach_messages.c.created_at.desc(),
+)
+sa.Index(
+    "ix_coach_messages_block_created",
+    coach_messages.c.study_block_id,
+    coach_messages.c.created_at,
+)
+
+# ---------------------------------------------------------------------------
+# escalation_log
+# ---------------------------------------------------------------------------
+
+escalation_log = sa.Table(
+    "escalation_log",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("user_id", sa.Uuid, nullable=False),
+    sa.Column("signal_type", sa.String, nullable=False),
+    sa.Column("concept", sa.String, nullable=True),
+    sa.Column("context_data", sa.JSON, nullable=True),
+    sa.Column("suggested_action", sa.String, nullable=True),
+    sa.Column(
+        "acknowledged",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.text("false"),
+    ),
+    sa.Column("acknowledged_at", sa.DateTime, nullable=True),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
+sa.Index(
+    "ix_escalation_log_user_created",
+    escalation_log.c.user_id,
+    escalation_log.c.created_at.desc(),
+)
+sa.Index(
+    "ix_escalation_log_signal_created",
+    escalation_log.c.signal_type,
+    escalation_log.c.created_at.desc(),
+)
+
+# ---------------------------------------------------------------------------
+# flagged_responses
+# ---------------------------------------------------------------------------
+
+flagged_responses = sa.Table(
+    "flagged_responses",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("user_id", sa.Uuid, nullable=False),
+    sa.Column(
+        "coach_message_id",
+        sa.BigInteger,
+        sa.ForeignKey("coach_messages.id"),
+        nullable=False,
+    ),
+    sa.Column("reason", sa.String, nullable=False),
+    sa.Column("flag_context", sa.JSON, nullable=True),
+    sa.Column(
+        "reviewed",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.text("false"),
+    ),
+    sa.Column("reviewed_at", sa.DateTime, nullable=True),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
+sa.Index(
+    "ix_flagged_responses_user_created",
+    flagged_responses.c.user_id,
+    flagged_responses.c.created_at.desc(),
+)
+sa.Index(
+    "ix_flagged_responses_reviewed_created",
+    flagged_responses.c.reviewed,
+    flagged_responses.c.created_at.desc(),
 )

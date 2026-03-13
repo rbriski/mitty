@@ -1,0 +1,551 @@
+{% extends "base.html" %}
+
+{% block title %}Mitty — Coach Chat{% endblock %}
+
+{% block nav %}
+{# Hide default nav; Alpine.js controls nav visibility based on auth state #}
+{% endblock %}
+
+{% block content %}
+<div x-data="coachChatApp()" x-init="init()" x-cloak>
+
+  {# ── Nav (only when authenticated) ── #}
+  <template x-if="session">
+    <nav class="bg-white shadow-sm border-b border-gray-200 -mx-4 -mt-6 mb-6">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="flex items-center justify-between h-14">
+          <a href="/" class="text-xl font-bold text-mitty-700 hover:text-mitty-600 transition-colors">
+            Mitty
+          </a>
+          <div class="flex items-center space-x-4 sm:space-x-6">
+            <a href="/"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Dashboard
+            </a>
+            <a href="/study-plan"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Study Plan
+            </a>
+            <a href="/mastery"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Mastery
+            </a>
+            <button
+              @click="signOut()"
+              class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </template>
+
+  {# ── Not authenticated ── #}
+  <template x-if="!session">
+    <div class="text-center py-16">
+      <p class="text-gray-500 mb-4">Please sign in to use the coach.</p>
+      <a href="/" class="text-mitty-600 hover:text-mitty-700 font-medium">Go to Dashboard</a>
+    </div>
+  </template>
+
+  {# ── Authenticated Content ── #}
+  <template x-if="session">
+    <div class="max-w-3xl mx-auto flex flex-col" style="height: calc(100vh - 8rem);">
+
+      {# ── Header bar ── #}
+      <div class="flex-shrink-0 mb-4">
+        <a href="/study-plan" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-3 transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+          </svg>
+          Back to Study Plan
+        </a>
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <div class="flex items-center gap-3">
+            <div class="flex-shrink-0 w-10 h-10 rounded-lg bg-mitty-100 flex items-center justify-center">
+              <svg class="w-5 h-5 text-mitty-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+              </svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <h1 class="text-base sm:text-lg font-bold text-gray-900 truncate">
+                Coach: <span x-text="blockTitle || 'Loading...'"></span>
+              </h1>
+              <p x-show="courseName" class="text-sm text-gray-500 truncate" x-text="courseName"></p>
+            </div>
+          </div>
+          {# Sources display #}
+          <div x-show="sources.length > 0" class="mt-3 flex flex-wrap gap-1.5">
+            <span class="text-xs text-gray-400 mr-1">Sources:</span>
+            <template x-for="(src, idx) in sources" :key="idx">
+              <span
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100"
+                x-text="src"
+              ></span>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      {# ── Loading state ── #}
+      <div x-show="loadingHistory" class="flex-1 flex items-center justify-center">
+        <div class="text-center">
+          <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+          <p class="text-sm text-gray-500 mt-3">Loading conversation...</p>
+        </div>
+      </div>
+
+      {# ── Error state ── #}
+      <div x-show="errorMessage && !loadingHistory" class="flex-1 flex items-center justify-center">
+        <div class="text-center">
+          <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 mb-3">
+            <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+            </svg>
+          </div>
+          <p class="text-red-700 font-medium mb-2">Failed to load coach</p>
+          <p class="text-sm text-gray-500 mb-4" x-text="errorMessage"></p>
+          <a href="/study-plan" class="text-mitty-600 hover:text-mitty-700 font-medium">Return to Study Plan</a>
+        </div>
+      </div>
+
+      {# ── Chat messages area ── #}
+      <div
+        x-show="!loadingHistory && !errorMessage"
+        x-ref="chatContainer"
+        class="flex-1 overflow-y-auto space-y-4 pb-4 pr-1"
+      >
+        {# Empty state #}
+        <div x-show="messages.length === 0 && !sending" class="text-center py-12">
+          <p class="text-gray-400 text-sm">Send a message to start your coaching session.</p>
+        </div>
+
+        <template x-for="msg in messages" :key="msg.id">
+          <div>
+            {# ── Student message (right-aligned) ── #}
+            <div x-show="msg.role === 'student'" class="flex justify-end">
+              <div class="max-w-[85%] sm:max-w-[75%]">
+                <div class="bg-mitty-600 text-white rounded-2xl rounded-br-md px-4 py-3 shadow-sm">
+                  <p class="text-sm leading-relaxed whitespace-pre-wrap" x-text="msg.content"></p>
+                </div>
+                <p class="text-xs text-gray-400 text-right mt-1" x-text="formatTime(msg.created_at)"></p>
+              </div>
+            </div>
+
+            {# ── Coach message (left-aligned) ── #}
+            <div x-show="msg.role === 'coach'" class="flex justify-start">
+              <div class="max-w-[85%] sm:max-w-[75%]">
+                <div class="bg-white border border-gray-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+                  <p class="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap" x-text="msg.content"></p>
+                  {# Source citations #}
+                  <div x-show="msg.sources_cited && msg.sources_cited.length > 0" class="mt-2 flex flex-wrap gap-1.5">
+                    <template x-for="(src, sIdx) in (msg.sources_cited || [])" :key="'src-' + msg.id + '-' + sIdx">
+                      <span
+                        class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-600 border border-blue-100"
+                        x-text="formatSource(src)"
+                      ></span>
+                    </template>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 mt-1">
+                  <p class="text-xs text-gray-400" x-text="formatTime(msg.created_at)"></p>
+                  <button
+                    @click="openFlagModal(msg)"
+                    class="text-xs text-gray-400 hover:text-red-500 transition-colors flex items-center gap-1"
+                    :class="msg._flagged ? 'text-red-400 cursor-default' : ''"
+                    :disabled="msg._flagged"
+                  >
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2z"></path>
+                    </svg>
+                    <span x-text="msg._flagged ? 'Flagged' : 'Flag'"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        {# ── Sending indicator ── #}
+        <div x-show="sending" class="flex justify-start">
+          <div class="max-w-[85%] sm:max-w-[75%]">
+            <div class="bg-white border border-gray-200 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+              <div class="flex items-center gap-2">
+                <div class="inline-block w-4 h-4 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+                <span class="text-sm text-gray-500">Coach is thinking...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# ── Message input ── #}
+      <div x-show="!loadingHistory && !errorMessage" class="flex-shrink-0 pt-3 border-t border-gray-200 bg-gray-50 -mx-4 px-4 pb-4">
+        <form @submit.prevent="sendMessage()" class="flex gap-2">
+          <input
+            type="text"
+            x-model="messageInput"
+            x-ref="messageField"
+            :disabled="sending"
+            maxlength="5000"
+            placeholder="Type your answer..."
+            class="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+            @keydown.enter.prevent="sendMessage()"
+          >
+          <button
+            type="submit"
+            :disabled="!messageInput.trim() || sending"
+            class="px-4 py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-xl transition-colors flex-shrink-0"
+          >
+            <span x-show="!sending">Send</span>
+            <span x-show="sending" class="flex items-center gap-1">
+              <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+            </span>
+          </button>
+        </form>
+      </div>
+
+      {# ── Flag modal ── #}
+      <div
+        x-show="flagModal"
+        x-transition.opacity
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+        @click.self="closeFlagModal()"
+      >
+        <div
+          class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6"
+          @click.stop
+        >
+          <h3 class="text-lg font-semibold text-gray-900 mb-1">Flag this response</h3>
+          <p class="text-sm text-gray-500 mb-4">Let us know why this response was unhelpful or inaccurate.</p>
+
+          <textarea
+            x-model="flagReason"
+            rows="3"
+            maxlength="500"
+            placeholder="Describe the issue..."
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none text-sm resize-none mb-4"
+          ></textarea>
+
+          <div x-show="flagError" class="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg">
+            <p class="text-sm text-red-700" x-text="flagError"></p>
+          </div>
+
+          <div class="flex gap-2">
+            <button
+              @click="closeFlagModal()"
+              class="flex-1 py-2 text-sm font-medium rounded-lg bg-white text-gray-600 border border-gray-300 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              @click="submitFlag()"
+              :disabled="!flagReason.trim() || flagSubmitting"
+              class="flex-1 py-2 text-sm font-medium rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white transition-colors"
+            >
+              <span x-show="!flagSubmitting">Submit Flag</span>
+              <span x-show="flagSubmitting" class="flex items-center justify-center gap-1">
+                <span class="inline-block w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                Submitting...
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
+
+  function coachChatApp() {
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Extract block_id from URL path: /blocks/{block_id}/coach
+    const pathParts = window.location.pathname.split('/');
+    const blockIdx = pathParts.indexOf('blocks');
+    const blockId = blockIdx !== -1 && pathParts[blockIdx + 1]
+      ? parseInt(pathParts[blockIdx + 1])
+      : null;
+
+    return {
+      session: null,
+
+      // Block context
+      blockId: blockId,
+      blockTitle: '',
+      courseName: '',
+      sources: [],
+
+      // Chat state
+      messages: [],
+      messageInput: '',
+      sending: false,
+      loadingHistory: false,
+      errorMessage: '',
+
+      // Flag modal state
+      flagModal: false,
+      flagMessageId: null,
+      flagReason: '',
+      flagSubmitting: false,
+      flagError: '',
+
+      async init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        this.session = session;
+
+        supabase.auth.onAuthStateChange((_event, session) => {
+          this.session = session;
+          if (session && !this._loaded) this.loadChat();
+        });
+
+        if (!this.blockId) {
+          this.errorMessage = 'No block ID provided. Please open a coaching session from the Study Plan.';
+          return;
+        }
+
+        if (this.session) this.loadChat();
+      },
+
+      async signOut() {
+        await supabase.auth.signOut();
+        this.session = null;
+        window.location.href = '/';
+      },
+
+      // ── Load block context + chat history ──
+
+      async loadChat() {
+        if (this._loaded) return;
+        this._loaded = true;
+        this.loadingHistory = true;
+        this.errorMessage = '';
+
+        try {
+          const token = this.session?.access_token;
+          if (!token) {
+            this.errorMessage = 'Not authenticated.';
+            return;
+          }
+
+          // Fetch block details and chat history in parallel
+          const [blockResp, messagesResp] = await Promise.all([
+            fetch('/study-blocks/' + this.blockId, {
+              headers: { 'Authorization': 'Bearer ' + token },
+            }),
+            fetch('/study-blocks/' + this.blockId + '/coach/messages?limit=200', {
+              headers: { 'Authorization': 'Bearer ' + token },
+            }),
+          ]);
+
+          if (!blockResp.ok) {
+            this.errorMessage = 'Study block not found or access denied.';
+            return;
+          }
+
+          const block = await blockResp.json();
+          this.blockTitle = block.title || 'Study Block #' + this.blockId;
+
+          // Fetch course name if course_id is available
+          if (block.course_id) {
+            const { data: course } = await supabase
+              .from('courses')
+              .select('name')
+              .eq('id', block.course_id)
+              .maybeSingle();
+            if (course) this.courseName = course.name;
+          }
+
+          // Extract sources from block context (resource_chunks or similar)
+          if (block.resource_titles) {
+            this.sources = block.resource_titles;
+          } else if (block.description) {
+            // Use description as a fallback hint
+            this.sources = [];
+          }
+
+          if (messagesResp.ok) {
+            const msgData = await messagesResp.json();
+            this.messages = (msgData.data || []).map(m => ({
+              ...m,
+              _flagged: false,
+            }));
+            this.$nextTick(() => this.scrollToBottom());
+          } else {
+            console.warn('Failed to load chat history:', messagesResp.status, messagesResp.statusText);
+            this.errorMessage = 'Could not load chat history. You can still send new messages.';
+          }
+        } catch (err) {
+          this.errorMessage = 'Failed to load coach chat: ' + err.message;
+        } finally {
+          this.loadingHistory = false;
+        }
+      },
+
+      // ── Send message ──
+
+      async sendMessage() {
+        const text = this.messageInput.trim();
+        if (!text || this.sending) return;
+
+        const token = this.session?.access_token;
+        if (!token) {
+          alert('Session expired. Please sign in again.');
+          return;
+        }
+
+        this.sending = true;
+
+        // Optimistically add student message
+        const tempId = Date.now();
+        this.messages.push({
+          id: tempId,
+          role: 'student',
+          content: text,
+          sources_cited: null,
+          created_at: new Date().toISOString(),
+          _flagged: false,
+        });
+        this.messageInput = '';
+        this.$nextTick(() => this.scrollToBottom());
+
+        try {
+          const resp = await fetch('/study-blocks/' + this.blockId + '/coach/messages', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ message: text }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            const msg = errData?.detail?.message || errData?.detail || 'Failed to send message';
+            alert(typeof msg === 'string' ? msg : JSON.stringify(msg));
+            // Remove optimistic student message on failure
+            this.messages = this.messages.filter(m => m.id !== tempId);
+            this.messageInput = text;
+            return;
+          }
+
+          const coachMsg = await resp.json();
+          this.messages.push({
+            ...coachMsg,
+            _flagged: false,
+          });
+          this.$nextTick(() => {
+            this.scrollToBottom();
+            this.$refs.messageField?.focus();
+          });
+        } catch (err) {
+          alert('Failed to send message: ' + err.message);
+          this.messages = this.messages.filter(m => m.id !== tempId);
+          this.messageInput = text;
+        } finally {
+          this.sending = false;
+        }
+      },
+
+      // ── Flag functionality ──
+
+      openFlagModal(msg) {
+        if (msg._flagged) return;
+        this.flagMessageId = msg.id;
+        this.flagReason = '';
+        this.flagError = '';
+        this.flagModal = true;
+      },
+
+      closeFlagModal() {
+        this.flagModal = false;
+        this.flagMessageId = null;
+        this.flagReason = '';
+        this.flagError = '';
+      },
+
+      async submitFlag() {
+        if (!this.flagReason.trim() || this.flagSubmitting) return;
+
+        const token = this.session?.access_token;
+        if (!token) {
+          this.flagError = 'Session expired.';
+          return;
+        }
+
+        this.flagSubmitting = true;
+        this.flagError = '';
+
+        try {
+          const resp = await fetch('/coach-messages/' + this.flagMessageId + '/flag', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ reason: this.flagReason.trim() }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            const msg = errData?.detail?.message || errData?.detail || 'Failed to submit flag';
+            this.flagError = typeof msg === 'string' ? msg : JSON.stringify(msg);
+            return;
+          }
+
+          // Mark message as flagged in the UI
+          const msg = this.messages.find(m => m.id === this.flagMessageId);
+          if (msg) msg._flagged = true;
+
+          this.closeFlagModal();
+        } catch (err) {
+          this.flagError = 'Failed to submit flag: ' + err.message;
+        } finally {
+          this.flagSubmitting = false;
+        }
+      },
+
+      // ── Helpers ──
+
+      scrollToBottom() {
+        const container = this.$refs.chatContainer;
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      },
+
+      formatTime(isoString) {
+        if (!isoString) return '';
+        try {
+          const d = new Date(isoString);
+          return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        } catch {
+          return '';
+        }
+      },
+
+      formatSource(src) {
+        if (typeof src === 'string') return src;
+        if (src && src.title) {
+          let label = src.title;
+          if (src.page) label += ' p.' + src.page;
+          if (src.chapter) label = 'Ch.' + src.chapter + ' ' + label;
+          return label;
+        }
+        return JSON.stringify(src);
+      },
+    };
+  }
+</script>
+{% endblock %}

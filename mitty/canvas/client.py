@@ -108,6 +108,7 @@ class CanvasClient:
                     f"Bearer {self._settings.canvas_token.get_secret_value()}"
                 )
             },
+            timeout=httpx.Timeout(30.0, connect=10.0),
         )
         return self
 

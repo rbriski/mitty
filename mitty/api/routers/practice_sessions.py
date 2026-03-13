@@ -34,9 +34,8 @@ from mitty.practice.evaluator import evaluate_answer
 from mitty.practice.generator import generate_practice_items
 
 if TYPE_CHECKING:
-    from supabase import AsyncClient
-
     from mitty.ai.client import AIClient
+    from supabase import AsyncClient
 
 logger = logging.getLogger(__name__)
 
@@ -90,24 +89,31 @@ async def generate_practice(
     # 3. Get current mastery level.
     mastery_level = await _get_mastery_level(client, user_id, course_id, concept)
 
-    # 4. Fetch resource chunks for the course.
-    resource_chunks = await _fetch_resource_chunks(client, course_id)
-
-    # 5. Generate practice items (with fallback).
+    # 4. Generate practice items (retriever fetches chunks internally).
     from uuid import UUID
 
     uid = UUID(user_id)
 
     try:
-        items = await generate_practice_items(
+        gen_result = await generate_practice_items(
             ai_client=ai_client,
             supabase_client=client,
             user_id=uid,
             course_id=course_id,
             concept=concept,
             mastery_level=mastery_level,
-            resource_chunks=resource_chunks,
         )
+
+        if gen_result.needs_resources:
+            return PracticeGenerateResponse(
+                concept=concept,
+                course_id=course_id,
+                items=[],
+                cached=False,
+                needs_resources=True,
+            )
+
+        items = gen_result.items
         cached = False
     except Exception:
         logger.warning(
@@ -237,6 +243,22 @@ async def evaluate_practice_answer(
         time_spent_seconds=data.time_spent_seconds,
     )
 
+    # Escalation check after storing the result (awaited to ensure completion).
+    try:
+        from mitty.ai.escalation import check_escalations
+
+        concept = item_data.get("concept")
+        course_id = item_data.get("course_id")
+        if course_id is not None:
+            await check_escalations(
+                client=client,
+                user_id=user_id,
+                course_id=course_id,
+                concept=concept,
+            )
+    except Exception:
+        logger.warning("Escalation check failed after evaluate", exc_info=True)
+
     return EvaluateResponse(
         practice_result_id=practice_result["id"],
         is_correct=result.is_correct,
@@ -316,6 +338,20 @@ async def update_mastery_from_results(
                 next_review_at=state.next_review_at,
             )
         )
+
+    # Escalation check for each concept updated (awaited to ensure completion).
+    try:
+        from mitty.ai.escalation import check_escalations
+
+        for (esc_course_id, esc_concept), _ in grouped.items():
+            await check_escalations(
+                client=client,
+                user_id=user_id,
+                course_id=esc_course_id,
+                concept=esc_concept,
+            )
+    except Exception:
+        logger.warning("Escalation check failed after mastery update", exc_info=True)
 
     return MasteryUpdateResponse(
         study_block_id=data.study_block_id,

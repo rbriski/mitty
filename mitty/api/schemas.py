@@ -596,6 +596,7 @@ class PracticeGenerateResponse(BaseModel):
     course_id: int
     items: list[PracticeItemResponse]
     cached: bool = False
+    needs_resources: bool = False
 
 
 class EvaluateRequest(BaseModel):
@@ -671,3 +672,89 @@ class MasteryDashboardResponse(BaseModel):
 
     course_id: int
     concepts: list[MasteryConceptRow]
+
+
+# ---------------------------------------------------------------------------
+# AI Usage / Cost Summary
+# ---------------------------------------------------------------------------
+
+
+class CallTypeBreakdown(BaseModel):
+    """Aggregated usage for a single call_type."""
+
+    call_type: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+
+
+class AICostSummaryResponse(BaseModel):
+    """Aggregated AI usage cost summary for a user."""
+
+    total_calls: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cost_usd: float
+    breakdown: list[CallTypeBreakdown]
+
+
+# ---------------------------------------------------------------------------
+# Escalation + Flag
+# ---------------------------------------------------------------------------
+
+
+class EscalationResponse(BaseModel):
+    """Full escalation_log record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    signal_type: str
+    concept: str | None
+    context_data: dict | None
+    suggested_action: str | None
+    acknowledged: bool
+    acknowledged_at: datetime | None
+    created_at: datetime
+
+
+class FlagCreate(BaseModel):
+    """Request to flag a coach response."""
+
+    reason: str = Field(max_length=500)
+
+
+class FlaggedResponseResponse(BaseModel):
+    """Full flagged_responses record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    coach_message_id: int
+    reason: str
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Coach Chat
+# ---------------------------------------------------------------------------
+
+
+class ChatMessageCreate(BaseModel):
+    """Request to send a message to the coach."""
+
+    message: str = Field(max_length=5000)
+
+
+class CoachMessageResponse(BaseModel):
+    """A single coach chat message."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    study_block_id: int
+    role: str  # 'student' | 'coach'
+    content: str
+    sources_cited: list[dict] | None = None
+    created_at: datetime
