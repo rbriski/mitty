@@ -671,3 +671,28 @@ class MasteryDashboardResponse(BaseModel):
 
     course_id: int
     concepts: list[MasteryConceptRow]
+
+
+# ---------------------------------------------------------------------------
+# AI Usage / Cost Summary
+# ---------------------------------------------------------------------------
+
+
+class CallTypeBreakdown(BaseModel):
+    """Aggregated usage for a single call_type."""
+
+    call_type: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+
+
+class AICostSummaryResponse(BaseModel):
+    """Aggregated AI usage cost summary for a user."""
+
+    total_calls: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_cost_usd: float
+    breakdown: list[CallTypeBreakdown]
