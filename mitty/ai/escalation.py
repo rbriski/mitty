@@ -160,16 +160,23 @@ async def check_avoidance(
         )
 
     # Check if any blocks in those plans were completed.
-    # Supabase doesn't support `in_` easily on async client, so we query
-    # all blocks with status=completed and a recent completed_at.
-    blocks_resp = await (
-        client.table("study_blocks")
-        .select("completed_at")
-        .eq("status", "completed")
-        .gte("completed_at", cutoff)
-        .execute()
-    )
-    blocks = blocks_resp.data or []
+    # Filter by the user's plan IDs so we don't see other users' blocks
+    # (study_blocks has no user_id column and no RLS).
+    plan_ids = [p["id"] for p in plans]
+    blocks: list[dict[str, Any]] = []
+    for pid in plan_ids:
+        blocks_resp = await (
+            client.table("study_blocks")
+            .select("completed_at")
+            .eq("plan_id", pid)
+            .eq("status", "completed")
+            .gte("completed_at", cutoff)
+            .limit(1)
+            .execute()
+        )
+        if blocks_resp.data:
+            blocks.extend(blocks_resp.data)
+            break  # One completed block is enough to dismiss avoidance
 
     if not blocks:
         logger.info(
@@ -202,33 +209,40 @@ async def check_confidence_crash(
     concept: str,
     drop_threshold: float = 0.3,
 ) -> Escalation | None:
-    """Check if confidence dropped significantly between sessions.
+    """Check if confidence dropped significantly between recent sessions.
 
-    Compares the two most recent mastery_states snapshots for this concept.
-    If the current ``confidence_self_report`` is lower than the previous by
-    more than ``drop_threshold``, triggers an escalation.
+    Compares the average ``confidence_before`` of the 5 most recent
+    practice results against the 5 before those. ``mastery_states`` is a
+    single-row-per-concept table (upserted), so it cannot provide
+    historical snapshots — we use ``practice_results`` instead.
     """
     response = await (
-        client.table("mastery_states")
-        .select("confidence_self_report, updated_at")
+        client.table("practice_results")
+        .select("confidence_before, created_at")
         .eq("user_id", user_id)
         .eq("course_id", course_id)
         .eq("concept", concept)
-        .order("updated_at", desc=True)
-        .limit(2)
+        .order("created_at", desc=True)
+        .limit(10)
         .execute()
     )
 
     records = response.data or []
 
-    if len(records) < 2:
+    # Filter to those with confidence ratings.
+    rated = [r for r in records if r.get("confidence_before") is not None]
+
+    if len(rated) < 4:
         return None
 
-    current_confidence = records[0].get("confidence_self_report")
-    previous_confidence = records[1].get("confidence_self_report")
+    # Split into recent half and older half.
+    mid = len(rated) // 2
+    recent_avg = sum(r["confidence_before"] for r in rated[:mid]) / mid
+    older_avg = sum(r["confidence_before"] for r in rated[mid:]) / (len(rated) - mid)
 
-    if current_confidence is None or previous_confidence is None:
-        return None
+    # Normalize from [1, 5] to [0, 1] before comparing.
+    current_confidence = max(0.0, min(1.0, (recent_avg - 1.0) / 4.0))
+    previous_confidence = max(0.0, min(1.0, (older_avg - 1.0) / 4.0))
 
     drop = previous_confidence - current_confidence
 

@@ -212,71 +212,68 @@ class TestAvoidance:
 
 
 class TestConfidenceCrash:
-    """Tests for the confidence_crash signal."""
+    """Tests for the confidence_crash signal.
+
+    Uses practice_results.confidence_before (rated 1-5) to detect drops.
+    The function normalizes to [0, 1] before comparing.
+    """
 
     @pytest.mark.asyncio
     async def test_triggers_on_large_drop(self) -> None:
-        """Drop of 0.4 (> 0.3 threshold) triggers escalation."""
-        # Two mastery snapshots: previous confidence 0.8, current 0.4
-        mastery_chain = _chain_mock(
+        """Large confidence drop across recent practice results triggers escalation."""
+        # Recent results: confidence 1.0 (normalized -> 0.0)
+        # Older results: confidence 5.0 (normalized -> 1.0)
+        # Drop = 1.0, well above 0.3 threshold
+        results_chain = _chain_mock(
             _mock_response(
                 [
-                    {
-                        "confidence_self_report": 0.4,
-                        "updated_at": "2025-01-02T00:00:00",
-                    },
-                    {
-                        "confidence_self_report": 0.8,
-                        "updated_at": "2025-01-01T00:00:00",
-                    },
+                    {"confidence_before": 1.0, "created_at": "2025-01-04T00:00:00"},
+                    {"confidence_before": 1.0, "created_at": "2025-01-03T00:00:00"},
+                    {"confidence_before": 5.0, "created_at": "2025-01-02T00:00:00"},
+                    {"confidence_before": 5.0, "created_at": "2025-01-01T00:00:00"},
                 ]
             )
         )
-        client = _make_client(("mastery_states", mastery_chain))
+        client = _make_client(("practice_results", results_chain))
 
         esc = await check_confidence_crash(client, USER_ID, COURSE_ID, CONCEPT)
 
         assert esc is not None
         assert esc.signal_type == "confidence_crash"
-        assert esc.context_data["drop"] == pytest.approx(0.4)
+        assert esc.context_data["drop"] == pytest.approx(1.0)
 
     @pytest.mark.asyncio
     async def test_no_trigger_on_small_drop(self) -> None:
-        """Drop of 0.2 (< 0.3 threshold) does not trigger."""
-        mastery_chain = _chain_mock(
+        """Small confidence drop does not trigger."""
+        # Recent: 3.5 (norm 0.625), Older: 4.0 (norm 0.75). Drop = 0.125
+        results_chain = _chain_mock(
             _mock_response(
                 [
-                    {
-                        "confidence_self_report": 0.6,
-                        "updated_at": "2025-01-02T00:00:00",
-                    },
-                    {
-                        "confidence_self_report": 0.8,
-                        "updated_at": "2025-01-01T00:00:00",
-                    },
+                    {"confidence_before": 3.5, "created_at": "2025-01-04T00:00:00"},
+                    {"confidence_before": 3.5, "created_at": "2025-01-03T00:00:00"},
+                    {"confidence_before": 4.0, "created_at": "2025-01-02T00:00:00"},
+                    {"confidence_before": 4.0, "created_at": "2025-01-01T00:00:00"},
                 ]
             )
         )
-        client = _make_client(("mastery_states", mastery_chain))
+        client = _make_client(("practice_results", results_chain))
 
         esc = await check_confidence_crash(client, USER_ID, COURSE_ID, CONCEPT)
 
         assert esc is None
 
     @pytest.mark.asyncio
-    async def test_no_trigger_when_only_one_record(self) -> None:
-        """Only one mastery record means no comparison possible."""
-        mastery_chain = _chain_mock(
+    async def test_no_trigger_when_too_few_results(self) -> None:
+        """Fewer than 4 rated results means no comparison possible."""
+        results_chain = _chain_mock(
             _mock_response(
                 [
-                    {
-                        "confidence_self_report": 0.5,
-                        "updated_at": "2025-01-01T00:00:00",
-                    },
+                    {"confidence_before": 2.0, "created_at": "2025-01-02T00:00:00"},
+                    {"confidence_before": 5.0, "created_at": "2025-01-01T00:00:00"},
                 ]
             )
         )
-        client = _make_client(("mastery_states", mastery_chain))
+        client = _make_client(("practice_results", results_chain))
 
         esc = await check_confidence_crash(client, USER_ID, COURSE_ID, CONCEPT)
 
@@ -285,21 +282,38 @@ class TestConfidenceCrash:
     @pytest.mark.asyncio
     async def test_no_trigger_when_confidence_increases(self) -> None:
         """Confidence going up is not a crash."""
-        mastery_chain = _chain_mock(
+        # Recent: 5.0 (norm 1.0), Older: 2.0 (norm 0.25). Drop = -0.75
+        results_chain = _chain_mock(
             _mock_response(
                 [
-                    {
-                        "confidence_self_report": 0.9,
-                        "updated_at": "2025-01-02T00:00:00",
-                    },
-                    {
-                        "confidence_self_report": 0.5,
-                        "updated_at": "2025-01-01T00:00:00",
-                    },
+                    {"confidence_before": 5.0, "created_at": "2025-01-04T00:00:00"},
+                    {"confidence_before": 5.0, "created_at": "2025-01-03T00:00:00"},
+                    {"confidence_before": 2.0, "created_at": "2025-01-02T00:00:00"},
+                    {"confidence_before": 2.0, "created_at": "2025-01-01T00:00:00"},
                 ]
             )
         )
-        client = _make_client(("mastery_states", mastery_chain))
+        client = _make_client(("practice_results", results_chain))
+
+        esc = await check_confidence_crash(client, USER_ID, COURSE_ID, CONCEPT)
+
+        assert esc is None
+
+    @pytest.mark.asyncio
+    async def test_skips_results_without_confidence(self) -> None:
+        """Results with confidence_before=None are excluded."""
+        results_chain = _chain_mock(
+            _mock_response(
+                [
+                    {"confidence_before": None, "created_at": "2025-01-05T00:00:00"},
+                    {"confidence_before": 1.0, "created_at": "2025-01-04T00:00:00"},
+                    {"confidence_before": None, "created_at": "2025-01-03T00:00:00"},
+                    {"confidence_before": 1.0, "created_at": "2025-01-02T00:00:00"},
+                    # Only 2 rated results — below the 4 minimum
+                ]
+            )
+        )
+        client = _make_client(("practice_results", results_chain))
 
         esc = await check_confidence_crash(client, USER_ID, COURSE_ID, CONCEPT)
 
@@ -318,15 +332,12 @@ class TestDeduplication:
     async def test_skips_duplicate_within_24h(self) -> None:
         """Same signal+concept within 24h should not create a new escalation."""
         # repeated_failure triggers (3 results)
-        results_chain = _chain_mock(_mock_response([{"id": 1}, {"id": 2}, {"id": 3}]))
-        # confidence_crash: only 1 record so no trigger
-        mastery_chain = _chain_mock(
+        failure_chain = _chain_mock(_mock_response([{"id": 1}, {"id": 2}, {"id": 3}]))
+        # confidence_crash: too few rated results so no trigger
+        crash_chain = _chain_mock(
             _mock_response(
                 [
-                    {
-                        "confidence_self_report": 0.5,
-                        "updated_at": "2025-01-01T00:00:00",
-                    },
+                    {"confidence_before": 3.0, "created_at": "2025-01-01T00:00:00"},
                 ]
             )
         )
@@ -348,13 +359,15 @@ class TestDeduplication:
         insert_chain = _chain_mock(_mock_response([{"id": 100}]))
 
         client = MagicMock()
-        call_count = {"escalation_log": 0}
+        call_count = {"escalation_log": 0, "practice_results": 0}
 
         def table_router(name: str) -> MagicMock:
             if name == "practice_results":
-                return results_chain
-            if name == "mastery_states":
-                return mastery_chain
+                call_count["practice_results"] += 1
+                # First call is repeated_failure, second is confidence_crash
+                if call_count["practice_results"] == 1:
+                    return failure_chain
+                return crash_chain
             if name == "study_blocks":
                 return blocks_chain
             if name == "study_plans":
@@ -388,20 +401,16 @@ class TestCheckEscalations:
     @pytest.mark.asyncio
     async def test_runs_all_signals(self) -> None:
         """Orchestrator runs all 3 signals and returns triggered ones."""
-        # repeated_failure: triggers (3 results)
-        results_chain = _chain_mock(_mock_response([{"id": 1}, {"id": 2}, {"id": 3}]))
-        # confidence_crash: triggers (big drop)
-        mastery_chain = _chain_mock(
+        # repeated_failure needs 3+ rows from practice_results
+        failure_chain = _chain_mock(_mock_response([{"id": 1}, {"id": 2}, {"id": 3}]))
+        # confidence_crash needs 4+ rated results showing a big drop
+        crash_chain = _chain_mock(
             _mock_response(
                 [
-                    {
-                        "confidence_self_report": 0.2,
-                        "updated_at": "2025-01-02T00:00:00",
-                    },
-                    {
-                        "confidence_self_report": 0.8,
-                        "updated_at": "2025-01-01T00:00:00",
-                    },
+                    {"confidence_before": 1.0, "created_at": "2025-01-04T00:00:00"},
+                    {"confidence_before": 1.0, "created_at": "2025-01-03T00:00:00"},
+                    {"confidence_before": 5.0, "created_at": "2025-01-02T00:00:00"},
+                    {"confidence_before": 5.0, "created_at": "2025-01-01T00:00:00"},
                 ]
             )
         )
@@ -414,12 +423,15 @@ class TestCheckEscalations:
 
         client = MagicMock()
         escalation_call = {"count": 0}
+        practice_call = {"count": 0}
 
         def table_router(name: str) -> MagicMock:
             if name == "practice_results":
-                return results_chain
-            if name == "mastery_states":
-                return mastery_chain
+                practice_call["count"] += 1
+                # First call is repeated_failure, second is confidence_crash
+                if practice_call["count"] == 1:
+                    return failure_chain
+                return crash_chain
             if name == "study_blocks":
                 return blocks_chain
             if name == "study_plans":
@@ -448,9 +460,9 @@ class TestCheckEscalations:
     async def test_writes_to_escalation_log(self) -> None:
         """New escalations are written to the escalation_log table."""
         # Only repeated_failure triggers
-        results_chain = _chain_mock(_mock_response([{"id": 1}, {"id": 2}, {"id": 3}]))
-        # confidence: no data
-        mastery_chain = _chain_mock(_mock_response([]))
+        failure_chain = _chain_mock(_mock_response([{"id": 1}, {"id": 2}, {"id": 3}]))
+        # confidence_crash: no data (no practice results with confidence)
+        crash_chain = _chain_mock(_mock_response([]))
         # avoidance: has recent blocks
         blocks_chain = _chain_mock(
             _mock_response([{"completed_at": datetime.now(UTC).isoformat()}])
@@ -468,12 +480,15 @@ class TestCheckEscalations:
         client = MagicMock()
         inserted_rows: list[dict] = []
         escalation_call = {"count": 0}
+        practice_call = {"count": 0}
 
         def table_router(name: str) -> MagicMock:
+            nonlocal practice_call
             if name == "practice_results":
-                return results_chain
-            if name == "mastery_states":
-                return mastery_chain
+                practice_call["count"] += 1
+                if practice_call["count"] == 1:
+                    return failure_chain
+                return crash_chain
             if name == "study_blocks":
                 return blocks_chain
             if name == "study_plans":
