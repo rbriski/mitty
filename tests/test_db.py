@@ -930,7 +930,7 @@ class TestMetadata:
     """Cross-cutting checks on the full metadata."""
 
     def test_table_count(self) -> None:
-        assert len(metadata.tables) == 19
+        assert len(metadata.tables) == 22
 
     def test_all_tables_present(self) -> None:
         expected = {
@@ -953,6 +953,9 @@ class TestMetadata:
             "coach_messages",
             "escalation_log",
             "flagged_responses",
+            "study_block_guides",
+            "block_artifacts",
+            "guide_content_cache",
         }
         assert set(metadata.tables.keys()) == expected
 
