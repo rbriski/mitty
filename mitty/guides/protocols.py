@@ -93,7 +93,7 @@ _PLAN_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=2,
             instruction_template=(
-                "Rate your confidence (1–5) for each concept you will " "study today."
+                "Rate your confidence (1–5) for each concept you will study today."
             ),
             step_type="confidence_check",
             requires_artifact=True,
@@ -103,8 +103,7 @@ _PLAN_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=3,
             instruction_template=(
-                "Calibration: Compare your confidence ratings to your "
-                "warm-up results."
+                "Calibration: Compare your confidence ratings to your warm-up results."
             ),
             step_type="instruction",
             requires_artifact=False,
@@ -113,7 +112,7 @@ _PLAN_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=4,
             instruction_template=(
-                "Choose 2 success criteria you will commit to for this " "session."
+                "Choose 2 success criteria you will commit to for this session."
             ),
             step_type="goal_commit",
             requires_artifact=True,
@@ -123,7 +122,7 @@ _PLAN_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=5,
             instruction_template=(
-                "Materials check: List what you need to have open for " "this session."
+                "Materials check: List what you need to have open for this session."
             ),
             step_type="instruction",
             requires_artifact=False,
@@ -149,7 +148,7 @@ _RETRIEVAL_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=2,
             instruction_template=(
-                "Free recall: Write down everything you remember about " "{concept}."
+                "Free recall: Write down everything you remember about {concept}."
             ),
             step_type="recall_prompt",
             requires_artifact=True,
@@ -170,7 +169,7 @@ _RETRIEVAL_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=4,
             instruction_template=(
-                "Targeted practice: Complete 3–5 practice items on " "{concept}."
+                "Targeted practice: Complete 3–5 practice items on {concept}."
             ),
             step_type="practice_item",
             requires_artifact=True,
@@ -180,7 +179,7 @@ _RETRIEVAL_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=5,
             instruction_template=(
-                "Summary: Write 2 things you understand better now about " "{concept}."
+                "Summary: Write 2 things you understand better now about {concept}."
             ),
             step_type="instruction",
             requires_artifact=True,
@@ -255,7 +254,7 @@ _DEEP_EXPLANATION_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=1,
             instruction_template=(
-                "Read the source material on {concept} from " "{resource_title}."
+                "Read the source material on {concept} from {resource_title}."
             ),
             step_type="review_source",
             requires_artifact=False,
@@ -264,7 +263,7 @@ _DEEP_EXPLANATION_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=2,
             instruction_template=(
-                "Close your notes and summarize {concept} in your own " "words."
+                "Close your notes and summarize {concept} in your own words."
             ),
             step_type="recall_prompt",
             requires_artifact=True,
@@ -319,8 +318,7 @@ _URGENT_DELIVERABLE_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=2,
             instruction_template=(
-                "Review the requirements in {resource_title} and note "
-                "what is needed."
+                "Review the requirements in {resource_title} and note what is needed."
             ),
             step_type="review_source",
             requires_artifact=True,
@@ -364,7 +362,7 @@ _REFLECTION_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=1,
             instruction_template=(
-                "Exit ticket: Answer one unassisted question on " "{concept}."
+                "Exit ticket: Answer one unassisted question on {concept}."
             ),
             step_type="practice_item",
             requires_artifact=True,
@@ -384,7 +382,7 @@ _REFLECTION_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=3,
             instruction_template=(
-                "Misconception log: Note any misunderstandings you " "discovered today."
+                "Misconception log: Note any misunderstandings you discovered today."
             ),
             step_type="misconception_log",
             requires_artifact=True,
@@ -404,7 +402,7 @@ _REFLECTION_PROTOCOL = Protocol(
         ProtocolStep(
             step_number=5,
             instruction_template=(
-                "Set a review target for tomorrow based on today's " "session."
+                "Set a review target for tomorrow based on today's session."
             ),
             step_type="instruction",
             requires_artifact=True,
