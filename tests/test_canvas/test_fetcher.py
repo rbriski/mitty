@@ -1322,7 +1322,7 @@ class TestFetchFileContents:
         mock_download.assert_awaited_once()
         # When content_type is generic, should guess from extension
         expected_ct = (
-            "application/vnd.openxmlformats-officedocument" ".wordprocessingml.document"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         mock_extract.assert_called_once_with(b"docx-bytes", expected_ct)
         assert result == {9004: "Essay content here"}
