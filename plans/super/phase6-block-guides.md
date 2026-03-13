@@ -3,7 +3,7 @@
 ## Meta
 - **Ticket:** tickets/phase6-block-guides.md
 - **Branch:** feature/phase6-block-guides
-- **Phase:** detailing
+- **Phase:** devolved
 - **Sessions:** 1
 - **Last session:** 2026-03-13
 
@@ -622,4 +622,24 @@ US-011 (UI) ──→ US-012 (quality gate) ──→ US-013 (patterns)
 
 ## Beads Manifest
 
-*(Phase 7)*
+- **Epic:** `mitty-hns`
+- **Branch:** `feature/phase6-block-guides`
+- **Tasks:** 13
+
+| Story | Bead ID | Status |
+|-------|---------|--------|
+| US-001: Schema migration | `mitty-hns.1` | open |
+| US-002: Add pymupdf + python-docx | `mitty-hns.2` | open |
+| US-003: File download + extraction | `mitty-hns.3` | blocked |
+| US-004: Assignment descriptions + module resolution | `mitty-hns.4` | open |
+| US-005: Content enrichment integration | `mitty-hns.5` | blocked |
+| US-006: Source bundle builder | `mitty-hns.6` | open |
+| US-007: Block-type protocols | `mitty-hns.7` | open |
+| US-008: Guide compiler + prompts | `mitty-hns.8` | blocked |
+| US-009: Pipeline integration | `mitty-hns.9` | blocked |
+| US-010: API schemas + router | `mitty-hns.10` | blocked |
+| US-011: Study plan UI rebuild | `mitty-hns.11` | blocked |
+| US-012: Quality Gate | `mitty-hns.12` | blocked |
+| US-013: Patterns & Memory | `mitty-hns.13` | blocked |
+
+**Ready now (5):** US-001, US-002, US-004, US-006, US-007
