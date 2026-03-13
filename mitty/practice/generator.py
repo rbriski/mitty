@@ -391,8 +391,7 @@ async def generate_practice_items(
 
         if not retrieval.sufficient:
             logger.warning(
-                "Retriever found insufficient sources for concept=%r "
-                "(course=%d): %s",
+                "Retriever found insufficient sources for concept=%r (course=%d): %s",
                 concept,
                 course_id,
                 retrieval.message,
