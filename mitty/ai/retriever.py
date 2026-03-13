@@ -160,6 +160,8 @@ async def _fts_query(
     ``english`` config.  Falls back to ``.ilike()`` if the FTS call
     raises an unexpected error.
     """
+    # text_search() returns AsyncQueryRequestBuilder (only .execute()),
+    # so all filters (.eq, .limit) must come BEFORE text_search().
     try:
         result = await (
             client.table("resource_chunks")
@@ -167,9 +169,13 @@ async def _fts_query(
                 "id, content_text, resource_id, "
                 "resources!inner(title, resource_type, course_id)"
             )
-            .text_search("search_vector", query, config="english")
             .eq("resources.course_id", course_id)
             .limit(top_k)
+            .text_search(
+                "search_vector",
+                query,
+                options={"config": "english", "type": "plain"},
+            )
             .execute()
         )
         return result.data or []
@@ -181,6 +187,7 @@ async def _fts_query(
         )
 
     # Fallback: simple ILIKE match on content_text.
+    # ilike() returns Self so chain order is flexible here.
     try:
         pattern = f"%{_escape_like(query)}%"
         result = await (
@@ -189,8 +196,8 @@ async def _fts_query(
                 "id, content_text, resource_id, "
                 "resources!inner(title, resource_type, course_id)"
             )
-            .ilike("content_text", pattern)
             .eq("resources.course_id", course_id)
+            .ilike("content_text", pattern)
             .limit(top_k)
             .execute()
         )

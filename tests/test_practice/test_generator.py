@@ -346,12 +346,14 @@ class TestNeedsResourcesWhenNoChunks:
     """Returns needs_resources indicator when retriever finds insufficient sources."""
 
     async def test_needs_resources_via_retriever(self) -> None:
-        """When retriever returns sufficient=False, generator returns empty + flag."""
+        """When retriever returns sufficient=False, generator falls through to LLM
+        with empty chunks (concept-name-only generation), matching Phase 4 behavior."""
         from unittest.mock import patch
 
         from mitty.ai.retriever import RetrievalResult
 
-        ai_client = _build_mock_ai_client(_make_full_batch())
+        batch = _make_full_batch(needs_resources=True)
+        ai_client = _build_mock_ai_client(batch)
         sb_client = _build_mock_client()
 
         insufficient = RetrievalResult(
@@ -375,10 +377,10 @@ class TestNeedsResourcesWhenNoChunks:
                 # No resource_chunks -> uses retriever
             )
 
+        # LLM is called with empty chunks — generates from concept name alone
+        ai_client.call_structured.assert_called_once()
+        assert len(gen_result.items) > 0
         assert gen_result.needs_resources is True
-        assert gen_result.items == []
-        # LLM should NOT have been called
-        ai_client.call_structured.assert_not_called()
 
     async def test_needs_resources_legacy_empty_chunks(self) -> None:
         """Legacy: passing empty resource_chunks=[] still works (calls LLM)."""

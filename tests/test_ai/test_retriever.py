@@ -47,12 +47,13 @@ def _make_supabase_client(rows: list[dict[str, Any]]) -> AsyncMock:
     execute_result = MagicMock()
     execute_result.data = rows
 
-    # Build a chain: table().select().text_search().eq().limit().execute()
+    # Build a chain: table().select().eq().limit().text_search().execute()
+    # text_search() is terminal (returns QueryRequestBuilder with only .execute())
     chain = AsyncMock()
     chain.execute = AsyncMock(return_value=execute_result)
+    chain.text_search = MagicMock(return_value=chain)
     chain.limit = MagicMock(return_value=chain)
     chain.eq = MagicMock(return_value=chain)
-    chain.text_search = MagicMock(return_value=chain)
     chain.select = MagicMock(return_value=chain)
 
     client = AsyncMock()
@@ -174,7 +175,9 @@ class TestRetrieveHappyPath:
 
         chain = client.table.return_value
         chain.text_search.assert_called_once_with(
-            "search_vector", "photosynthesis", config="english"
+            "search_vector",
+            "photosynthesis",
+            options={"config": "english", "type": "plain"},
         )
 
     @pytest.mark.asyncio
@@ -295,7 +298,9 @@ class TestRetrieveEdgeCases:
         assert result.sufficient is True
         chain = client.table.return_value
         chain.text_search.assert_called_once_with(
-            "search_vector", "photo synthesis light", config="english"
+            "search_vector",
+            "photo synthesis light",
+            options={"config": "english", "type": "plain"},
         )
 
     @pytest.mark.asyncio
@@ -318,68 +323,65 @@ class TestRetrieveFallback:
     async def test_falls_back_to_ilike_on_text_search_error(self) -> None:
         """When text_search raises, the retriever should try ilike."""
         rows = _sample_rows(5)
-        execute_result = MagicMock()
-        execute_result.data = rows
+        ok_result = MagicMock()
+        ok_result.data = rows
 
-        # Build a chain where text_search path raises, but ilike path works.
+        # FTS chain: select().eq().limit().text_search().execute() raises
         fts_chain = MagicMock()
+        fts_chain.select = MagicMock(return_value=fts_chain)
         fts_chain.eq = MagicMock(return_value=fts_chain)
         fts_chain.limit = MagicMock(return_value=fts_chain)
+        fts_chain.text_search = MagicMock(return_value=fts_chain)
         fts_chain.execute = AsyncMock(side_effect=Exception("FTS not available"))
 
+        # ILIKE chain: select().eq().ilike().limit().execute() succeeds
         ilike_chain = MagicMock()
+        ilike_chain.select = MagicMock(return_value=ilike_chain)
         ilike_chain.eq = MagicMock(return_value=ilike_chain)
+        ilike_chain.ilike = MagicMock(return_value=ilike_chain)
         ilike_chain.limit = MagicMock(return_value=ilike_chain)
-        ilike_chain.execute = AsyncMock(return_value=execute_result)
+        ilike_chain.execute = AsyncMock(return_value=ok_result)
 
-        select_mock = MagicMock()
-        select_mock.text_search = MagicMock(return_value=fts_chain)
-        select_mock.ilike = MagicMock(return_value=ilike_chain)
-
-        table_mock = MagicMock()
-        table_mock.select = MagicMock(return_value=select_mock)
-
+        # First table() call → FTS path, second → ILIKE path
         client = AsyncMock()
-        client.table = MagicMock(return_value=table_mock)
+        client.table = MagicMock(side_effect=[fts_chain, ilike_chain])
 
         result = await retrieve(client, course_id=1, query="photosynthesis")
 
         assert result.sufficient is True
         assert len(result.chunks) == 5
-        select_mock.ilike.assert_called_once()
+        ilike_chain.ilike.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_ilike_fallback_escapes_wildcards(self) -> None:
         """ILIKE fallback must escape % and _ in the query to prevent injection."""
         rows = _sample_rows(5)
-        execute_result = MagicMock()
-        execute_result.data = rows
+        ok_result = MagicMock()
+        ok_result.data = rows
 
+        # FTS chain fails
         fts_chain = MagicMock()
+        fts_chain.select = MagicMock(return_value=fts_chain)
         fts_chain.eq = MagicMock(return_value=fts_chain)
         fts_chain.limit = MagicMock(return_value=fts_chain)
+        fts_chain.text_search = MagicMock(return_value=fts_chain)
         fts_chain.execute = AsyncMock(side_effect=Exception("FTS not available"))
 
+        # ILIKE chain succeeds
         ilike_chain = MagicMock()
+        ilike_chain.select = MagicMock(return_value=ilike_chain)
         ilike_chain.eq = MagicMock(return_value=ilike_chain)
+        ilike_chain.ilike = MagicMock(return_value=ilike_chain)
         ilike_chain.limit = MagicMock(return_value=ilike_chain)
-        ilike_chain.execute = AsyncMock(return_value=execute_result)
-
-        select_mock = MagicMock()
-        select_mock.text_search = MagicMock(return_value=fts_chain)
-        select_mock.ilike = MagicMock(return_value=ilike_chain)
-
-        table_mock = MagicMock()
-        table_mock.select = MagicMock(return_value=select_mock)
+        ilike_chain.execute = AsyncMock(return_value=ok_result)
 
         client = AsyncMock()
-        client.table = MagicMock(return_value=table_mock)
+        client.table = MagicMock(side_effect=[fts_chain, ilike_chain])
 
-        # Query contains ILIKE wildcards that must be escaped
         await retrieve(client, course_id=1, query="100% of_cells")
 
-        select_mock.ilike.assert_called_once()
-        pattern = select_mock.ilike.call_args[0][1]
+        ilike_chain.ilike.assert_called_once()
+        pattern = ilike_chain.ilike.call_args[0][1]
         # Wildcards in user input must be escaped; only outer % are real
         assert pattern == r"%100\% of\_cells%"
 

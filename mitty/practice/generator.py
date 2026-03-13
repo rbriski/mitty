@@ -18,13 +18,14 @@ Pydantic models for structured LLM output:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 if TYPE_CHECKING:
     from mitty.ai.client import AIClient
@@ -110,6 +111,14 @@ class GeneratedBatch(BaseModel):
             "to generate high-quality items."
         ),
     )
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def _parse_stringified_items(cls, v: Any) -> Any:
+        """Handle LLM returning items as a JSON string instead of a list."""
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -395,13 +404,15 @@ async def generate_practice_items(
                 course_id,
                 retrieval.message,
             )
-            return GenerationResult(items=[], needs_resources=True)
-
-        # Convert RetrievedChunk dataclasses to dicts matching legacy format
-        resource_chunks = [
-            {"id": chunk.chunk_id, "content_text": chunk.content_text}
-            for chunk in retrieval.chunks
-        ]
+            # Fall through with empty chunks — the LLM prompt handles this
+            # by generating items from the concept name alone.
+            resource_chunks = []
+        else:
+            # Convert RetrievedChunk dataclasses to dicts matching legacy format
+            resource_chunks = [
+                {"id": chunk.chunk_id, "content_text": chunk.content_text}
+                for chunk in retrieval.chunks
+            ]
 
     # 3. Build prompt and call LLM
     user_prompt = _build_user_prompt(
@@ -452,4 +463,7 @@ async def generate_practice_items(
     )
 
     # 6. Convert stored rows to PracticeItem dataclass
-    return GenerationResult(items=_rows_to_practice_items(stored_rows))
+    return GenerationResult(
+        items=_rows_to_practice_items(stored_rows),
+        needs_resources=batch.needs_resources,
+    )
