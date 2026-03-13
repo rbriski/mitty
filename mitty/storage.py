@@ -802,12 +802,18 @@ async def upsert_files_as_resources(
     client: AsyncClient,
     files: list[FileMetadata],
     course_id: int,
+    *,
+    file_contents: dict[int, str] | None = None,
 ) -> None:
     """Upsert Canvas file metadata as resource rows.
 
     Each file is mapped to a resource with ``resource_type='file'``,
     ``source_url`` set to the file's download URL, and ``title`` set
-    to ``display_name``.  No file content is downloaded or stored.
+    to ``display_name``.
+
+    When *file_contents* is provided, files whose IDs appear in the
+    mapping will have their ``content_text`` populated with the
+    extracted text.
 
     Deduplication uses the ``canvas_item_id`` column, set to the
     file's Canvas ID.
@@ -816,6 +822,7 @@ async def upsert_files_as_resources(
         client: Async Supabase client.
         files: List of FileMetadata models to upsert.
         course_id: The Canvas course ID these files belong to.
+        file_contents: Optional mapping of file ID to extracted plain text.
 
     Raises:
         StorageError: If the Supabase upsert fails.
@@ -823,6 +830,7 @@ async def upsert_files_as_resources(
     if not files:
         return
 
+    resolved = file_contents or {}
     now = _now_iso()
     rows: list[dict] = []
     for file in files:
@@ -836,6 +844,9 @@ async def upsert_files_as_resources(
             "created_at": now,
             "updated_at": now,
         }
+        content_text = resolved.get(file.id)
+        if content_text:
+            row["content_text"] = content_text
         rows.append(row)
 
     try:
@@ -1016,9 +1027,9 @@ async def store_all(
     5. quizzes -> assessments
     6. module_items -> resources
     7. pages -> resources
-    8. files -> resources
+    8. files -> resources (with extracted content_text from file_contents)
     9. discussion_topics -> resources
-    10. chunk resources with content_text (pages + discussions)
+    10. chunk resources with content_text (pages + discussions + files)
     11. calendar_events -> assessments (filtered by classifier)
     12. assignments -> assessments (filtered by classifier)
 
@@ -1038,6 +1049,7 @@ async def store_all(
     modules_data = data.get("modules", {})
     pages = data.get("pages", {})
     files = data.get("files", {})
+    file_contents_data = data.get("file_contents", {})
     discussion_topics = data.get("discussion_topics", {})
     calendar_events = data.get("calendar_events", [])
 
@@ -1114,17 +1126,28 @@ async def store_all(
             if page.body and page.body.strip():
                 page_canvas_item_ids.append(1_000_000_000 + page.page_id)
 
-    # Phase 2: files as resources (per-course)
+    # Phase 2: files as resources (per-course), with extracted content
+    file_canvas_item_ids: list[int] = []
     for course_id_str, file_list in files.items():
+        course_file_contents = file_contents_data.get(course_id_str, {})
         step_name = f"upsert_files_as_resources[{course_id_str}]"
         logger.info("store_all: starting %s", step_name)
         try:
-            await upsert_files_as_resources(client, file_list, int(course_id_str))
+            await upsert_files_as_resources(
+                client,
+                file_list,
+                int(course_id_str),
+                file_contents=course_file_contents,
+            )
         except StorageError:
             raise
         except Exception as exc:
             msg = f"store_all failed at step '{step_name}': {exc}"
             raise StorageError(msg) from exc
+        # Collect canvas_item_ids for files that have extracted content
+        for file in file_list:
+            if course_file_contents.get(file.id):
+                file_canvas_item_ids.append(file.id)
 
     # Phase 4: discussion topics as resources (per-course)
     discussion_canvas_item_ids: list[int] = []
@@ -1145,8 +1168,10 @@ async def store_all(
             msg = f"store_all failed at step '{step_name}': {exc}"
             raise StorageError(msg) from exc
 
-    # Chunk resources with content_text (pages + discussions)
-    all_chunkable_ids = page_canvas_item_ids + discussion_canvas_item_ids
+    # Chunk resources with content_text (pages + discussions + files)
+    all_chunkable_ids = (
+        page_canvas_item_ids + discussion_canvas_item_ids + file_canvas_item_ids
+    )
     if all_chunkable_ids:
         step_name = "chunk_and_store_resources"
         logger.info("store_all: starting %s", step_name)

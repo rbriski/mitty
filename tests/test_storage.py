@@ -1373,7 +1373,7 @@ class TestStoreAll:
             )
 
         mock_pages.assert_awaited_once_with(client, [page], 1)
-        mock_files.assert_awaited_once_with(client, [file], 1)
+        mock_files.assert_awaited_once_with(client, [file], 1, file_contents={})
 
     async def test_phase2_calendar_events_filtered_by_classifier(self) -> None:
         """Only assessment-classified calendar events are stored."""
@@ -2096,6 +2096,28 @@ class TestUpsertFilesAsResources:
         assert len(rows) == 2
         ids = {r["canvas_item_id"] for r in rows}
         assert ids == {9001, 9002}
+
+    async def test_upsert_files_with_file_contents_sets_content_text(self) -> None:
+        """When file_contents is provided, matching files get content_text."""
+        client = _mock_client()
+        files = [
+            FileMetadata(id=9001, display_name="guide.pdf"),
+            FileMetadata(id=9002, display_name="image.png"),
+        ]
+        file_contents = {9001: "Extracted PDF text"}
+
+        await upsert_files_as_resources(
+            client, files, course_id=12345, file_contents=file_contents
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+
+        pdf_row = next(r for r in rows if r["canvas_item_id"] == 9001)
+        assert pdf_row["content_text"] == "Extracted PDF text"
+
+        png_row = next(r for r in rows if r["canvas_item_id"] == 9002)
+        assert "content_text" not in png_row
 
     async def test_upsert_files_api_failure_raises_storage_error(self) -> None:
         client = _mock_client()
@@ -2842,3 +2864,147 @@ class TestUpsertAssignmentsAsAssessments:
 
         with pytest.raises(StorageError, match="db timeout"):
             await upsert_assignments_as_assessments(client, assignments)
+
+
+# ------------------------------------------------------------------ #
+#  store_all: file content enrichment pipeline integration
+# ------------------------------------------------------------------ #
+
+
+class TestStoreAllFileContentEnrichment:
+    """store_all wires file_contents into upsert and chunking pipeline."""
+
+    async def test_store_all_chunks_file_resources_with_content(self) -> None:
+        """Files with extracted content_text are passed to the chunking pipeline."""
+        client = AsyncMock()
+
+        file = FileMetadata(
+            id=9001,
+            display_name="study_guide.pdf",
+            url="https://example.com/file.pdf",
+        )
+
+        data = {
+            "files": {"1": [file]},
+            "file_contents": {"1": {9001: "Extracted PDF text"}},
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ) as mock_files,
+            patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ) as mock_chunk,
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+        ):
+            await store_all(client, data)
+
+        # upsert_files_as_resources receives the file_contents kwarg
+        mock_files.assert_awaited_once_with(
+            client, [file], 1, file_contents={9001: "Extracted PDF text"}
+        )
+
+        # File canvas_item_id should appear in the chunkable IDs
+        mock_chunk.assert_awaited_once()
+        canvas_ids = mock_chunk.call_args[0][1]
+        assert 9001 in canvas_ids
+
+    async def test_store_all_skips_files_without_content(self) -> None:
+        """Files without extracted content are not added to the chunking pipeline."""
+        client = AsyncMock()
+
+        file_no_content = FileMetadata(
+            id=9002,
+            display_name="image.png",
+            url="https://example.com/image.png",
+        )
+
+        data = {
+            "files": {"1": [file_no_content]},
+            "file_contents": {"1": {}},
+        }
+
+        with (
+            patch(_STORE_ALL_PATCHES["upsert_courses"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_enrollments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_assignments"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["upsert_submissions"], new_callable=AsyncMock),
+            patch(_STORE_ALL_PATCHES["insert_grade_snapshots"], new_callable=AsyncMock),
+            patch(
+                _STORE_ALL_PATCHES["upsert_quizzes_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_module_items_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_pages_as_resources"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_files_as_resources"],
+                new_callable=AsyncMock,
+            ) as mock_files,
+            patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["chunk_and_store_resources"],
+                new_callable=AsyncMock,
+            ) as mock_chunk,
+            patch(_STORE_ALL_PATCHES["is_assessment_event"], return_value=False),
+            patch(
+                _STORE_ALL_PATCHES["upsert_assignments_as_assessments"],
+                new_callable=AsyncMock,
+            ),
+        ):
+            await store_all(client, data)
+
+        # upsert_files_as_resources is still called with empty file_contents
+        mock_files.assert_awaited_once_with(
+            client, [file_no_content], 1, file_contents={}
+        )
+
+        # No chunkable IDs from files, so chunk_and_store should not be called
+        # (unless pages/discussions contribute IDs — here they don't)
+        mock_chunk.assert_not_awaited()
