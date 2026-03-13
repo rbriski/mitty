@@ -188,7 +188,7 @@ class TestFormatConversationHistory:
             {"role": "coach", "content": "Hello!"},
         ]
         result = _format_conversation_history(history)
-        assert "Student: Hi" in result
+        assert "Student: <user_input>Hi</user_input>" in result
         assert "Coach: Hello!" in result
 
 

@@ -31,12 +31,25 @@ _INJECTION_PREAMBLE = (
 )
 
 
+def _strip_xml_tags(text: str) -> str:
+    """Remove ``<user_input>`` and ``</user_input>`` from *text*.
+
+    Prevents a student from closing the XML wrapper early and injecting
+    instructions outside the tagged region.
+    """
+    return text.replace("<user_input>", "").replace("</user_input>", "")
+
+
 def wrap_user_input(text: str) -> str:
     """Wrap *text* in XML tags for prompt injection defense.
 
+    Strips any existing ``<user_input>`` / ``</user_input>`` tags from *text*
+    before wrapping, so a student cannot close the wrapper early.
+
     Returns the text surrounded by ``<user_input>`` / ``</user_input>`` tags.
     """
-    return f"<user_input>{text}</user_input>"
+    sanitized = _strip_xml_tags(text)
+    return f"<user_input>{sanitized}</user_input>"
 
 
 # ---------------------------------------------------------------------------

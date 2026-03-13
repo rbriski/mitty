@@ -64,6 +64,15 @@ def _sanitize_query(query: str) -> str:
     return " ".join(cleaned.split())
 
 
+def _escape_like(query: str) -> str:
+    """Escape LIKE/ILIKE wildcard characters (``%`` and ``_``) in *query*.
+
+    Must be applied before embedding in a ``%…%`` pattern so user input
+    cannot inject wildcards that match unintended rows.
+    """
+    return query.replace("%", r"\%").replace("_", r"\_")
+
+
 # ---------------------------------------------------------------------------
 # Core retrieval
 # ---------------------------------------------------------------------------
@@ -173,7 +182,7 @@ async def _fts_query(
 
     # Fallback: simple ILIKE match on content_text.
     try:
-        pattern = f"%{query}%"
+        pattern = f"%{_escape_like(query)}%"
         result = await (
             client.table("resource_chunks")
             .select(

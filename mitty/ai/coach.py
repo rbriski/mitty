@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from mitty.ai.prompts import get_prompt
+from mitty.ai.prompts import get_prompt, wrap_user_input
 from mitty.ai.retriever import retrieve
 
 if TYPE_CHECKING:
@@ -133,13 +133,19 @@ async def _store_message(
 
 
 def _format_conversation_history(history: list[dict[str, Any]]) -> str:
-    """Format chat history as a readable conversation transcript."""
+    """Format chat history as a readable conversation transcript.
+
+    Student messages are wrapped in ``<user_input>`` tags to prevent
+    prompt injection via replayed history.
+    """
     if not history:
         return "(no previous messages)"
     lines = []
     for msg in history:
-        role_label = "Student" if msg["role"] == "student" else "Coach"
-        lines.append(f"{role_label}: {msg['content']}")
+        if msg["role"] == "student":
+            lines.append(f"Student: {wrap_user_input(msg['content'])}")
+        else:
+            lines.append(f"Coach: {msg['content']}")
     return "\n".join(lines)
 
 
