@@ -70,7 +70,7 @@ def _escape_like(query: str) -> str:
     Must be applied before embedding in a ``%…%`` pattern so user input
     cannot inject wildcards that match unintended rows.
     """
-    return query.replace("%", r"\%").replace("_", r"\_")
+    return query.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
 
 
 # ---------------------------------------------------------------------------

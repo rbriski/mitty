@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -109,13 +110,27 @@ async def send_coach_message(
         message=data.message,
     )
 
+    # Fetch the stored message to get the DB-generated created_at.
+    msg_result = await (
+        client.table("coach_messages")
+        .select("created_at")
+        .eq("id", response.message_id)
+        .maybe_single()
+        .execute()
+    )
+    created_at = (
+        msg_result.data["created_at"]
+        if msg_result and msg_result.data
+        else datetime.now(UTC).isoformat()
+    )
+
     return CoachMessageResponse(
         id=response.message_id,
         study_block_id=block_id,
         role="coach",
         content=response.content,
         sources_cited=response.sources_cited or None,
-        created_at="",  # populated by DB; endpoint returns coach msg
+        created_at=created_at,
     )
 
 
@@ -132,8 +147,8 @@ async def get_coach_messages(
     block_id: int,
     client: UserClient,
     current_user: CurrentUser,
-    offset: int = 0,
-    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
 ) -> ListResponse[CoachMessageResponse]:
     """Return paginated chat history for a study block.
 

@@ -158,7 +158,14 @@ class TestSendCoachMessage:
         from mitty.ai.coach import CoachResponse
 
         block_chain = _chain_mock(SAMPLE_BLOCK, raw=True)
-        mock_client.table = MagicMock(return_value=block_chain)
+        msg_chain = _chain_mock({"created_at": "2026-03-12T10:00:00+00:00"}, raw=True)
+
+        def route_table(name: str) -> MagicMock:
+            if name == "study_blocks":
+                return block_chain
+            return msg_chain
+
+        mock_client.table = MagicMock(side_effect=route_table)
 
         coach_resp = CoachResponse(
             content="A quadratic equation has the form ax^2 + bx + c = 0.",

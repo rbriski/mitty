@@ -120,6 +120,18 @@ def load_settings() -> Settings:
     if anthropic_model := os.environ.get("ANTHROPIC_MODEL"):
         overrides["anthropic_model"] = anthropic_model
 
+    if ai_rpm := os.environ.get("AI_RATE_LIMIT_RPM"):
+        overrides["ai_rate_limit_rpm"] = int(ai_rpm)
+
+    if ai_tpm := os.environ.get("AI_RATE_LIMIT_TPM"):
+        overrides["ai_rate_limit_tpm"] = int(ai_tpm)
+
+    if ai_budget_session := os.environ.get("AI_BUDGET_PER_SESSION"):
+        overrides["ai_budget_per_session"] = float(ai_budget_session)
+
+    if ai_budget_day := os.environ.get("AI_BUDGET_PER_DAY"):
+        overrides["ai_budget_per_day"] = float(ai_budget_day)
+
     return Settings(**overrides)
 
 

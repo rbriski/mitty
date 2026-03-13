@@ -54,15 +54,17 @@ async def get_ai_usage(
 
     for row in rows:
         total_calls += 1
-        total_input_tokens += row["input_tokens"]
-        total_output_tokens += row["output_tokens"]
-        cost = float(row["cost_usd"])
+        inp = row.get("input_tokens") or 0
+        out = row.get("output_tokens") or 0
+        cost = float(row.get("cost_usd") or 0)
+        total_input_tokens += inp
+        total_output_tokens += out
         total_cost_usd += cost
 
-        bucket = by_type[row["call_type"]]
+        bucket = by_type[row.get("call_type") or "unknown"]
         bucket["calls"] += 1
-        bucket["input_tokens"] += row["input_tokens"]
-        bucket["output_tokens"] += row["output_tokens"]
+        bucket["input_tokens"] += inp
+        bucket["output_tokens"] += out
         bucket["cost_usd"] += cost
 
     breakdown = [

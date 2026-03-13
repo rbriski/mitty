@@ -406,3 +406,7 @@ class TestEscapeLike:
 
     def test_empty_string(self) -> None:
         assert _escape_like("") == ""
+
+    def test_escapes_backslash_first(self) -> None:
+        """Backslash must be escaped before % and _ to avoid double-escaping."""
+        assert _escape_like(r"a\b%c_d") == r"a\\b\%c\_d"

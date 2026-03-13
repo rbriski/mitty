@@ -584,7 +584,7 @@ coach_messages = sa.Table(
     sa.Column("user_id", sa.Uuid, nullable=False),
     sa.Column(
         "study_block_id",
-        sa.BigInteger,
+        sa.Integer,
         sa.ForeignKey("study_blocks.id"),
         nullable=False,
     ),
