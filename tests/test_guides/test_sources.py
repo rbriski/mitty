@@ -188,7 +188,7 @@ class TestNeedsResources:
         assert len(bundle.chunks) == MIN_SOURCE_CHUNKS
 
     @pytest.mark.asyncio
-    async def test_true_when_exactly_at_threshold(self) -> None:
+    async def test_false_when_exactly_at_threshold(self) -> None:
         """needs_resources=False when chunks == MIN_SOURCE_CHUNKS (boundary)."""
         chunks = [
             _make_chunk(i, resource_id=10 + i, trust=0.7)

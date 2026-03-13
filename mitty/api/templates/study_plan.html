@@ -500,7 +500,8 @@
                               type="text"
                               :placeholder="'Your answer...'"
                               class="w-full px-3 py-2 text-sm border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-transparent outline-none bg-white"
-                              x-model="getArtifactModel(block.id, 'warmup_' + wIdx)"
+                              :value="getArtifactModel(block.id, 'warmup_' + wIdx)"
+                              @input="setArtifactModel(block.id, 'warmup_' + wIdx, $event.target.value)"
                               @change="saveWarmupAnswer(block, wIdx, $event.target.value)"
                             >
                             <div
@@ -669,19 +670,22 @@
                             type="text"
                             placeholder="What I thought..."
                             class="w-full px-3 py-2 text-sm border border-red-200 rounded-lg focus:ring-2 focus:ring-red-400 focus:border-transparent outline-none bg-white"
-                            x-model="getMisconceptionModel(block.id, 'thought')"
+                            :value="getMisconceptionModel(block.id, 'thought')"
+                            @input="setMisconceptionModel(block.id, 'thought', $event.target.value)"
                           >
                           <input
                             type="text"
                             placeholder="Why it was wrong..."
                             class="w-full px-3 py-2 text-sm border border-red-200 rounded-lg focus:ring-2 focus:ring-red-400 focus:border-transparent outline-none bg-white"
-                            x-model="getMisconceptionModel(block.id, 'why_wrong')"
+                            :value="getMisconceptionModel(block.id, 'why_wrong')"
+                            @input="setMisconceptionModel(block.id, 'why_wrong', $event.target.value)"
                           >
                           <input
                             type="text"
                             placeholder="Corrected understanding..."
                             class="w-full px-3 py-2 text-sm border border-red-200 rounded-lg focus:ring-2 focus:ring-red-400 focus:border-transparent outline-none bg-white"
-                            x-model="getMisconceptionModel(block.id, 'corrected')"
+                            :value="getMisconceptionModel(block.id, 'corrected')"
+                            @input="setMisconceptionModel(block.id, 'corrected', $event.target.value)"
                           >
                           <button
                             @click="saveMisconception(block)"
@@ -1341,6 +1345,13 @@
         return this.misconceptionForms[blockId][field] || '';
       },
 
+      setMisconceptionModel(blockId, field, value) {
+        if (!this.misconceptionForms[blockId]) {
+          this.misconceptionForms[blockId] = { thought: '', why_wrong: '', corrected: '' };
+        }
+        this.misconceptionForms[blockId][field] = value;
+      },
+
       saveMisconception(block) {
         const form = this.misconceptionForms[block.id];
         if (!form?.thought && !form?.why_wrong && !form?.corrected) return;
@@ -1357,6 +1368,13 @@
 
       getArtifactModel(blockId, key) {
         return this.blockArtifacts[blockId]?.[key] || '';
+      },
+
+      setArtifactModel(blockId, key, value) {
+        if (!this.blockArtifacts[blockId]) {
+          this.blockArtifacts[blockId] = {};
+        }
+        this.blockArtifacts[blockId][key] = value;
       },
 
       saveWarmupAnswer(block, wIdx, value) {

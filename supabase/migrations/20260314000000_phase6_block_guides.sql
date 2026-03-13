@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS block_artifacts (
     created_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS ix_block_artifacts_block_id
-    ON block_artifacts (block_id);
+CREATE INDEX IF NOT EXISTS ix_block_artifacts_block_id_step
+    ON block_artifacts (block_id, step_number);
 
 -- =========================================================================
 -- 3. guide_content_cache (DEC-002)

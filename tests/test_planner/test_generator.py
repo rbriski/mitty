@@ -173,6 +173,9 @@ class _WritableTable:
     def insert(self, rows: Any, **_kwargs: Any) -> _InsertChain:
         return self._insert_chain.insert(rows)
 
+    def upsert(self, rows: Any, **_kwargs: Any) -> _InsertChain:
+        return self._insert_chain.insert(rows)
+
     def delete(self, **_kwargs: Any) -> _QueryChain:
         return _QueryChain([])
 
@@ -656,19 +659,9 @@ async def test_guide_compilation_failure_does_not_fail_plan() -> None:
     client = _build_mock_client()
     mock_ai = AsyncMock()
 
-    with patch(
-        "mitty.planner.generator._compile_block_guides",
-        new_callable=AsyncMock,
-        side_effect=Exception("guide failure"),
-    ):
-        # Even if _compile_block_guides raises, the caller catches it
-        # via gather(return_exceptions=True). But since we're mocking
-        # _compile_block_guides itself, let's test the actual internal path.
-        pass
-
     # Test the inner path: _compile_block_guides with a failing compiler.
     block_rows = [
-        {"id": 1, "block_type": "homework", "course_id": 1},
+        {"id": 1, "block_type": "retrieval", "course_id": 1},
         {"id": 2, "block_type": "plan", "course_id": None},
     ]
     with patch(

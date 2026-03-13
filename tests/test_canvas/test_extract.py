@@ -205,6 +205,7 @@ class TestDownloadFileContent:
         content = b"fake pdf content"
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.content = content
+        mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()
 
         client = AsyncMock(spec=httpx.AsyncClient)
@@ -222,6 +223,7 @@ class TestDownloadFileContent:
         oversized = b"x" * 200  # 200 bytes
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.content = oversized
+        mock_response.status_code = 200
         mock_response.raise_for_status = MagicMock()
 
         client = AsyncMock(spec=httpx.AsyncClient)

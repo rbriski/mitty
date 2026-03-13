@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 _SIGNAL_MAX_AGE = timedelta(hours=24)
 
 # Per-block timeout for guide compilation (seconds).
-_GUIDE_TIMEOUT_S: float = 4.0
+_GUIDE_TIMEOUT_S: float = 15.0
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +535,10 @@ async def _compile_and_persist_guide(
     from mitty.guides.compiler import compile_block_guide
 
     block_id = block_row["id"]
-    block_type = block_row.get("block_type", "homework")
+    block_type = block_row.get("block_type")
+    if block_type is None:
+        logger.debug("Skipping guide for block %d — no block_type", block_id)
+        return
     course_id = block_row.get("course_id")
 
     if course_id is None:
@@ -568,7 +571,9 @@ async def _compile_and_persist_guide(
         "guide_version": guide.guide_version,
         "generated_at": now_iso,
     }
-    await client.table("study_block_guides").insert(row).execute()
+    await (
+        client.table("study_block_guides").upsert(row, on_conflict="block_id").execute()
+    )
 
 
 async def _compile_block_guides(

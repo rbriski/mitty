@@ -122,9 +122,13 @@ class BlockGuide:
 # ---------------------------------------------------------------------------
 
 
-def _compute_source_hash(chunk_ids: list[int]) -> str:
-    """Hash sorted chunk IDs with SHA-256 for cache keying."""
-    payload = ",".join(str(cid) for cid in sorted(chunk_ids))
+def _compute_source_hash(chunk_ids: list[int], concept: str = "") -> str:
+    """Hash sorted chunk IDs with SHA-256 for cache keying.
+
+    Includes the concept name in the hash to prevent collisions when
+    different concepts have identical (or empty) source chunk sets.
+    """
+    payload = f"{concept}:" + ",".join(str(cid) for cid in sorted(chunk_ids))
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
@@ -175,7 +179,11 @@ async def _store_cache(
         "created_at": datetime.now(UTC).isoformat(),
     }
     try:
-        await client.table("guide_content_cache").upsert(row).execute()
+        await (
+            client.table("guide_content_cache")
+            .upsert(row, on_conflict="concept,source_hash")
+            .execute()
+        )
     except Exception:
         logger.warning("Failed to store cache for concept=%r", concept, exc_info=True)
 
@@ -415,7 +423,7 @@ async def compile_block_guide(
 
     # 5. Compute source hash from chunk IDs
     chunk_ids = [c.chunk_id for c in source_bundle.chunks]
-    source_hash = _compute_source_hash(chunk_ids)
+    source_hash = _compute_source_hash(chunk_ids, concept=primary_concept)
 
     # 6. Check guide content cache
     cached_content = await _check_cache(client, primary_concept, source_hash)

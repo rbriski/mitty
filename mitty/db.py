@@ -691,7 +691,7 @@ study_block_guides = sa.Table(
     sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
     sa.Column(
         "block_id",
-        sa.BigInteger,
+        sa.Integer,
         sa.ForeignKey("study_blocks.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
@@ -722,7 +722,7 @@ block_artifacts = sa.Table(
     sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
     sa.Column(
         "block_id",
-        sa.BigInteger,
+        sa.Integer,
         sa.ForeignKey("study_blocks.id", ondelete="CASCADE"),
         nullable=False,
     ),

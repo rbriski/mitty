@@ -285,7 +285,10 @@ async def fetch_files(
 
 
 # Content types eligible for text extraction.
-_EXTRACTABLE_CONTENT_TYPES = {"application/pdf"}
+_EXTRACTABLE_CONTENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 _EXTRACTABLE_EXTENSIONS = {".pdf", ".docx"}
 
 

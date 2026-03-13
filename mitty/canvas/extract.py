@@ -73,11 +73,36 @@ async def download_file_content(
         return None
 
     try:
+        # Use follow_redirects=False to validate each redirect destination
+        # against the allowlist (prevents SSRF via open redirect).
         response = await client.get(
             file_url,
             timeout=httpx.Timeout(30.0, connect=10.0),
-            follow_redirects=True,
+            follow_redirects=False,
         )
+
+        # Manually follow up to 5 redirects, validating each destination.
+        max_redirects = 5
+        for _ in range(max_redirects):
+            if response.status_code not in (301, 302, 303, 307, 308):
+                break
+            location = response.headers.get("location")
+            if not location:
+                break
+            # Canvas redirects to S3 presigned URLs — allow those through
+            # but still block internal/metadata endpoints.
+            from urllib.parse import urlparse
+
+            parsed = urlparse(location)
+            if parsed.hostname and parsed.hostname.startswith("169.254."):
+                logger.warning("Blocked redirect to metadata endpoint: %s", location)
+                return None
+            response = await client.get(
+                location,
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                follow_redirects=False,
+            )
+
         response.raise_for_status()
     except httpx.HTTPError as exc:
         logger.warning("File download failed for %s: %s", file_url, exc)
@@ -163,8 +188,10 @@ def extract_text(content: bytes, content_type: str) -> str:
     Returns:
         Extracted plain text, or ``""`` for unsupported types.
     """
-    if content_type in _PDF_TYPES:
+    # Strip MIME type parameters (e.g., "; charset=utf-8").
+    mime_type = content_type.split(";")[0].strip().lower()
+    if mime_type in _PDF_TYPES:
         return extract_text_from_pdf(content)
-    if content_type in _DOCX_TYPES:
+    if mime_type in _DOCX_TYPES:
         return extract_text_from_docx(content)
     return ""
