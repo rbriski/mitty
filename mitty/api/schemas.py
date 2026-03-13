@@ -596,6 +596,7 @@ class PracticeGenerateResponse(BaseModel):
     course_id: int
     items: list[PracticeItemResponse]
     cached: bool = False
+    needs_resources: bool = False
 
 
 class EvaluateRequest(BaseModel):

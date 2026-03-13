@@ -14,6 +14,7 @@ from uuid import UUID
 from mitty.practice.generator import (
     GeneratedBatch,
     GeneratedItem,
+    GenerationResult,
     generate_practice_items,
 )
 
@@ -237,7 +238,7 @@ class TestGenerateAll6Types:
         sb_client = _build_mock_client()
         chunks = _sample_chunks()
 
-        result = await generate_practice_items(
+        gen_result = await generate_practice_items(
             ai_client=ai_client,
             supabase_client=sb_client,
             user_id=_USER_ID,
@@ -246,6 +247,10 @@ class TestGenerateAll6Types:
             mastery_level=0.5,
             resource_chunks=chunks,
         )
+
+        assert isinstance(gen_result, GenerationResult)
+        assert gen_result.needs_resources is False
+        result = gen_result.items
 
         # We should get items for all 6 types
         types_returned = {item.practice_type for item in result}
@@ -264,7 +269,7 @@ class TestItemsCiteSourceChunks:
         sb_client = _build_mock_client()
         chunks = _sample_chunks()
 
-        result = await generate_practice_items(
+        gen_result = await generate_practice_items(
             ai_client=ai_client,
             supabase_client=sb_client,
             user_id=_USER_ID,
@@ -275,7 +280,7 @@ class TestItemsCiteSourceChunks:
         )
 
         chunk_ids = {c["id"] for c in chunks}
-        for item in result:
+        for item in gen_result.items:
             assert item.source_chunk_ids is not None
             assert len(item.source_chunk_ids) > 0
             # Every cited chunk should be from the provided chunks
@@ -297,7 +302,7 @@ class TestDifficultyScalesWithMasteryLevel:
         sb_high = _build_mock_client()
         chunks = _sample_chunks()
 
-        low_result = await generate_practice_items(
+        low_gen = await generate_practice_items(
             ai_client=low_ai,
             supabase_client=sb_low,
             user_id=_USER_ID,
@@ -307,7 +312,7 @@ class TestDifficultyScalesWithMasteryLevel:
             resource_chunks=chunks,
         )
 
-        high_result = await generate_practice_items(
+        high_gen = await generate_practice_items(
             ai_client=high_ai,
             supabase_client=sb_high,
             user_id=_USER_ID,
@@ -327,10 +332,10 @@ class TestDifficultyScalesWithMasteryLevel:
 
         # The returned items should reflect their respective difficulty levels
         low_difficulties = [
-            i.difficulty_level for i in low_result if i.difficulty_level
+            i.difficulty_level for i in low_gen.items if i.difficulty_level
         ]
         high_difficulties = [
-            i.difficulty_level for i in high_result if i.difficulty_level
+            i.difficulty_level for i in high_gen.items if i.difficulty_level
         ]
 
         if low_difficulties and high_difficulties:
@@ -338,23 +343,57 @@ class TestDifficultyScalesWithMasteryLevel:
 
 
 class TestNeedsResourcesWhenNoChunks:
-    """Returns needs_resources indicator when no chunks are provided."""
+    """Returns needs_resources indicator when retriever finds insufficient sources."""
 
-    async def test_needs_resources_when_no_chunks(self) -> None:
-        # With empty chunks, the function should return items with needs_resources
-        # set but still return minimal items if possible.
+    async def test_needs_resources_via_retriever(self) -> None:
+        """When retriever returns sufficient=False, generator returns empty + flag."""
+        from unittest.mock import patch
+
+        from mitty.ai.retriever import RetrievalResult
+
+        ai_client = _build_mock_ai_client(_make_full_batch())
+        sb_client = _build_mock_client()
+
+        insufficient = RetrievalResult(
+            chunks=[],
+            sufficient=False,
+            message="No study materials found for this topic.",
+        )
+
+        with patch(
+            "mitty.ai.retriever.retrieve",
+            new_callable=AsyncMock,
+            return_value=insufficient,
+        ):
+            gen_result = await generate_practice_items(
+                ai_client=ai_client,
+                supabase_client=sb_client,
+                user_id=_USER_ID,
+                course_id=_COURSE_ID,
+                concept=_CONCEPT,
+                mastery_level=0.5,
+                # No resource_chunks -> uses retriever
+            )
+
+        assert gen_result.needs_resources is True
+        assert gen_result.items == []
+        # LLM should NOT have been called
+        ai_client.call_structured.assert_not_called()
+
+    async def test_needs_resources_legacy_empty_chunks(self) -> None:
+        """Legacy: passing empty resource_chunks=[] still works (calls LLM)."""
         batch = _make_full_batch(needs_resources=True)
         ai_client = _build_mock_ai_client(batch)
         sb_client = _build_mock_client()
 
-        result = await generate_practice_items(
+        gen_result = await generate_practice_items(
             ai_client=ai_client,
             supabase_client=sb_client,
             user_id=_USER_ID,
             course_id=_COURSE_ID,
             concept=_CONCEPT,
             mastery_level=0.5,
-            resource_chunks=[],  # No chunks!
+            resource_chunks=[],  # Legacy path: empty list passed explicitly
         )
 
         # The AI client should have been called with a prompt indicating
@@ -365,7 +404,7 @@ class TestNeedsResourcesWhenNoChunks:
         )
 
         # Result should still be items (the LLM can generate from concept alone)
-        assert len(result) >= 1
+        assert len(gen_result.items) >= 1
 
 
 class TestCacheHitSkipsLlmCall:
@@ -412,7 +451,7 @@ class TestCacheHitSkipsLlmCall:
         ai_client = _build_mock_ai_client(_make_full_batch())
         sb_client = _build_mock_client(cached_items=cached)
 
-        result = await generate_practice_items(
+        gen_result = await generate_practice_items(
             ai_client=ai_client,
             supabase_client=sb_client,
             user_id=_USER_ID,
@@ -426,9 +465,10 @@ class TestCacheHitSkipsLlmCall:
         ai_client.call_structured.assert_not_called()
 
         # Should return the cached items
-        assert len(result) == 2
-        assert result[0].practice_type == "multiple_choice"
-        assert result[1].practice_type == "flashcard"
+        assert gen_result.needs_resources is False
+        assert len(gen_result.items) == 2
+        assert gen_result.items[0].practice_type == "multiple_choice"
+        assert gen_result.items[1].practice_type == "flashcard"
 
 
 class TestItemsStoredInPracticeItemsTable:
@@ -440,7 +480,7 @@ class TestItemsStoredInPracticeItemsTable:
         sb_client = _build_mock_client()
         chunks = _sample_chunks()
 
-        result = await generate_practice_items(
+        gen_result = await generate_practice_items(
             ai_client=ai_client,
             supabase_client=sb_client,
             user_id=_USER_ID,
@@ -457,7 +497,7 @@ class TestItemsStoredInPracticeItemsTable:
         assert "practice_items" in table_calls
 
         # Each returned item should have an id (from the upsert response)
-        for item in result:
+        for item in gen_result.items:
             assert item.id is not None
             assert item.id > 0
 
@@ -471,7 +511,7 @@ class TestVariesQuestionTypesInBatch:
         sb_client = _build_mock_client()
         chunks = _sample_chunks()
 
-        result = await generate_practice_items(
+        gen_result = await generate_practice_items(
             ai_client=ai_client,
             supabase_client=sb_client,
             user_id=_USER_ID,
@@ -481,8 +521,73 @@ class TestVariesQuestionTypesInBatch:
             resource_chunks=chunks,
         )
 
-        types = {item.practice_type for item in result}
+        types = {item.practice_type for item in gen_result.items}
         # Should have multiple distinct types — at least 3 different types
         assert len(types) >= 3
         # Ideally all 6
         assert types == ALL_PRACTICE_TYPES
+
+
+class TestRetrieverIntegration:
+    """Generator calls retriever internally when resource_chunks is omitted."""
+
+    async def test_generator_calls_retriever_when_no_chunks_passed(self) -> None:
+        """When resource_chunks is None, generator calls retrieve() internally."""
+        from unittest.mock import patch
+
+        from mitty.ai.retriever import RetrievalResult, RetrievedChunk
+
+        batch = _make_full_batch()
+        ai_client = _build_mock_ai_client(batch)
+        sb_client = _build_mock_client()
+
+        retrieval = RetrievalResult(
+            chunks=[
+                RetrievedChunk(
+                    chunk_id=101,
+                    content_text="Photosynthesis converts light to energy.",
+                    resource_id=1,
+                    resource_title="Biology Ch.5",
+                    trust_score=0.9,
+                    rank=1.0,
+                ),
+                RetrievedChunk(
+                    chunk_id=102,
+                    content_text="Calvin cycle fixes carbon dioxide.",
+                    resource_id=1,
+                    resource_title="Biology Ch.5",
+                    trust_score=0.9,
+                    rank=2.0,
+                ),
+                RetrievedChunk(
+                    chunk_id=103,
+                    content_text="Thylakoid membranes produce ATP.",
+                    resource_id=1,
+                    resource_title="Biology Ch.5",
+                    trust_score=0.9,
+                    rank=3.0,
+                ),
+            ],
+            sufficient=True,
+        )
+
+        with patch(
+            "mitty.ai.retriever.retrieve",
+            new_callable=AsyncMock,
+            return_value=retrieval,
+        ) as mock_retrieve:
+            gen_result = await generate_practice_items(
+                ai_client=ai_client,
+                supabase_client=sb_client,
+                user_id=_USER_ID,
+                course_id=_COURSE_ID,
+                concept=_CONCEPT,
+                mastery_level=0.5,
+                # resource_chunks omitted -> uses retriever
+            )
+
+        mock_retrieve.assert_awaited_once_with(sb_client, _COURSE_ID, _CONCEPT)
+        assert gen_result.needs_resources is False
+        assert len(gen_result.items) >= 1
+        # LLM should have been called
+        ai_client.call_structured.assert_called_once()
