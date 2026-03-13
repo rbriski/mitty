@@ -34,9 +34,8 @@ from mitty.practice.evaluator import evaluate_answer
 from mitty.practice.generator import generate_practice_items
 
 if TYPE_CHECKING:
-    from supabase import AsyncClient
-
     from mitty.ai.client import AIClient
+    from supabase import AsyncClient
 
 logger = logging.getLogger(__name__)
 

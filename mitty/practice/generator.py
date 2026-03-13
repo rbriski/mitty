@@ -27,9 +27,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from supabase import AsyncClient
-
     from mitty.ai.client import AIClient
+    from supabase import AsyncClient
 
 logger = logging.getLogger(__name__)
 
