@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from mitty.ai.prompts import get_prompt, wrap_user_input
+from mitty.ai.prompts import get_prompt, strip_xml_tags, wrap_user_input
 from mitty.ai.retriever import retrieve
 
 if TYPE_CHECKING:
@@ -260,7 +260,10 @@ async def coach_chat(
             message_id=coach_msg_id,
         )
 
-    # 1. Load the study block (verifies ownership)
+    # 1. Load the study block (verifies ownership).
+    # Intentionally do NOT store the student message if the block doesn't exist
+    # or doesn't belong to this user — an invalid study_block_id means the
+    # request is unauthorized and the message should not be persisted.
     block = await _load_study_block(client, study_block_id, user_id)
     if block is None:
         return CoachResponse(
@@ -327,12 +330,10 @@ async def coach_chat(
     # The coach template already wraps {student_message} in <user_input>
     # tags, so we strip any embedded tags from the raw message to prevent
     # early-close injection (DEC-007), then substitute.
-    from mitty.ai.prompts import _strip_xml_tags
-
     user_prompt = prompt_config.user_template
     user_prompt = user_prompt.replace("{topic}", topic)
     user_prompt = user_prompt.replace("{mastery_level}", str(mastery_level))
-    user_prompt = user_prompt.replace("{student_message}", _strip_xml_tags(message))
+    user_prompt = user_prompt.replace("{student_message}", strip_xml_tags(message))
     user_prompt = user_prompt.replace("{resource_chunks}", chunks_text)
     user_prompt = user_prompt.replace("{conversation_history}", conversation_history)
 

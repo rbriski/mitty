@@ -252,9 +252,19 @@ class AIClient:
             msg = f"No tool_use block named '{tool_name}' found in API response."
             raise AIClientError(msg)
 
-        except (AIClientError, RateLimitError, BudgetExceededError) as exc:
+        except (
+            AIClientError,
+            RateLimitError,
+            BudgetExceededError,
+            pydantic.ValidationError,
+        ) as exc:
             elapsed = time.monotonic() - start
-            status = "rate_limited" if isinstance(exc, RateLimitError) else "error"
+            if isinstance(exc, RateLimitError):
+                status = "rate_limited"
+            elif isinstance(exc, pydantic.ValidationError):
+                status = "validation_error"
+            else:
+                status = "error"
             error_msg = str(exc)
 
             # Fire-and-forget audit write on error
