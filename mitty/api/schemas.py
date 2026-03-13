@@ -697,3 +697,27 @@ class AICostSummaryResponse(BaseModel):
     total_output_tokens: int
     total_cost_usd: float
     breakdown: list[CallTypeBreakdown]
+
+
+# ---------------------------------------------------------------------------
+# Coach Chat
+# ---------------------------------------------------------------------------
+
+
+class ChatMessageCreate(BaseModel):
+    """Request to send a message to the coach."""
+
+    message: str = Field(max_length=5000)
+
+
+class CoachMessageResponse(BaseModel):
+    """A single coach chat message."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    study_block_id: int
+    role: str  # 'student' | 'coach'
+    content: str
+    sources_cited: list[dict] | None = None
+    created_at: str

@@ -22,6 +22,7 @@ from mitty.api.middleware import RequestLoggingMiddleware
 from mitty.api.routers import (
     ai_usage,
     assessments,
+    coach,
     config,
     health,
     mastery_dashboard,
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(resources.router)
     app.include_router(resource_chunks.router)
     app.include_router(practice_sessions.router)
+    app.include_router(coach.router)
     app.include_router(ai_usage.router)
 
     # Standardized error handler (covers both FastAPI and Starlette HTTPException)
