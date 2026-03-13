@@ -205,7 +205,13 @@ class TestAllRoles:
     """Every registered role has at least v1."""
 
     def test_all_roles_have_v1(self) -> None:
-        expected = {"practice_generator", "evaluator", "concept_extraction", "coach"}
+        expected = {
+            "practice_generator",
+            "evaluator",
+            "concept_extraction",
+            "coach",
+            "guide_compiler",
+        }
         assert expected == ROLES
         for role in expected:
             cfg = get_prompt(role, version=1)
