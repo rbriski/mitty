@@ -261,6 +261,55 @@ class TestFlagCoachMessage:
         assert resp.status_code == 404
 
 
+class TestCrossUserIsolation:
+    """Verify user_id scoping prevents cross-user data access."""
+
+    def test_acknowledge_other_users_escalation_returns_404(
+        self,
+        client: TestClient,
+        mock_client: MagicMock,
+    ) -> None:
+        """Acknowledging another user's escalation returns 404.
+
+        The endpoint filters by both escalation id AND user_id, so
+        an escalation owned by a different user must not be updated.
+        """
+        # Simulate the update returning empty data (no row matched)
+        chain = _chain_mock([])
+        mock_client.table = MagicMock(return_value=chain)
+
+        resp = client.post("/escalations/1/acknowledge")
+
+        assert resp.status_code == 404
+
+        # Verify the update query included both id and user_id filters
+        chain.eq.assert_any_call("id", 1)
+        chain.eq.assert_any_call("user_id", USER_ID)
+
+    def test_flag_other_users_coach_message_returns_404(
+        self,
+        client: TestClient,
+        mock_client: MagicMock,
+    ) -> None:
+        """Flagging a coach message owned by another user returns 404.
+
+        The endpoint filters coach_messages by both id and user_id.
+        """
+        # Simulate no message found (different user owns it)
+        msg_chain = _chain_mock(None, raw=True)
+        mock_client.table = MagicMock(return_value=msg_chain)
+
+        resp = client.post(
+            "/coach-messages/10/flag",
+            json={"reason": "Bad response"},
+        )
+
+        assert resp.status_code == 404
+
+        # Verify user_id was included in the ownership check
+        msg_chain.eq.assert_any_call("user_id", USER_ID)
+
+
 class TestAuthRequired:
     """Verify endpoints require authentication."""
 

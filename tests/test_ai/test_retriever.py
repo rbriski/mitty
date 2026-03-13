@@ -10,6 +10,7 @@ import pytest
 from mitty.ai.retriever import (
     RetrievalResult,
     RetrievedChunk,
+    _escape_like,
     _rows_to_chunks,
     _sanitize_query,
     retrieve,
@@ -346,3 +347,62 @@ class TestRetrieveFallback:
         assert result.sufficient is True
         assert len(result.chunks) == 5
         select_mock.ilike.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ilike_fallback_escapes_wildcards(self) -> None:
+        """ILIKE fallback must escape % and _ in the query to prevent injection."""
+        rows = _sample_rows(5)
+        execute_result = MagicMock()
+        execute_result.data = rows
+
+        fts_chain = MagicMock()
+        fts_chain.eq = MagicMock(return_value=fts_chain)
+        fts_chain.limit = MagicMock(return_value=fts_chain)
+        fts_chain.execute = AsyncMock(side_effect=Exception("FTS not available"))
+
+        ilike_chain = MagicMock()
+        ilike_chain.eq = MagicMock(return_value=ilike_chain)
+        ilike_chain.limit = MagicMock(return_value=ilike_chain)
+        ilike_chain.execute = AsyncMock(return_value=execute_result)
+
+        select_mock = MagicMock()
+        select_mock.text_search = MagicMock(return_value=fts_chain)
+        select_mock.ilike = MagicMock(return_value=ilike_chain)
+
+        table_mock = MagicMock()
+        table_mock.select = MagicMock(return_value=select_mock)
+
+        client = AsyncMock()
+        client.table = MagicMock(return_value=table_mock)
+
+        # Query contains ILIKE wildcards that must be escaped
+        await retrieve(client, course_id=1, query="100% of_cells")
+
+        select_mock.ilike.assert_called_once()
+        pattern = select_mock.ilike.call_args[0][1]
+        # Wildcards in user input must be escaped; only outer % are real
+        assert pattern == r"%100\% of\_cells%"
+
+
+# ---------------------------------------------------------------------------
+# _escape_like
+# ---------------------------------------------------------------------------
+
+
+class TestEscapeLike:
+    """Unit tests for ILIKE wildcard escaping."""
+
+    def test_escapes_percent(self) -> None:
+        assert _escape_like("100%") == r"100\%"
+
+    def test_escapes_underscore(self) -> None:
+        assert _escape_like("cell_division") == r"cell\_division"
+
+    def test_escapes_both(self) -> None:
+        assert _escape_like("50% of_total") == r"50\% of\_total"
+
+    def test_plain_text_unchanged(self) -> None:
+        assert _escape_like("photosynthesis") == "photosynthesis"
+
+    def test_empty_string(self) -> None:
+        assert _escape_like("") == ""
