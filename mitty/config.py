@@ -34,6 +34,10 @@ class Settings(BaseModel):
         fastapi_debug: Enable FastAPI debug mode.
         anthropic_api_key: Anthropic API key for LLM calls (optional).
         anthropic_model: Anthropic model identifier for LLM calls.
+        ai_rate_limit_rpm: Max AI requests per minute per user.
+        ai_rate_limit_tpm: Max AI tokens per minute per user.
+        ai_budget_per_session: Max USD spend per session.
+        ai_budget_per_day: Max USD spend per day.
     """
 
     canvas_base_url: str = "https://mitty.instructure.com"
@@ -53,6 +57,10 @@ class Settings(BaseModel):
     fastapi_debug: bool = False
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str = "claude-sonnet-4-20250514"
+    ai_rate_limit_rpm: int = 30
+    ai_rate_limit_tpm: int = 100_000
+    ai_budget_per_session: float = 1.0
+    ai_budget_per_day: float = 5.0
 
 
 def load_settings() -> Settings:
