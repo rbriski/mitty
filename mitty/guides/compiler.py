@@ -347,7 +347,7 @@ def _build_user_prompt(
         config.user_template.replace("{concept}", wrap_user_input(concept))
         .replace("{mastery_level}", f"{mastery_level:.2f}")
         .replace("{block_type}", block_type)
-        .replace("{source_excerpts}", source_excerpts)
+        .replace("{source_excerpts}", wrap_user_input(source_excerpts))
     )
 
 

@@ -76,15 +76,15 @@ async def _verify_plan_ownership(
     user_id: str,
 ) -> None:
     """Raise 404 if the plan does not belong to the given user."""
-    result = (
-        await client.table("study_plans")
+    result = await (
+        client.table("study_plans")
         .select("id")
         .eq("id", plan_id)
         .eq("user_id", user_id)
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(
             status_code=404,
             detail={
