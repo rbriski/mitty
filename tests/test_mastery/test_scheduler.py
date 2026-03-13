@@ -273,6 +273,6 @@ class TestParametrizedIntervalProgression:
             last_retrieval_at=NOW,
         )
         delta_days = (result - NOW).total_seconds() / 86400
-        assert (
-            min_days <= delta_days <= max_days
-        ), f"Expected {min_days}-{max_days} days, got {delta_days:.2f}"
+        assert min_days <= delta_days <= max_days, (
+            f"Expected {min_days}-{max_days} days, got {delta_days:.2f}"
+        )
