@@ -635,7 +635,7 @@
         if (!this.studentAnswer || this.evaluating) return;
         const token = this.session?.access_token;
         if (!token) {
-          this.evaluationError = 'Session expired. Please sign in again.';
+          alert('Session expired. Please sign in again.');
           return;
         }
         this.evaluating = true;

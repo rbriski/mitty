@@ -307,4 +307,4 @@ async def _fetch_existing(
         .maybe_single()
         .execute()
     )
-    return response.data
+    return response.data if response else None

@@ -178,7 +178,7 @@ async def evaluate_answer(
 
     # --- Multiple choice: always exact match ---
     if ptype == "multiple_choice":
-        return _evaluate_mc(correct, student_answer)
+        return _evaluate_mc(correct, student_answer, practice_item.options_json)
 
     # --- Fill-in-blank: exact match first, LLM fallback ---
     if ptype == "fill_in_blank":
@@ -205,17 +205,62 @@ async def evaluate_answer(
 # ---------------------------------------------------------------------------
 
 
-def _evaluate_mc(correct: str, student_answer: str) -> EvaluationResult:
-    """Evaluate a multiple-choice answer via exact match."""
-    is_correct = _exact_match(student_answer, correct)
+def _resolve_mc_answer(
+    correct: str,
+    options: list | dict | None,
+) -> str:
+    """Resolve a letter-based MC answer (A/B/C/D) to the actual option text.
 
-    if is_correct:
+    The LLM sometimes stores "C" instead of the full option text. When
+    options_json is a list, map A→0, B→1, C→2, D→3 to get the real text.
+    If correct is already the full text or options aren't available, return as-is.
+    """
+    if not options or not isinstance(options, list):
+        return correct
+
+    normalized = correct.strip().upper()
+    # Handle "A", "B", "C", "D" or "A.", "B.", etc.
+    letter = normalized.rstrip(".)").strip()
+    if len(letter) == 1 and letter in "ABCDEFGH":
+        idx = ord(letter) - ord("A")
+        if 0 <= idx < len(options):
+            return str(options[idx])
+
+    return correct
+
+
+def _evaluate_mc(
+    correct: str,
+    student_answer: str,
+    options: list | dict | None = None,
+) -> EvaluationResult:
+    """Evaluate a multiple-choice answer via exact match.
+
+    Handles the case where correct_answer is a letter (A/B/C/D) but the
+    student sends the full option text (from the UI), or vice versa.
+    """
+    # Direct match first (both letters, or both full text).
+    if _exact_match(student_answer, correct):
         return EvaluationResult(
             is_correct=True,
             score=1.0,
             feedback="Correct!",
             misconceptions_detected=[],
         )
+
+    # Try resolving letter→text or text→letter to handle mismatches.
+    if options and isinstance(options, list):
+        resolved_correct = _resolve_mc_answer(correct, options)
+        resolved_student = _resolve_mc_answer(student_answer, options)
+        if _exact_match(resolved_student, resolved_correct):
+            return EvaluationResult(
+                is_correct=True,
+                score=1.0,
+                feedback="Correct!",
+                misconceptions_detected=[],
+            )
+        # Use the resolved text for feedback.
+        correct = resolved_correct
 
     return EvaluationResult(
         is_correct=False,

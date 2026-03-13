@@ -342,7 +342,7 @@ async def _fetch_block_for_user(
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(
             status_code=404,
             detail={
@@ -361,7 +361,8 @@ async def _derive_concept(
 ) -> tuple[str | None, int | None]:
     """Derive concept name and course_id from a study block.
 
-    Tries assessment.unit_or_topic first, falls back to block title.
+    Tries assessment.unit_or_topic first, falls back to block title
+    enriched with the course name so the LLM knows the subject area.
     """
     assessment_id = block.get("assessment_id")
     course_id = block.get("course_id")
@@ -374,18 +375,37 @@ async def _derive_concept(
             .maybe_single()
             .execute()
         )
-        if result.data:
+        if result and result.data:
             concept = result.data.get("unit_or_topic")
             if not course_id:
                 course_id = result.data.get("course_id")
             if concept:
                 return concept, course_id
 
-    # Fallback: use block title if we have a course_id.
+    # Fallback: enrich block title with course name for LLM context.
     if course_id:
-        return block.get("title"), course_id
+        title = block.get("title")
+        if title:
+            course_name = await _get_course_name(client, course_id)
+            if course_name:
+                return f"{course_name}: {title}", course_id
+            return title, course_id
 
     return None, None
+
+
+async def _get_course_name(client: AsyncClient, course_id: int) -> str | None:
+    """Fetch the course name for enriching concept context."""
+    result = await (
+        client.table("courses")
+        .select("name")
+        .eq("id", course_id)
+        .maybe_single()
+        .execute()
+    )
+    if result and result.data:
+        return result.data.get("name")
+    return None
 
 
 async def _get_mastery_level(
@@ -404,7 +424,7 @@ async def _get_mastery_level(
         .maybe_single()
         .execute()
     )
-    if result.data:
+    if result and result.data:
         return float(result.data.get("mastery_level", 0.0))
     return 0.0
 
@@ -456,7 +476,7 @@ async def _fetch_practice_item(
         .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if result else None
 
 
 async def _store_practice_result(

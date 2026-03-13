@@ -175,7 +175,10 @@ def _build_user_prompt(
     if resource_chunks:
         chunk_sections = []
         for chunk in resource_chunks:
-            chunk_sections.append(f"[Chunk ID={chunk['id']}]\n{chunk['content_text']}")
+            chunk_id = chunk.get("id", "unknown")
+            content = chunk.get("content_text", "")
+            if content:
+                chunk_sections.append(f"[Chunk ID={chunk_id}]\n{content}")
         chunk_text = "\n\n".join(chunk_sections)
     else:
         chunk_text = (

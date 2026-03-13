@@ -264,12 +264,20 @@ class TestMasteryDashboardSorting:
         dates = [c["next_review_at"] for c in concepts]
         non_none = [d for d in dates if d is not None]
         assert non_none == sorted(non_none)
+        none_indices = [i for i, d in enumerate(dates) if d is None]
+        assert all(i >= len(non_none) for i in none_indices), (
+            "None values should sort last"
+        )
 
     def test_sort_by_calibration_gap(self) -> None:
         concepts = self._get_sorted("calibration_gap")
         gaps = [c["calibration_gap"] for c in concepts]
         non_none = [g for g in gaps if g is not None]
         assert non_none == sorted(non_none)
+        none_indices = [i for i, d in enumerate(gaps) if d is None]
+        assert all(i >= len(non_none) for i in none_indices), (
+            "None values should sort last"
+        )
 
     def test_invalid_sort_by_returns_422(self) -> None:
         mock_client = MagicMock()
@@ -389,7 +397,7 @@ class TestMasteryDashboardAuth:
         with TestClient(app) as tc:
             resp = tc.get("/mastery-dashboard/10")
 
-        assert resp.status_code in (401, 403)
+        assert resp.status_code == 401
 
 
 # ===========================================================================

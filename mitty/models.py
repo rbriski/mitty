@@ -169,7 +169,7 @@ class DiscussionAuthor(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: int
+    id: int | None = None
     display_name: str = ""
 
 

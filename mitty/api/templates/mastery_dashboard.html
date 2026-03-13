@@ -242,18 +242,33 @@
 
       async fetchCourses() {
         try {
+          // Fetch only courses with active enrollments in the current term
+          // (matches the main dashboard filter)
+          const CURRENT_TERM = '2025-2026 Second Semester';
           const { data, error } = await supabase
-            .from('courses')
-            .select('id, name')
-            .eq('workflow_state', 'available')
-            .order('name');
-          if (!error && data) {
-            this.courses = data;
-            // Auto-select first course if available
-            if (this.courses.length > 0 && !this.selectedCourseId) {
-              this.selectedCourseId = this.courses[0].id;
-              this.fetchDashboard();
-            }
+            .from('enrollments')
+            .select('course_id, courses (id, name, workflow_state, term_name)')
+            .eq('enrollment_state', 'active');
+          if (error) {
+            this.fetchError = 'Failed to load courses. Please refresh the page.';
+            return;
+          }
+          this.courses = (data || [])
+            .filter(e => e.courses
+              && e.courses.workflow_state === 'available'
+              && e.courses.term_name === CURRENT_TERM)
+            .map(e => ({ id: e.courses.id, name: e.courses.name }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+          // Deduplicate (multiple enrollments for same course)
+          const seen = new Set();
+          this.courses = this.courses.filter(c => {
+            if (seen.has(c.id)) return false;
+            seen.add(c.id);
+            return true;
+          });
+          if (this.courses.length > 0 && !this.selectedCourseId) {
+            this.selectedCourseId = this.courses[0].id;
+            this.fetchDashboard();
           }
         } catch (err) {
           console.warn('Failed to fetch courses:', err.message);

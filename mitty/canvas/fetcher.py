@@ -446,7 +446,8 @@ async def fetch_all(
             raise result
         if isinstance(result, BaseException):
             error_msg = (
-                f"Failed to fetch data for course {course.id} ({course.name}): {result}"
+                f"Failed to fetch data for course "
+                f"{course.id} ({course.name}): {result!r}"
             )
             logger.warning(error_msg)
             errors.append(error_msg)
