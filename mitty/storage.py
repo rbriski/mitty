@@ -603,6 +603,8 @@ async def upsert_module_items_as_resources(
     items: list[ModuleItem],
     course_id: int,
     module_name: str,
+    *,
+    page_content: dict[int, str] | None = None,
 ) -> None:
     """Upsert module items as resource rows.
 
@@ -616,10 +618,15 @@ async def upsert_module_items_as_resources(
         course_id: The Canvas course ID these items belong to.
         module_name: The human-readable name of the parent module
             (denormalized into each row).
+        page_content: Optional mapping of ``module_item_id`` to plain-text
+            page body, as returned by
+            :func:`~mitty.canvas.fetcher.resolve_module_item_pages`.
+            Used to populate ``content_text`` on Page-type resources.
 
     Raises:
         StorageError: If the Supabase upsert fails.
     """
+    resolved = page_content or {}
     rows: list[dict] = []
     now = _now_iso()
     for item in items:
@@ -640,6 +647,9 @@ async def upsert_module_items_as_resources(
             "created_at": now,
             "updated_at": now,
         }
+        content_text = resolved.get(item.id)
+        if content_text:
+            row["content_text"] = content_text
         rows.append(row)
 
     if not rows:
@@ -1066,6 +1076,7 @@ async def store_all(
     for course_id_str, mod_data in modules_data.items():
         course_modules = mod_data.get("modules", [])
         module_items = mod_data.get("module_items", {})
+        resolved_page_content = mod_data.get("resolved_page_content", {})
         for mod in course_modules:
             items = module_items.get(mod.id, [])
             if not items:
@@ -1074,7 +1085,11 @@ async def store_all(
             logger.info("store_all: starting %s", step_name)
             try:
                 await upsert_module_items_as_resources(
-                    client, items, int(course_id_str), mod.name
+                    client,
+                    items,
+                    int(course_id_str),
+                    mod.name,
+                    page_content=resolved_page_content,
                 )
             except StorageError:
                 raise
