@@ -14,6 +14,7 @@ Roles:
     evaluator          — evaluates student answers
     concept_extraction — extracts concepts from course materials
     coach              — Socratic conversational coaching
+    guide_compiler     — compiles personalized study guide content
 """
 
 from __future__ import annotations
@@ -245,6 +246,28 @@ Conversation history:
 Respond as a Socratic tutor following your coaching rules."""
 
 # ---------------------------------------------------------------------------
+# guide_compiler — v1 (new for Phase 6)
+# ---------------------------------------------------------------------------
+
+_GUIDE_COMPILER_V1_SYSTEM = f"""\
+{_INJECTION_PREAMBLE}
+
+You are a study guide compiler. Generate personalized study content for a \
+high school student. Include warm-up questions, exit tickets, teach-back \
+prompts, and success criteria based on the student's mastery level and \
+available source materials. Questions should be age-appropriate and \
+curriculum-aligned."""
+
+_GUIDE_COMPILER_V1_USER = """\
+Concept: {concept}
+Mastery level: {mastery_level}/1.0
+Block type: {block_type}
+Source material:
+{source_excerpts}
+
+Generate the requested content."""
+
+# ---------------------------------------------------------------------------
 # Prompt registry
 # ---------------------------------------------------------------------------
 
@@ -286,6 +309,16 @@ _REGISTRY: dict[str, dict[int, PromptConfig]] = {
             version=1,
             system_prompt=_COACH_V1_SYSTEM,
             user_template=_COACH_V1_USER,
+            temperature=0.7,
+            max_tokens=2048,
+        ),
+    },
+    "guide_compiler": {
+        1: _make_config(
+            role="guide_compiler",
+            version=1,
+            system_prompt=_GUIDE_COMPILER_V1_SYSTEM,
+            user_template=_GUIDE_COMPILER_V1_USER,
             temperature=0.7,
             max_tokens=2048,
         ),
