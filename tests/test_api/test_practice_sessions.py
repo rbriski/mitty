@@ -180,7 +180,7 @@ class TestGenerate:
         mock_ai: AsyncMock,
     ) -> None:
         """Happy path: block found, generator returns items."""
-        from mitty.practice.generator import PracticeItem
+        from mitty.practice.generator import GenerationResult, PracticeItem
 
         # Mock the block lookup (maybe_single -> raw dict)
         block_chain = _chain_mock(SAMPLE_BLOCK, raw=True)
@@ -188,14 +188,11 @@ class TestGenerate:
         assessment_chain = _chain_mock(SAMPLE_ASSESSMENT, raw=True)
         # Mock the mastery state lookup (maybe_single -> raw dict)
         mastery_chain = _chain_mock(SAMPLE_MASTERY_STATE, raw=True)
-        # Mock the resource_chunks lookup (list)
-        chunks_chain = _chain_mock([SAMPLE_RESOURCE_CHUNK])
 
         table_calls = {
             "study_blocks": block_chain,
             "assessments": assessment_chain,
             "mastery_states": mastery_chain,
-            "resource_chunks": chunks_chain,
         }
 
         def route_table(name: str) -> MagicMock:
@@ -224,7 +221,7 @@ class TestGenerate:
         with patch(
             "mitty.api.routers.practice_sessions.generate_practice_items",
             new_callable=AsyncMock,
-            return_value=practice_items,
+            return_value=GenerationResult(items=practice_items),
         ):
             resp = client.post("/study-blocks/10/practice/generate")
 
@@ -233,6 +230,7 @@ class TestGenerate:
         assert len(body["items"]) == 1
         assert body["items"][0]["concept"] == "Quadratics"
         assert body["concept"] == "Quadratics"
+        assert body["needs_resources"] is False
 
     def test_generate_block_not_found(
         self,
@@ -273,14 +271,12 @@ class TestGenerate:
         block_chain = _chain_mock(SAMPLE_BLOCK, raw=True)
         assessment_chain = _chain_mock(SAMPLE_ASSESSMENT, raw=True)
         mastery_chain = _chain_mock(SAMPLE_MASTERY_STATE, raw=True)
-        chunks_chain = _chain_mock([SAMPLE_RESOURCE_CHUNK])
         cached_chain = _chain_mock([SAMPLE_PRACTICE_ITEM])
 
         call_map = {
             "study_blocks": block_chain,
             "assessments": assessment_chain,
             "mastery_states": mastery_chain,
-            "resource_chunks": chunks_chain,
             "practice_items": cached_chain,
         }
         mock_client.table = MagicMock(
@@ -310,14 +306,12 @@ class TestGenerate:
         block_chain = _chain_mock(SAMPLE_BLOCK, raw=True)
         assessment_chain = _chain_mock(SAMPLE_ASSESSMENT, raw=True)
         mastery_chain = _chain_mock(SAMPLE_MASTERY_STATE, raw=True)
-        chunks_chain = _chain_mock([SAMPLE_RESOURCE_CHUNK])
         empty_cache_chain = _chain_mock([])
 
         call_map = {
             "study_blocks": block_chain,
             "assessments": assessment_chain,
             "mastery_states": mastery_chain,
-            "resource_chunks": chunks_chain,
             "practice_items": empty_cache_chain,
         }
         mock_client.table = MagicMock(
@@ -332,6 +326,41 @@ class TestGenerate:
             resp = client.post("/study-blocks/10/practice/generate")
 
         assert resp.status_code == 503
+
+    def test_generate_needs_resources(
+        self,
+        client: TestClient,
+        mock_client: MagicMock,
+        mock_ai: AsyncMock,
+    ) -> None:
+        """Returns needs_resources=True when retriever finds insufficient material."""
+        from mitty.practice.generator import GenerationResult
+
+        block_chain = _chain_mock(SAMPLE_BLOCK, raw=True)
+        assessment_chain = _chain_mock(SAMPLE_ASSESSMENT, raw=True)
+        mastery_chain = _chain_mock(SAMPLE_MASTERY_STATE, raw=True)
+
+        call_map = {
+            "study_blocks": block_chain,
+            "assessments": assessment_chain,
+            "mastery_states": mastery_chain,
+        }
+        mock_client.table = MagicMock(
+            side_effect=lambda n: call_map.get(n, _chain_mock([]))
+        )
+
+        with patch(
+            "mitty.api.routers.practice_sessions.generate_practice_items",
+            new_callable=AsyncMock,
+            return_value=GenerationResult(items=[], needs_resources=True),
+        ):
+            resp = client.post("/study-blocks/10/practice/generate")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["needs_resources"] is True
+        assert body["items"] == []
+        assert body["cached"] is False
 
 
 class TestEvaluate:

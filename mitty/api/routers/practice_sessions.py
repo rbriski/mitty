@@ -90,24 +90,31 @@ async def generate_practice(
     # 3. Get current mastery level.
     mastery_level = await _get_mastery_level(client, user_id, course_id, concept)
 
-    # 4. Fetch resource chunks for the course.
-    resource_chunks = await _fetch_resource_chunks(client, course_id)
-
-    # 5. Generate practice items (with fallback).
+    # 4. Generate practice items (retriever fetches chunks internally).
     from uuid import UUID
 
     uid = UUID(user_id)
 
     try:
-        items = await generate_practice_items(
+        gen_result = await generate_practice_items(
             ai_client=ai_client,
             supabase_client=client,
             user_id=uid,
             course_id=course_id,
             concept=concept,
             mastery_level=mastery_level,
-            resource_chunks=resource_chunks,
         )
+
+        if gen_result.needs_resources:
+            return PracticeGenerateResponse(
+                concept=concept,
+                course_id=course_id,
+                items=[],
+                cached=False,
+                needs_resources=True,
+            )
+
+        items = gen_result.items
         cached = False
     except Exception:
         logger.warning(

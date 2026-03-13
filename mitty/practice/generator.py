@@ -1,17 +1,19 @@
 """LLM-powered practice item generator.
 
-Given a concept and resource chunks, calls Claude to produce a varied batch
-of practice items (6 types), stores them in the ``practice_items`` table,
-and returns them.  Checks cache first to avoid redundant LLM calls.
+Given a concept, calls Claude to produce a varied batch of practice items
+(6 types), stores them in the ``practice_items`` table, and returns them.
+Checks cache first to avoid redundant LLM calls.  Resource chunks are
+fetched internally via the retriever; callers no longer need to pass them.
 
 Public API:
     generate_practice_items(ai_client, supabase_client, user_id, course_id,
-        concept, mastery_level, resource_chunks) -> list[PracticeItem]
+        concept, mastery_level) -> GenerationResult
 
 Pydantic models for structured LLM output:
     GeneratedItem  — a single practice item from the LLM
     GeneratedBatch — the full batch response from the LLM
     PracticeItem   — the final item returned to callers (with DB id)
+    GenerationResult — items list + needs_resources flag
 """
 
 from __future__ import annotations
@@ -135,6 +137,21 @@ class PracticeItem:
     times_used: int = 0
     last_used_at: datetime | None = None
     created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GenerationResult:
+    """Result of practice item generation.
+
+    Attributes:
+        items: The generated (or cached) practice items.
+        needs_resources: True when the retriever found insufficient source
+            material.  When True, ``items`` is empty and callers should
+            prompt the user to add resources for this course/concept.
+    """
+
+    items: list[PracticeItem]
+    needs_resources: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -337,14 +354,15 @@ async def generate_practice_items(
     course_id: int,
     concept: str,
     mastery_level: float,
-    resource_chunks: list[dict[str, Any]],
-) -> list[PracticeItem]:
+    resource_chunks: list[dict[str, Any]] | None = None,
+) -> GenerationResult:
     """Generate practice items for a concept using Claude.
 
     Checks cache first. If items already exist, returns them without
-    calling the LLM. Otherwise, calls the LLM to generate a batch of
-    6-8 items covering all 6 practice types, stores them in the
-    ``practice_items`` table, and returns them.
+    calling the LLM. Otherwise, retrieves resource chunks via the
+    retriever, calls the LLM to generate a batch of 6-8 items covering
+    all 6 practice types, stores them in the ``practice_items`` table,
+    and returns them.
 
     Args:
         ai_client: AIClient instance for Claude API calls.
@@ -353,17 +371,41 @@ async def generate_practice_items(
         course_id: The course this concept belongs to.
         concept: The concept/topic to generate practice for.
         mastery_level: Student's current mastery (0.0-1.0).
-        resource_chunks: List of resource chunk dicts with id, content_text.
+        resource_chunks: **Deprecated.** Optional list of resource chunk
+            dicts with id, content_text. When omitted (the default),
+            chunks are fetched internally via the retriever.
 
     Returns:
-        List of PracticeItem instances with database IDs.
+        GenerationResult with practice items and needs_resources flag.
     """
     # 1. Check cache
     cached = await _check_cache(supabase_client, user_id, course_id, concept)
     if cached:
-        return _rows_to_practice_items(cached)
+        return GenerationResult(items=_rows_to_practice_items(cached))
 
-    # 2. Build prompt and call LLM
+    # 2. Obtain resource chunks — prefer retriever, accept legacy passthrough
+    if resource_chunks is None:
+        from mitty.ai.retriever import retrieve
+
+        retrieval = await retrieve(supabase_client, course_id, concept)
+
+        if not retrieval.sufficient:
+            logger.warning(
+                "Retriever found insufficient sources for concept=%r "
+                "(course=%d): %s",
+                concept,
+                course_id,
+                retrieval.message,
+            )
+            return GenerationResult(items=[], needs_resources=True)
+
+        # Convert RetrievedChunk dataclasses to dicts matching legacy format
+        resource_chunks = [
+            {"id": chunk.chunk_id, "content_text": chunk.content_text}
+            for chunk in retrieval.chunks
+        ]
+
+    # 3. Build prompt and call LLM
     user_prompt = _build_user_prompt(
         concept=concept,
         mastery_level=mastery_level,
@@ -392,7 +434,7 @@ async def generate_practice_items(
             course_id,
         )
 
-    # 3. Validate we have varied types
+    # 4. Validate we have varied types
     types_seen = {item.practice_type for item in batch.items}
     logger.debug(
         "LLM generated %d items with types: %s",
@@ -400,7 +442,7 @@ async def generate_practice_items(
         types_seen,
     )
 
-    # 4. Store in practice_items table
+    # 5. Store in practice_items table
     generation_model = getattr(ai_client, "_model", "unknown")
     stored_rows = await _store_items(
         supabase_client,
@@ -411,5 +453,5 @@ async def generate_practice_items(
         generation_model,
     )
 
-    # 5. Convert stored rows to PracticeItem dataclass
-    return _rows_to_practice_items(stored_rows)
+    # 6. Convert stored rows to PracticeItem dataclass
+    return GenerationResult(items=_rows_to_practice_items(stored_rows))
