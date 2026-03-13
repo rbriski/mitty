@@ -3,7 +3,7 @@
 ## Meta
 - **Ticket**: tickets/phase5-ai-roles.md
 - **Branch**: feature/phase5-ai-roles
-- **Phase**: detailing
+- **Phase**: devolved
 - **Created**: 2026-03-12
 - **Sessions**: 1
 
@@ -517,4 +517,24 @@ Phase 5 upgrades the lightweight LLM integration from Phase 4 into a production-
 
 ## Beads Manifest
 
-*Pending — Phase 7 (devolve)*
+**Epic:** `mitty-6vz`
+**Branch:** `feature/phase5-ai-roles`
+
+| Story | Beads ID | Title |
+|-------|----------|-------|
+| US-001 | mitty-6vz.1 | Database migration + FTS index |
+| US-002 | mitty-6vz.2 | Prompt management system |
+| US-003 | mitty-6vz.3 | AIClient upgrade (audit, cost, rate limit) |
+| US-004 | mitty-6vz.4 | Source trust scoring |
+| US-005 | mitty-6vz.5 | AI retriever (Postgres FTS) |
+| US-006 | mitty-6vz.6 | Wire retriever into practice gen/eval |
+| US-007 | mitty-6vz.7 | Conversational coach service |
+| US-008 | mitty-6vz.8 | Coach API endpoints |
+| US-009 | mitty-6vz.9 | Escalation detector |
+| US-010 | mitty-6vz.10 | Escalation + flag API endpoints |
+| US-011 | mitty-6vz.11 | AI usage endpoint |
+| US-012 | mitty-6vz.12 | Coach chat UI |
+| US-013 | mitty-6vz.13 | Quality Gate (code review x4 + CodeRabbit) |
+| US-014 | mitty-6vz.14 | Patterns & Memory |
+
+**Dependencies:** 18 edges wired (see Detailed Breakdown for dependency graph)
