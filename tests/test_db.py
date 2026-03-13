@@ -783,6 +783,71 @@ class TestMasteryStatesTable:
 # ---------------------------------------------------------------------------
 
 
+class TestPracticeItemsTable:
+    """Verify the ``practice_items`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "practice_items" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("practice_items").columns) == 15
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("practice_items").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("practice_items").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("practice_items")
+        assert isinstance(t.c.id.type, sa.Integer)
+        assert isinstance(t.c.user_id.type, sa.Uuid)
+        assert isinstance(t.c.course_id.type, sa.Integer)
+        assert isinstance(t.c.concept.type, sa.String)
+        assert isinstance(t.c.practice_type.type, sa.String)
+        assert isinstance(t.c.question_text.type, sa.Text)
+        assert isinstance(t.c.correct_answer.type, sa.Text)
+        assert isinstance(t.c.options_json.type, sa.JSON)
+        assert isinstance(t.c.explanation.type, sa.Text)
+        assert isinstance(t.c.difficulty_level.type, sa.Float)
+        assert isinstance(t.c.times_used.type, sa.Integer)
+        assert isinstance(t.c.created_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("practice_items")
+        assert t.c.id.nullable is False
+        assert t.c.user_id.nullable is False
+        assert t.c.course_id.nullable is False
+        assert t.c.concept.nullable is False
+        assert t.c.practice_type.nullable is False
+        assert t.c.question_text.nullable is False
+        assert t.c.correct_answer.nullable is True
+        assert t.c.options_json.nullable is True
+        assert t.c.explanation.nullable is True
+        assert t.c.source_chunk_ids.nullable is True
+        assert t.c.difficulty_level.nullable is True
+        assert t.c.generation_model.nullable is True
+        assert t.c.times_used.nullable is False
+        assert t.c.last_used_at.nullable is True
+        assert t.c.created_at.nullable is False
+
+    def test_foreign_key_to_courses(self) -> None:
+        fks = _table("practice_items").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "courses.id" in fk_targets
+
+    def test_user_course_concept_index(self) -> None:
+        idx_cols = _index_column_sets(_table("practice_items"))
+        assert ("user_id", "course_id", "concept") in idx_cols
+
+    def test_times_used_server_default(self) -> None:
+        col = _table("practice_items").c.times_used
+        assert col.server_default is not None
+        assert "0" in str(col.server_default.arg)
+
+
 class TestPracticeResultsTable:
     """Verify the ``practice_results`` table structure."""
 
@@ -790,7 +855,7 @@ class TestPracticeResultsTable:
         assert "practice_results" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("practice_results").columns) == 13
+        assert len(_table("practice_results").columns) == 16
 
     def test_primary_key(self) -> None:
         pk_cols = [c.name for c in _table("practice_results").primary_key]
@@ -814,6 +879,8 @@ class TestPracticeResultsTable:
         assert isinstance(t.c.is_correct.type, sa.Boolean)
         assert isinstance(t.c.confidence_before.type, sa.Float)
         assert isinstance(t.c.time_spent_seconds.type, sa.Integer)
+        assert isinstance(t.c.score.type, sa.Float)
+        assert isinstance(t.c.feedback.type, sa.Text)
         assert isinstance(t.c.created_at.type, sa.DateTime)
 
     def test_nullable_flags(self) -> None:
@@ -830,6 +897,9 @@ class TestPracticeResultsTable:
         assert t.c.is_correct.nullable is True
         assert t.c.confidence_before.nullable is True
         assert t.c.time_spent_seconds.nullable is True
+        assert t.c.score.nullable is True
+        assert t.c.feedback.nullable is True
+        assert t.c.misconceptions_detected.nullable is True
         assert t.c.created_at.nullable is False
 
     def test_foreign_key_to_study_blocks(self) -> None:
@@ -860,7 +930,7 @@ class TestMetadata:
     """Cross-cutting checks on the full metadata."""
 
     def test_table_count(self) -> None:
-        assert len(metadata.tables) == 14
+        assert len(metadata.tables) == 15
 
     def test_all_tables_present(self) -> None:
         expected = {
@@ -877,6 +947,7 @@ class TestMetadata:
             "study_plans",
             "study_blocks",
             "mastery_states",
+            "practice_items",
             "practice_results",
         }
         assert set(metadata.tables.keys()) == expected

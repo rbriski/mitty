@@ -41,6 +41,9 @@ from mitty.storage import (
     upsert_submissions,
 )
 
+# upsert_discussions_as_resources is tested in test_fetcher_discussions.py
+# and exercised indirectly via _STORE_ALL_PATCHES for store_all tests.
+
 
 def _mock_client() -> AsyncMock:
     """Build a mock AsyncClient with chained table().upsert().execute()."""
@@ -1078,6 +1081,9 @@ _STORE_ALL_PATCHES: dict[str, str] = {
     ),
     "upsert_pages_as_resources": "mitty.storage.upsert_pages_as_resources",
     "upsert_files_as_resources": "mitty.storage.upsert_files_as_resources",
+    "upsert_discussions_as_resources": (
+        "mitty.storage.upsert_discussions_as_resources"
+    ),
     "upsert_calendar_events_as_assessments": (
         "mitty.storage.upsert_calendar_events_as_assessments"
     ),
@@ -1156,6 +1162,11 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
                 new_callable=AsyncMock,
             ),
@@ -1228,6 +1239,11 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
                 new_callable=AsyncMock,
             ),
@@ -1280,6 +1296,11 @@ class TestStoreAll:
             patch(
                 _STORE_ALL_PATCHES["upsert_files_as_resources"],
                 new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
             ),
             patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
@@ -1383,6 +1404,11 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
                 new_callable=AsyncMock,
             ) as mock_cal,
@@ -1448,6 +1474,11 @@ class TestStoreAll:
             patch(
                 _STORE_ALL_PATCHES["upsert_files_as_resources"],
                 new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
             ),
             patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
@@ -1521,6 +1552,11 @@ class TestStoreAll:
                 new_callable=AsyncMock,
             ),
             patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
                 new_callable=AsyncMock,
             ) as mock_cal,
@@ -1586,6 +1622,11 @@ class TestStoreAll:
             patch(
                 _STORE_ALL_PATCHES["upsert_files_as_resources"],
                 new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
             ),
             patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
@@ -2396,6 +2437,11 @@ class TestStoreAllChunking:
                 new_callable=AsyncMock,
             ),
             patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
                 new_callable=AsyncMock,
             ),
@@ -2447,6 +2493,11 @@ class TestStoreAllChunking:
                 new_callable=AsyncMock,
             ),
             patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
                 new_callable=AsyncMock,
             ),
@@ -2489,6 +2540,11 @@ class TestStoreAllChunking:
             patch(
                 _STORE_ALL_PATCHES["upsert_files_as_resources"],
                 new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
             ),
             patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],
@@ -2537,6 +2593,11 @@ class TestStoreAllChunking:
             patch(
                 _STORE_ALL_PATCHES["upsert_files_as_resources"],
                 new_callable=AsyncMock,
+            ),
+            patch(
+                _STORE_ALL_PATCHES["upsert_discussions_as_resources"],
+                new_callable=AsyncMock,
+                return_value=[],
             ),
             patch(
                 _STORE_ALL_PATCHES["upsert_calendar_events_as_assessments"],

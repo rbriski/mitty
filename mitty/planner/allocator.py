@@ -377,13 +377,47 @@ def _fill_study_blocks(
 # ---------------------------------------------------------------------------
 
 
+def _best_retrieval_opportunity(
+    scored: list[ScoredOpportunity],
+) -> ScoredOpportunity | None:
+    """Select the best opportunity for retrieval practice.
+
+    Prefers the opportunity with the highest mastery_gap among those
+    with a positive mastery_gap or confidence_gap.  Falls back to the
+    top-scored opportunity when no mastery data is present.
+    """
+    if not scored:
+        return None
+
+    # Candidates with meaningful mastery/confidence gaps.
+    candidates = [
+        s
+        for s in scored
+        if s.opportunity.mastery_gap > 0.0 or s.opportunity.confidence_gap > 0.0
+    ]
+    if candidates:
+        # Rank by mastery_gap first, then confidence_gap as tiebreaker.
+        candidates.sort(
+            key=lambda s: (
+                -s.opportunity.mastery_gap,
+                -s.opportunity.confidence_gap,
+                s.opportunity.name,  # stability
+            )
+        )
+        return candidates[0]
+
+    # No mastery data — fall back to top-scored.
+    return scored[0]
+
+
 def _retrieval_title(
     scored: list[ScoredOpportunity],
 ) -> tuple[str, str | None]:
-    """Build a retrieval block title from the top-scored opportunity."""
-    if not scored:
+    """Build a retrieval block title from the best retrieval opportunity."""
+    best = _best_retrieval_opportunity(scored)
+    if best is None:
         return "Retrieval practice", None
-    top = scored[0].opportunity
+    top = best.opportunity
     if top.opportunity_type == "assessment":
         return f"Study for {top.name}", top.course_name
     return f"Review {top.course_name}", top.course_name

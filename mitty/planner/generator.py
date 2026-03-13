@@ -237,6 +237,67 @@ def _build_course_lookup(
     return result
 
 
+def _compute_mastery_gaps(
+    mastery_states: list[dict[str, Any]],
+) -> dict[int, tuple[float, float]]:
+    """Compute per-course mastery_gap and confidence_gap from mastery_states.
+
+    mastery_gap   = 1 - avg(mastery_level) across all concepts for the course.
+    confidence_gap = avg(confidence_self_report) - avg(mastery_level).
+                     Positive means overconfident.
+
+    Returns:
+        Dict of course_id -> (mastery_gap, confidence_gap).
+        Courses with no mastery data are absent from the dict.
+    """
+    # Accumulate per-course totals.
+    course_totals: dict[int, dict[str, float]] = {}
+
+    for ms in mastery_states:
+        cid = ms.get("course_id")
+        if cid is None:
+            continue
+
+        mastery_level = ms.get("mastery_level")
+        if mastery_level is None:
+            continue
+
+        if cid not in course_totals:
+            course_totals[cid] = {
+                "mastery_sum": 0.0,
+                "confidence_sum": 0.0,
+                "count": 0.0,
+                "confidence_count": 0.0,
+            }
+
+        totals = course_totals[cid]
+        totals["mastery_sum"] += float(mastery_level)
+        totals["count"] += 1.0
+
+        confidence = ms.get("confidence_self_report")
+        if confidence is not None:
+            totals["confidence_sum"] += float(confidence)
+            totals["confidence_count"] += 1.0
+
+    result: dict[int, tuple[float, float]] = {}
+    for cid, totals in course_totals.items():
+        if totals["count"] == 0:
+            continue
+
+        avg_mastery = totals["mastery_sum"] / totals["count"]
+        mastery_gap = max(0.0, min(1.0, 1.0 - avg_mastery))
+
+        if totals["confidence_count"] > 0:
+            avg_confidence = totals["confidence_sum"] / totals["confidence_count"]
+            confidence_gap = avg_confidence - avg_mastery
+        else:
+            confidence_gap = 0.0
+
+        result[cid] = (mastery_gap, confidence_gap)
+
+    return result
+
+
 def _build_opportunities(
     assignments: list[dict[str, Any]],
     submissions_by_assignment: dict[int, dict[str, Any]],
@@ -245,9 +306,11 @@ def _build_opportunities(
     course_names: dict[int, str],
     grade_snapshots: list[dict[str, Any]],
     now: datetime,
+    mastery_gaps: dict[int, tuple[float, float]] | None = None,
 ) -> list[StudyOpportunity]:
     """Convert raw Supabase rows into StudyOpportunity objects."""
     opportunities: list[StudyOpportunity] = []
+    _gaps = mastery_gaps or {}
 
     # Build a previous-score lookup from grade snapshots.
     # Sort by scraped_at desc so the first per course is "current" and the
@@ -296,7 +359,8 @@ def _build_opportunities(
             except (ValueError, TypeError):
                 logger.warning(
                     "Malformed due_at for assignment %s: %r",
-                    asn.get("name"), due_at_raw,
+                    asn.get("name"),
+                    due_at_raw,
                 )
                 due_at = None
             # Ensure timezone-aware for scoring arithmetic
@@ -309,6 +373,7 @@ def _build_opportunities(
             if days_overdue > 7:
                 continue
 
+        course_mg, course_cg = _gaps.get(course_id, (0.0, 0.0))
         opportunities.append(
             StudyOpportunity(
                 opportunity_type="homework",
@@ -321,6 +386,8 @@ def _build_opportunities(
                 current_score=enrollment.get("current_score"),
                 previous_score=_prev_scores.get(course_id),
                 points_possible=asn.get("points_possible"),
+                mastery_gap=course_mg,
+                confidence_gap=course_cg,
             )
         )
 
@@ -346,7 +413,8 @@ def _build_opportunities(
             except (ValueError, TypeError):
                 logger.warning(
                     "Malformed scheduled_date for assessment %s: %r",
-                    assess.get("name"), scheduled_raw,
+                    assess.get("name"),
+                    scheduled_raw,
                 )
                 scheduled_at = None
             if scheduled_at is not None and scheduled_at.tzinfo is None:
@@ -363,6 +431,7 @@ def _build_opportunities(
             if sub.get("score") is not None or sub.get("workflow_state") == "graded":
                 continue
 
+        assess_mg, assess_cg = _gaps.get(course_id, (0.0, 0.0))
         opportunities.append(
             StudyOpportunity(
                 opportunity_type="assessment",
@@ -373,6 +442,8 @@ def _build_opportunities(
                 current_score=enrollment.get("current_score"),
                 previous_score=_prev_scores.get(course_id),
                 assessment_type=assess.get("assessment_type"),
+                mastery_gap=assess_mg,
+                confidence_gap=assess_cg,
             )
         )
 
@@ -485,7 +556,7 @@ async def generate_plan(
     grade_snapshots = await _read_non_critical(
         client, "grade_snapshots", "grade snapshots"
     )
-    _mastery_states = await _read_non_critical(  # noqa: F841 — read for future use
+    mastery_states_data = await _read_non_critical(
         client,
         "mastery_states",
         "mastery states",
@@ -519,6 +590,7 @@ async def generate_plan(
 
     # 6. Build opportunities.
     now = datetime.now(UTC)
+    mastery_gap_lookup = _compute_mastery_gaps(mastery_states_data)
     opportunities = _build_opportunities(
         assignments_data,
         submissions_by_assignment,
@@ -527,6 +599,7 @@ async def generate_plan(
         course_names,
         grade_snapshots,
         now,
+        mastery_gaps=mastery_gap_lookup,
     )
     logger.debug("Built %d study opportunities", len(opportunities))
 
@@ -566,7 +639,8 @@ async def generate_plan(
     except Exception as exc:
         logger.error(
             "Failed to write blocks for plan %d, cleaning up: %s",
-            plan_id, exc,
+            plan_id,
+            exc,
         )
         await client.table("study_plans").delete().eq("id", plan_id).execute()
         raise PlanGenerationError(f"Failed to write study blocks: {exc}") from exc

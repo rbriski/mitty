@@ -501,3 +501,112 @@ class TestPurity:
         allocate_blocks(scored, 90)
         assert len(scored) == original_len
         assert [s.score for s in scored] == original_scores
+
+
+# ---------------------------------------------------------------------------
+# Mastery-aware retrieval concept selection
+# ---------------------------------------------------------------------------
+
+
+class TestMasteryRetrieval:
+    """Retrieval block should prefer concepts with highest mastery_gap or
+    positive confidence_gap."""
+
+    def test_retrieval_prefers_highest_mastery_gap(self) -> None:
+        """When mastery data is present, retrieval block picks the course
+        with the highest mastery_gap rather than just the top-scored item."""
+        # Top-scored item has no mastery gap; lower-scored has high mastery gap.
+        top_scored = StudyOpportunity(
+            opportunity_type="homework",
+            name="Easy HW",
+            course_id=1,
+            course_name="Strong",
+            due_at=NOW + timedelta(days=2),
+            current_score=90.0,
+            mastery_gap=0.0,
+        )
+        lower_scored = StudyOpportunity(
+            opportunity_type="homework",
+            name="Hard HW",
+            course_id=2,
+            course_name="Weak",
+            due_at=NOW + timedelta(days=4),
+            current_score=75.0,
+            mastery_gap=0.8,
+        )
+        scored = _score([top_scored, lower_scored])
+        blocks = allocate_blocks(scored, 60)
+
+        retrieval_blocks = [b for b in blocks if b.block_type == "retrieval"]
+        assert len(retrieval_blocks) >= 1
+        # Retrieval block should target the "Weak" course due to high mastery gap
+        assert retrieval_blocks[0].course_name == "Weak"
+
+    def test_retrieval_prefers_positive_confidence_gap(self) -> None:
+        """Confidence gap (overconfident) should influence retrieval selection."""
+        calibrated = StudyOpportunity(
+            opportunity_type="homework",
+            name="Calibrated HW",
+            course_id=1,
+            course_name="Calibrated",
+            due_at=NOW + timedelta(days=3),
+            current_score=85.0,
+            mastery_gap=0.0,
+            confidence_gap=0.0,
+        )
+        overconfident = StudyOpportunity(
+            opportunity_type="homework",
+            name="Overconfident HW",
+            course_id=2,
+            course_name="Overconfident",
+            due_at=NOW + timedelta(days=3),
+            current_score=85.0,
+            mastery_gap=0.0,
+            confidence_gap=0.5,
+        )
+        scored = _score([calibrated, overconfident])
+        blocks = allocate_blocks(scored, 60)
+
+        retrieval_blocks = [b for b in blocks if b.block_type == "retrieval"]
+        assert len(retrieval_blocks) >= 1
+        assert retrieval_blocks[0].course_name == "Overconfident"
+
+    def test_retrieval_falls_back_when_no_mastery_data(self) -> None:
+        """Without mastery data (all gaps 0), retrieval falls back to top-scored."""
+        scored = _typical_scored()
+        blocks = allocate_blocks(scored, 60)
+
+        retrieval_blocks = [b for b in blocks if b.block_type == "retrieval"]
+        assert len(retrieval_blocks) >= 1
+        # Should still produce a valid retrieval block from the top-scored item
+        assert retrieval_blocks[0].course_name is not None
+
+    def test_mastery_gap_breaks_tie_over_confidence_gap(self) -> None:
+        """When two items have mastery data, higher mastery_gap wins over
+        higher confidence_gap."""
+        high_mastery = StudyOpportunity(
+            opportunity_type="homework",
+            name="High Mastery Gap",
+            course_id=1,
+            course_name="Weak Mastery",
+            due_at=NOW + timedelta(days=3),
+            current_score=85.0,
+            mastery_gap=0.9,
+            confidence_gap=0.1,
+        )
+        high_confidence = StudyOpportunity(
+            opportunity_type="homework",
+            name="High Confidence Gap",
+            course_id=2,
+            course_name="Overconfident",
+            due_at=NOW + timedelta(days=3),
+            current_score=85.0,
+            mastery_gap=0.2,
+            confidence_gap=0.8,
+        )
+        scored = _score([high_mastery, high_confidence])
+        blocks = allocate_blocks(scored, 60)
+
+        retrieval_blocks = [b for b in blocks if b.block_type == "retrieval"]
+        assert len(retrieval_blocks) >= 1
+        assert retrieval_blocks[0].course_name == "Weak Mastery"

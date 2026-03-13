@@ -38,6 +38,18 @@ async def resources_manage(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("resources.html", {"request": request})
 
 
+@router.get("/practice", response_class=HTMLResponse)
+async def practice_session(request: Request) -> HTMLResponse:
+    """Render the practice session page."""
+    return templates.TemplateResponse("practice_session.html", {"request": request})
+
+
+@router.get("/mastery", response_class=HTMLResponse)
+async def mastery_dashboard(request: Request) -> HTMLResponse:
+    """Render the mastery dashboard page."""
+    return templates.TemplateResponse("mastery_dashboard.html", {"request": request})
+
+
 @router.get("/class/{course_id}", response_class=HTMLResponse)
 async def class_detail(request: Request, course_id: int) -> HTMLResponse:
     """Render the class detail page for a specific course."""

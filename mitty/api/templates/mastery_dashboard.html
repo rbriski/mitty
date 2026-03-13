@@ -1,0 +1,351 @@
+{% extends "base.html" %}
+
+{% block title %}Mitty — Mastery Dashboard{% endblock %}
+
+{% block nav %}
+{# Hide default nav; Alpine.js controls nav visibility based on auth state #}
+{% endblock %}
+
+{% block content %}
+<div x-data="masteryDashboardApp()" x-init="init()" x-cloak>
+
+  {# ── Nav (only when authenticated) ── #}
+  <template x-if="session">
+    <nav class="bg-white shadow-sm border-b border-gray-200 -mx-4 -mt-6 mb-6">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="flex items-center justify-between h-14">
+          <a href="/" class="text-xl font-bold text-mitty-700 hover:text-mitty-600 transition-colors">
+            Mitty
+          </a>
+          <div class="flex items-center space-x-6">
+            <a href="/"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Dashboard
+            </a>
+            <a href="/study-plan"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Study Plan
+            </a>
+            <a href="/mastery"
+               class="text-sm font-medium text-mitty-600 border-b-2 border-mitty-600 pb-0.5">
+              Mastery
+            </a>
+            <button
+              @click="signOut()"
+              class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </template>
+
+  {# ── Not authenticated ── #}
+  <template x-if="!session">
+    <div class="text-center py-16">
+      <p class="text-gray-500 mb-4">Please sign in to view your mastery dashboard.</p>
+      <a href="/" class="text-mitty-600 hover:text-mitty-700 font-medium">Go to Dashboard</a>
+    </div>
+  </template>
+
+  {# ── Authenticated Content ── #}
+  <template x-if="session">
+    <div class="max-w-4xl mx-auto py-8">
+
+      {# Back button #}
+      <a href="/" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-6 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Dashboard
+      </a>
+
+      {# Page header #}
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-2">
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">Mastery Dashboard</h1>
+          <p class="text-sm text-gray-500">Track your concept mastery and calibration</p>
+        </div>
+      </div>
+
+      {# Controls: course selector + sort #}
+      <div class="flex flex-col sm:flex-row gap-3 mb-6">
+        <select
+          x-model="selectedCourseId"
+          @change="fetchDashboard()"
+          class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
+        >
+          <option value="">Select a course</option>
+          <template x-for="c in courses" :key="c.id">
+            <option :value="c.id" x-text="c.name"></option>
+          </template>
+        </select>
+
+        <select
+          x-model="sortBy"
+          @change="fetchDashboard()"
+          class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
+        >
+          <option value="mastery_level">Sort by mastery level</option>
+          <option value="next_review_at">Sort by next review</option>
+          <option value="calibration_gap">Sort by calibration gap</option>
+        </select>
+      </div>
+
+      {# Loading state #}
+      <div x-show="loading" class="text-center py-12">
+        <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+        <p class="text-sm text-gray-500 mt-3">Loading mastery data...</p>
+      </div>
+
+      {# Error state #}
+      <div x-show="fetchError && !loading" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
+        <p class="text-sm text-red-700" x-text="fetchError"></p>
+      </div>
+
+      {# No course selected #}
+      <div x-show="!loading && !fetchError && !selectedCourseId" class="text-center py-12">
+        <p class="text-gray-500">Select a course above to view mastery data.</p>
+      </div>
+
+      {# Empty state #}
+      <div x-show="!loading && !fetchError && selectedCourseId && concepts.length === 0" class="text-center py-12">
+        <p class="text-gray-500">No mastery data yet for this course.</p>
+        <p class="text-sm text-gray-400 mt-1">Complete some practice sessions to start tracking your mastery.</p>
+      </div>
+
+      {# Concept rows #}
+      <div x-show="!loading && !fetchError && concepts.length > 0" class="space-y-3">
+        <template x-for="concept in concepts" :key="concept.concept">
+          <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+            <div class="flex items-start justify-between gap-3 mb-3">
+              <div class="flex-1 min-w-0">
+                <h3 class="font-semibold text-gray-900" x-text="concept.concept"></h3>
+                <div class="flex flex-wrap items-center gap-2 mt-1">
+                  {# Calibration badge #}
+                  <span
+                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                    :class="calibrationBadge(concept.calibration_status)"
+                    x-text="calibrationLabel(concept.calibration_status)"
+                  ></span>
+
+                  {# No study materials indicator #}
+                  <span
+                    x-show="!concept.has_resources"
+                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
+                  >
+                    No study materials
+                  </span>
+
+                  {# Retrieval count #}
+                  <span class="text-xs text-gray-400" x-text="(concept.retrieval_count || 0) + ' retrievals'"></span>
+
+                  {# Success rate #}
+                  <span
+                    x-show="concept.success_rate !== null"
+                    class="text-xs text-gray-400"
+                    x-text="Math.round((concept.success_rate || 0) * 100) + '% success'"
+                  ></span>
+                </div>
+              </div>
+
+              {# Next review date #}
+              <div class="flex-shrink-0 text-right">
+                <template x-if="concept.next_review_at">
+                  <div>
+                    <p class="text-xs text-gray-400">Next review</p>
+                    <p class="text-sm text-gray-600" x-text="formatDate(concept.next_review_at)"></p>
+                  </div>
+                </template>
+                <template x-if="!concept.next_review_at">
+                  <p class="text-xs text-gray-400">No review scheduled</p>
+                </template>
+              </div>
+            </div>
+
+            {# Mastery bar #}
+            <div class="mb-2">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs text-gray-500">Mastery</span>
+                <span class="text-xs font-medium text-gray-700" x-text="Math.round((concept.mastery_level || 0) * 100) + '%'"></span>
+              </div>
+              <div class="w-full bg-gray-100 rounded-full h-2.5">
+                <div
+                  class="h-2.5 rounded-full transition-all duration-500"
+                  :class="masteryBarColor(concept.mastery_level || 0)"
+                  :style="'width: ' + Math.round((concept.mastery_level || 0) * 100) + '%'"
+                ></div>
+              </div>
+            </div>
+
+            {# Confidence bar (if available) #}
+            <template x-if="concept.confidence_self_report !== null">
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-xs text-gray-500">Self-reported confidence</span>
+                  <span class="text-xs font-medium text-gray-700" x-text="Math.round((concept.confidence_self_report || 0) * 100) + '%'"></span>
+                </div>
+                <div class="w-full bg-gray-100 rounded-full h-2">
+                  <div
+                    class="h-2 rounded-full transition-all duration-500 bg-blue-400"
+                    :style="'width: ' + Math.round((concept.confidence_self_report || 0) * 100) + '%'"
+                  ></div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+
+    </div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
+
+  function masteryDashboardApp() {
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    return {
+      session: null,
+      loading: false,
+      fetchError: '',
+
+      courses: [],
+      concepts: [],
+      selectedCourseId: '',
+      sortBy: 'mastery_level',
+
+      async init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        this.session = session;
+
+        supabase.auth.onAuthStateChange((_event, session) => {
+          this.session = session;
+          if (session) this.fetchCourses();
+        });
+
+        if (this.session) this.fetchCourses();
+      },
+
+      async signOut() {
+        await supabase.auth.signOut();
+        this.session = null;
+        window.location.href = '/';
+      },
+
+      async fetchCourses() {
+        try {
+          // Fetch only courses with active enrollments in the current term
+          // (matches the main dashboard filter)
+          const CURRENT_TERM = '2025-2026 Second Semester';
+          const { data, error } = await supabase
+            .from('enrollments')
+            .select('course_id, courses (id, name, workflow_state, term_name)')
+            .eq('enrollment_state', 'active');
+          if (error) {
+            this.fetchError = 'Failed to load courses. Please refresh the page.';
+            return;
+          }
+          this.courses = (data || [])
+            .filter(e => e.courses
+              && e.courses.workflow_state === 'available'
+              && e.courses.term_name === CURRENT_TERM)
+            .map(e => ({ id: e.courses.id, name: e.courses.name }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+          // Deduplicate (multiple enrollments for same course)
+          const seen = new Set();
+          this.courses = this.courses.filter(c => {
+            if (seen.has(c.id)) return false;
+            seen.add(c.id);
+            return true;
+          });
+          if (this.courses.length > 0 && !this.selectedCourseId) {
+            this.selectedCourseId = this.courses[0].id;
+            this.fetchDashboard();
+          }
+        } catch (err) {
+          console.warn('Failed to fetch courses:', err.message);
+          this.fetchError = 'Failed to load courses. Please refresh the page.';
+        }
+      },
+
+      async fetchDashboard() {
+        if (!this.selectedCourseId) {
+          this.concepts = [];
+          return;
+        }
+
+        this.loading = true;
+        this.fetchError = '';
+        this.concepts = [];
+
+        try {
+          const token = this.session?.access_token;
+          if (!token) {
+            this.fetchError = 'Not authenticated.';
+            return;
+          }
+
+          const resp = await fetch(
+            `/mastery-dashboard/${this.selectedCourseId}?sort_by=${this.sortBy}`,
+            { headers: { 'Authorization': 'Bearer ' + token } }
+          );
+
+          if (!resp.ok) {
+            this.fetchError = 'Failed to load mastery data (HTTP ' + resp.status + ')';
+            return;
+          }
+
+          const data = await resp.json();
+          this.concepts = data.concepts || [];
+        } catch (err) {
+          this.fetchError = 'Failed to load mastery data: ' + err.message;
+        } finally {
+          this.loading = false;
+        }
+      },
+
+      formatDate(isoString) {
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        return d.toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric',
+        });
+      },
+
+      masteryBarColor(level) {
+        if (level >= 0.8) return 'bg-emerald-500';
+        if (level >= 0.5) return 'bg-yellow-500';
+        return 'bg-red-400';
+      },
+
+      calibrationBadge(status) {
+        const map = {
+          well_calibrated: 'bg-emerald-100 text-emerald-700',
+          over_confident: 'bg-red-100 text-red-700',
+          under_confident: 'bg-blue-100 text-blue-700',
+          unknown: 'bg-gray-100 text-gray-600',
+        };
+        return map[status] || 'bg-gray-100 text-gray-600';
+      },
+
+      calibrationLabel(status) {
+        const map = {
+          well_calibrated: 'Well calibrated',
+          over_confident: 'Over confident',
+          under_confident: 'Under confident',
+          unknown: 'Not calibrated',
+        };
+        return map[status] || status;
+      },
+    };
+  }
+</script>
+{% endblock %}

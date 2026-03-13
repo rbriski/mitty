@@ -11,6 +11,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
+# Calibration status type
+# ---------------------------------------------------------------------------
+
+CalibrationStatus = Literal[
+    "well_calibrated", "over_confident", "under_confident", "unknown"
+]
+
+# ---------------------------------------------------------------------------
 # Generic wrappers
 # ---------------------------------------------------------------------------
 
@@ -124,7 +132,13 @@ class AssessmentResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 ResourceType = Literal[
-    "textbook_chapter", "canvas_page", "file", "link", "notes", "video"
+    "textbook_chapter",
+    "canvas_page",
+    "file",
+    "link",
+    "notes",
+    "video",
+    "discussion",
 ]
 
 
@@ -438,8 +452,79 @@ class MasteryStateResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 PracticeType = Literal[
-    "quiz", "flashcard", "worked_example", "reflection", "explanation"
+    "multiple_choice",
+    "fill_in_blank",
+    "short_answer",
+    "flashcard",
+    "worked_example",
+    "explanation",
 ]
+
+
+# ---------------------------------------------------------------------------
+# PracticeItem
+# ---------------------------------------------------------------------------
+
+
+class PracticeItemCreate(BaseModel):
+    """Create a new practice item."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: UUID
+    course_id: int
+    concept: str
+    practice_type: PracticeType
+    question_text: str = Field(max_length=10000)
+    correct_answer: str | None = Field(default=None, max_length=10000)
+    options_json: dict | list | None = None
+    explanation: str | None = Field(default=None, max_length=10000)
+    source_chunk_ids: list[int] | None = None
+    difficulty_level: float | None = Field(default=None, ge=0.0, le=1.0)
+    generation_model: str | None = Field(default=None, max_length=255)
+
+
+class PracticeItemUpdate(BaseModel):
+    """Partial update for a practice item."""
+
+    concept: str | None = None
+    practice_type: PracticeType | None = None
+    question_text: str | None = Field(default=None, max_length=10000)
+    correct_answer: str | None = Field(default=None, max_length=10000)
+    options_json: dict | list | None = None
+    explanation: str | None = Field(default=None, max_length=10000)
+    source_chunk_ids: list[int] | None = None
+    difficulty_level: float | None = Field(default=None, ge=0.0, le=1.0)
+    generation_model: str | None = Field(default=None, max_length=255)
+    times_used: int | None = None
+    last_used_at: datetime | None = None
+
+
+class PracticeItemResponse(BaseModel):
+    """Full practice_item record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: UUID
+    course_id: int
+    concept: str
+    practice_type: PracticeType
+    question_text: str
+    correct_answer: str | None
+    options_json: dict | list | None
+    explanation: str | None
+    source_chunk_ids: list[int] | None
+    difficulty_level: float | None
+    generation_model: str | None
+    times_used: int
+    last_used_at: datetime | None
+    created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# PracticeResult
+# ---------------------------------------------------------------------------
 
 
 class PracticeResultCreate(BaseModel):
@@ -458,6 +543,9 @@ class PracticeResultCreate(BaseModel):
     is_correct: bool | None = None
     confidence_before: float | None = Field(default=None, ge=1.0, le=5.0)
     time_spent_seconds: int | None = None
+    score: float | None = None
+    feedback: str | None = Field(default=None, max_length=10000)
+    misconceptions_detected: list[str] | None = None
 
 
 class PracticeResultUpdate(BaseModel):
@@ -468,6 +556,9 @@ class PracticeResultUpdate(BaseModel):
     is_correct: bool | None = None
     confidence_before: float | None = Field(default=None, ge=1.0, le=5.0)
     time_spent_seconds: int | None = None
+    score: float | None = None
+    feedback: str | None = Field(default=None, max_length=10000)
+    misconceptions_detected: list[str] | None = None
 
 
 class PracticeResultResponse(BaseModel):
@@ -487,4 +578,96 @@ class PracticeResultResponse(BaseModel):
     is_correct: bool | None
     confidence_before: float | None
     time_spent_seconds: int | None
+    score: float | None
+    feedback: str | None
+    misconceptions_detected: list[str] | None
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Practice Session orchestration schemas
+# ---------------------------------------------------------------------------
+
+
+class PracticeGenerateResponse(BaseModel):
+    """Response from practice item generation."""
+
+    concept: str
+    course_id: int
+    items: list[PracticeItemResponse]
+    cached: bool = False
+
+
+class EvaluateRequest(BaseModel):
+    """Request to evaluate a student answer."""
+
+    practice_item_id: int
+    student_answer: str = Field(max_length=5000)
+    confidence_before: float | None = Field(default=None, ge=1.0, le=5.0)
+    study_block_id: int | None = None
+    time_spent_seconds: int | None = None
+
+
+class EvaluateResponse(BaseModel):
+    """Response from answer evaluation."""
+
+    practice_result_id: int
+    is_correct: bool
+    score: float
+    feedback: str
+    misconceptions_detected: list[str]
+
+
+class MasteryUpdateRequest(BaseModel):
+    """Request to batch-update mastery after a practice session."""
+
+    study_block_id: int
+
+
+class MasteryStateResult(BaseModel):
+    """A single mastery state in the update response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    concept: str
+    course_id: int
+    mastery_level: float
+    success_rate: float | None
+    confidence_self_report: float | None
+    retrieval_count: int
+    last_retrieval_at: datetime | None
+    next_review_at: datetime | None
+
+
+class MasteryUpdateResponse(BaseModel):
+    """Response from mastery batch-update."""
+
+    study_block_id: int
+    mastery_states: list[MasteryStateResult]
+
+
+# ---------------------------------------------------------------------------
+# MasteryDashboard (read-only aggregate)
+# ---------------------------------------------------------------------------
+
+
+class MasteryConceptRow(BaseModel):
+    """Aggregated mastery data for a single concept."""
+
+    concept: str
+    mastery_level: float
+    confidence_self_report: float | None
+    calibration_gap: float | None
+    calibration_status: CalibrationStatus
+    next_review_at: datetime | None
+    last_retrieval_at: datetime | None
+    retrieval_count: int
+    success_rate: float | None
+    has_resources: bool
+
+
+class MasteryDashboardResponse(BaseModel):
+    """Mastery dashboard for a single course."""
+
+    course_id: int
+    concepts: list[MasteryConceptRow]

@@ -1,6 +1,6 @@
 """SQLAlchemy Core table definitions for the Mitty database schema.
 
-Defines 14 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
+Defines 15 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
 
 - **courses**: Canvas LMS courses with optional term info.
 - **assignments**: Assignments belonging to a course (FK -> courses).
@@ -15,6 +15,7 @@ Defines 14 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
 - **study_plans**: Daily study plans.
 - **study_blocks**: Individual blocks within a study plan.
 - **mastery_states**: Per-concept mastery tracking (FK -> courses).
+- **practice_items**: Generated practice questions/items (FKs -> courses).
 - **practice_results**: Practice item outcomes (FKs -> study_blocks, courses).
 
 All nullable columns are explicitly marked per the project schema specification.
@@ -434,6 +435,47 @@ sa.Index(
 )
 
 # ---------------------------------------------------------------------------
+# practice_items
+# ---------------------------------------------------------------------------
+
+practice_items = sa.Table(
+    "practice_items",
+    metadata,
+    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+    sa.Column("user_id", sa.Uuid, nullable=False),
+    sa.Column(
+        "course_id",
+        sa.Integer,
+        sa.ForeignKey("courses.id"),
+        nullable=False,
+    ),
+    sa.Column("concept", sa.String, nullable=False),
+    sa.Column("practice_type", sa.String, nullable=False),
+    sa.Column("question_text", sa.Text, nullable=False),
+    sa.Column("correct_answer", sa.Text, nullable=True),
+    sa.Column("options_json", sa.JSON, nullable=True),
+    sa.Column("explanation", sa.Text, nullable=True),
+    sa.Column("source_chunk_ids", sa.ARRAY(sa.Integer), nullable=True),
+    sa.Column("difficulty_level", sa.Float, nullable=True),
+    sa.Column("generation_model", sa.String(255), nullable=True),
+    sa.Column(
+        "times_used",
+        sa.Integer,
+        nullable=False,
+        server_default=sa.text("0"),
+    ),
+    sa.Column("last_used_at", sa.DateTime, nullable=True),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
+sa.Index(
+    "ix_practice_items_user_course_concept",
+    practice_items.c.user_id,
+    practice_items.c.course_id,
+    practice_items.c.concept,
+)
+
+# ---------------------------------------------------------------------------
 # practice_results
 # ---------------------------------------------------------------------------
 
@@ -462,6 +504,9 @@ practice_results = sa.Table(
     sa.Column("is_correct", sa.Boolean, nullable=True),
     sa.Column("confidence_before", sa.Float, nullable=True),
     sa.Column("time_spent_seconds", sa.Integer, nullable=True),
+    sa.Column("score", sa.Float, nullable=True),
+    sa.Column("feedback", sa.Text, nullable=True),
+    sa.Column("misconceptions_detected", sa.ARRAY(sa.String), nullable=True),
     sa.Column("created_at", sa.DateTime, nullable=False),
 )
 

@@ -18,6 +18,7 @@ from mitty.models import (
     Assignment,
     CalendarEvent,
     Course,
+    DiscussionTopic,
     Enrollment,
     FileMetadata,
     Module,
@@ -294,6 +295,42 @@ async def fetch_calendar_events(
     return all_events
 
 
+async def fetch_discussion_topics(
+    client: CanvasClient,
+    course_id: int,
+) -> list[DiscussionTopic]:
+    """Fetch discussion topics for a given course, filtering to teacher posts.
+
+    Calls ``GET /api/v1/courses/:id/discussion_topics?per_page=100``
+    and parses each item into a :class:`~mitty.models.DiscussionTopic`.
+    Only announcements and teacher-authored posts are returned; student
+    replies are excluded by the endpoint itself (discussion_topics only
+    returns top-level topics, not replies).
+
+    HTML in the ``message`` field is stripped to plain text via
+    :func:`strip_html`.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+
+    Returns:
+        A list of validated ``DiscussionTopic`` model instances with
+        plain-text messages.
+    """
+    raw = await client.get_paginated(
+        f"/api/v1/courses/{course_id}/discussion_topics",
+        {"per_page": "100"},
+    )
+    topics: list[DiscussionTopic] = []
+    for item in raw:
+        topic = DiscussionTopic.model_validate(item)
+        if topic.message:
+            topic = topic.model_copy(update={"message": strip_html(topic.message)})
+        topics.append(topic)
+    return topics
+
+
 async def fetch_all(
     client: CanvasClient,
     settings: Settings,
@@ -301,10 +338,10 @@ async def fetch_all(
     """Fetch courses, enrollments, and all per-course data concurrently.
 
     Courses and enrollments are fetched in parallel first.  Then each
-    course's assignments, quizzes, modules (with items), pages, and files
-    are fetched concurrently, bounded by ``settings.max_concurrent`` to
-    avoid overwhelming the Canvas API.  Calendar events are fetched once
-    globally across all courses.
+    course's assignments, quizzes, modules (with items), pages, files,
+    and discussion topics are fetched concurrently, bounded by
+    ``settings.max_concurrent`` to avoid overwhelming the Canvas API.
+    Calendar events are fetched once globally across all courses.
 
     If fetching data for a particular course fails, the error is logged
     and appended to the ``errors`` list in the result dict.  Other
@@ -317,11 +354,12 @@ async def fetch_all(
     Returns:
         A dict with keys ``courses``, ``assignments``, ``enrollments``,
         ``quizzes``, ``modules``, ``pages``, ``files``,
-        ``calendar_events``, and ``errors``.
+        ``discussion_topics``, ``calendar_events``, and ``errors``.
 
-        Per-course data (assignments, quizzes, modules, pages, files) is
-        keyed by ``str(course_id)``.  The ``modules`` value contains
-        dicts with ``"modules"`` and ``"module_items"`` sub-keys.
+        Per-course data (assignments, quizzes, modules, pages, files,
+        discussion_topics) is keyed by ``str(course_id)``.  The
+        ``modules`` value contains dicts with ``"modules"`` and
+        ``"module_items"`` sub-keys.
     """
     courses, enrollments = await asyncio.gather(
         fetch_courses(client),
@@ -334,6 +372,7 @@ async def fetch_all(
     modules: dict[str, dict] = {}
     pages: dict[str, list[Page]] = {}
     files: dict[str, list[FileMetadata]] = {}
+    discussion_topics: dict[str, list[DiscussionTopic]] = {}
     semaphore = asyncio.Semaphore(settings.max_concurrent)
 
     async def _fetch_or_empty(coro: Any, label: str, course: Course) -> Any:
@@ -382,6 +421,11 @@ async def fetch_all(
             course_files = await _fetch_or_empty(
                 fetch_files(client, course.id), "files", course
             )
+            course_discussions = await _fetch_or_empty(
+                fetch_discussion_topics(client, course.id),
+                "discussion_topics",
+                course,
+            )
 
             return {
                 "course_id": course.id,
@@ -391,17 +435,19 @@ async def fetch_all(
                 "module_items": all_module_items,
                 "pages": course_pages,
                 "files": course_files,
+                "discussion_topics": course_discussions,
             }
 
     tasks = [_fetch_course_data(c) for c in courses]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for course, result in zip(courses, results, strict=True):
-        if isinstance(result, (KeyboardInterrupt, SystemExit)):
+        if isinstance(result, KeyboardInterrupt | SystemExit):
             raise result
         if isinstance(result, BaseException):
             error_msg = (
-                f"Failed to fetch data for course {course.id} ({course.name}): {result}"
+                f"Failed to fetch data for course "
+                f"{course.id} ({course.name}): {result!r}"
             )
             logger.warning(error_msg)
             errors.append(error_msg)
@@ -415,6 +461,7 @@ async def fetch_all(
             }
             pages[cid] = result["pages"]
             files[cid] = result["files"]
+            discussion_topics[cid] = result["discussion_topics"]
 
     # Calendar events: fetch once globally for all courses
     course_ids = [c.id for c in courses]
@@ -435,6 +482,7 @@ async def fetch_all(
         "modules": modules,
         "pages": pages,
         "files": files,
+        "discussion_topics": discussion_topics,
         "calendar_events": calendar_events,
         "errors": errors,
     }

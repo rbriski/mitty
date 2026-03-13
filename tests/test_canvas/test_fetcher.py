@@ -19,10 +19,14 @@ from mitty.canvas.fetcher import (
     fetch_quizzes,
     strip_html,
 )
+
+# fetch_discussion_topics is tested in test_fetcher_discussions.py but exercised
+# indirectly via _patch_all_fetchers for fetch_all tests.
 from mitty.models import (
     Assignment,
     CalendarEvent,
     Course,
+    DiscussionTopic,
     Enrollment,
     FileMetadata,
     Module,
@@ -305,6 +309,11 @@ def _make_calendar_event(
     return CalendarEvent(id=event_id, title=title, context_code=context_code)
 
 
+def _make_discussion_topic(topic_id: int, title: str = "Discussion") -> DiscussionTopic:
+    """Create a DiscussionTopic instance for testing."""
+    return DiscussionTopic(id=topic_id, title=title)
+
+
 def _patch_all_fetchers(**overrides):
     """Return a dict of patches for all fetcher functions used by fetch_all.
 
@@ -326,6 +335,7 @@ def _patch_all_fetchers(**overrides):
         "fetch_module_items": [],
         "fetch_pages": [],
         "fetch_files": [],
+        "fetch_discussion_topics": [],
         "fetch_calendar_events": [],
     }
     defaults.update(overrides)
@@ -370,6 +380,7 @@ class TestFetchAll:
         items_1_30 = [_make_module_item(300, 30)]
         pages_1 = [_make_page(80)]
         files_1 = [_make_file(90)]
+        discussions_1 = [_make_discussion_topic(110, "Welcome")]
         cal_events = [_make_calendar_event(70, "Midterm Exam")]
 
         patches = _patch_all_fetchers(
@@ -381,6 +392,7 @@ class TestFetchAll:
             fetch_module_items=items_1_30,
             fetch_pages=[pages_1, []],
             fetch_files=[files_1, []],
+            fetch_discussion_topics=[discussions_1, []],
             fetch_calendar_events=cal_events,
         )
 
@@ -393,6 +405,7 @@ class TestFetchAll:
             patches["fetch_module_items"] as mock_mod_items,
             patches["fetch_pages"] as mock_pages,
             patches["fetch_files"] as mock_files,
+            patches["fetch_discussion_topics"] as mock_disc,
             patches["fetch_calendar_events"] as mock_cal,
         ):
             client = AsyncMock()
@@ -410,6 +423,7 @@ class TestFetchAll:
         assert result["modules"]["1"]["module_items"][30] == items_1_30
         assert result["pages"]["1"] == pages_1
         assert result["files"]["1"] == files_1
+        assert result["discussion_topics"]["1"] == discussions_1
         assert result["calendar_events"] == cal_events
         assert mock_assign.call_count == 2
         assert mock_quiz.call_count == 2
@@ -417,6 +431,7 @@ class TestFetchAll:
         assert mock_mod_items.call_count == 1  # only 1 module in course 1
         assert mock_pages.call_count == 2
         assert mock_files.call_count == 2
+        assert mock_disc.call_count == 2
         mock_cal.assert_called_once_with(client, [1, 2])
 
     async def test_one_course_fails(self) -> None:
@@ -454,6 +469,7 @@ class TestFetchAll:
             patches["fetch_module_items"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
             client = AsyncMock()
@@ -490,6 +506,7 @@ class TestFetchAll:
             patches["fetch_module_items"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
             client = AsyncMock()
@@ -502,6 +519,7 @@ class TestFetchAll:
         assert result["modules"] == {}
         assert result["pages"] == {}
         assert result["files"] == {}
+        assert result["discussion_topics"] == {}
         assert result["calendar_events"] == []
         assert result["enrollments"] == [_make_enrollment(100, 1)]
         assert result["errors"] == []
@@ -520,6 +538,7 @@ class TestFetchAll:
             fetch_modules=[[]],
             fetch_pages=[[]],
             fetch_files=[[]],
+            fetch_discussion_topics=[[]],
             fetch_calendar_events=RuntimeError("Calendar API down"),
         )
 
@@ -532,6 +551,7 @@ class TestFetchAll:
             patches["fetch_module_items"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
             client = AsyncMock()
@@ -557,6 +577,7 @@ class TestFetchAll:
             patches["fetch_module_items"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
             client = AsyncMock()
@@ -571,6 +592,7 @@ class TestFetchAll:
             "modules",
             "pages",
             "files",
+            "discussion_topics",
             "calendar_events",
             "errors",
         }

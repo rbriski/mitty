@@ -26,6 +26,10 @@
                class="text-sm font-medium text-mitty-600 border-b-2 border-mitty-600 pb-0.5">
               Study Plan
             </a>
+            <a href="/mastery"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Mastery
+            </a>
             <button
               @click="signOut()"
               class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
@@ -348,6 +352,15 @@
                   class="px-4 py-1.5 text-sm font-medium rounded-lg bg-mitty-600 text-white hover:bg-mitty-700 disabled:bg-gray-300 transition-colors"
                 >
                   Start
+                </button>
+
+                {# Start Practice button — for retrieval blocks that are pending or in_progress #}
+                <button
+                  x-show="block.block_type === 'retrieval' && (block.status === 'pending' || block.status === 'in_progress')"
+                  @click="if (block.status === 'pending') { await startBlock(block); } window.location.href = '/practice?block_id=' + block.id;"
+                  class="px-4 py-1.5 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+                >
+                  Start Practice
                 </button>
 
                 {# Done button — for in_progress blocks #}

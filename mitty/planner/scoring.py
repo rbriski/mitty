@@ -1,7 +1,7 @@
 """Priority scoring engine for study opportunities.
 
 Pure, deterministic scoring function that ranks study opportunities (homework,
-assessments) using 6 weighted factors. No I/O — only computation.
+assessments) using 8 weighted factors. No I/O — only computation.
 
 Public API:
     score_opportunities(opportunities, signal, now) -> list[ScoredOpportunity]
@@ -13,6 +13,8 @@ Weight constants (module-level, tunable):
     W_GRADE_RISK           — courses with lower grades get priority
     W_GRADE_VOLATILITY     — courses where grade is changing (up or down)
     W_STUDENT_PREFERENCE   — student signal (from check-in) boost
+    W_MASTERY_GAP          — concepts with low mastery get retrieval priority
+    W_CONFIDENCE_GAP       — overconfident concepts (high self-report, low mastery)
 """
 
 from __future__ import annotations
@@ -30,12 +32,14 @@ if TYPE_CHECKING:
 # "tests in <= 3 days dominate."
 # ---------------------------------------------------------------------------
 
-W_HOMEWORK_URGENCY: float = 0.18
-W_ASSESSMENT_PROXIMITY: float = 0.35
-W_LATE_MISSING: float = 0.18
-W_GRADE_RISK: float = 0.14
-W_GRADE_VOLATILITY: float = 0.08
-W_STUDENT_PREFERENCE: float = 0.07
+W_HOMEWORK_URGENCY: float = 0.16
+W_ASSESSMENT_PROXIMITY: float = 0.30
+W_LATE_MISSING: float = 0.16
+W_GRADE_RISK: float = 0.12
+W_GRADE_VOLATILITY: float = 0.07
+W_STUDENT_PREFERENCE: float = 0.06
+W_MASTERY_GAP: float = 0.08
+W_CONFIDENCE_GAP: float = 0.05
 
 # ---------------------------------------------------------------------------
 # Data models (pure, no I/O)
@@ -57,6 +61,8 @@ class StudyOpportunity:
     previous_score: float | None = None  # prior snapshot for volatility
     points_possible: float | None = None
     assessment_type: str | None = None  # test, quiz, essay, etc.
+    mastery_gap: float = 0.0  # 0–1; higher = weaker mastery on related concepts
+    confidence_gap: float = 0.0  # positive = overconfident (self-report > mastery)
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +197,25 @@ def _factor_student_preference(
     return 0.0
 
 
+def _factor_mastery_gap(opp: StudyOpportunity) -> float:
+    """Score 0–1 based on the mastery gap for this opportunity's course.
+
+    mastery_gap is pre-computed as 1 - avg_mastery_level for the course,
+    clamped to [0, 1]. Higher gap = weaker mastery = more study needed.
+    """
+    return max(0.0, min(1.0, opp.mastery_gap))
+
+
+def _factor_confidence_gap(opp: StudyOpportunity) -> float:
+    """Score 0–1 based on the confidence gap for this opportunity's course.
+
+    confidence_gap = avg_self_report - avg_mastery_level. Positive means the
+    student is overconfident (thinks they know more than they do), which is
+    a priority for retrieval practice. Negative gaps clamp to 0.
+    """
+    return max(0.0, min(1.0, opp.confidence_gap))
+
+
 # ---------------------------------------------------------------------------
 # Reason builder
 # ---------------------------------------------------------------------------
@@ -233,6 +258,12 @@ def _build_reason(
     ):
         drop = opp.previous_score - opp.current_score
         parts.append(f"grade dropped {drop:.0f}pts")
+
+    if factors.get("mastery_gap", 0) >= 0.5:
+        parts.append("mastery gap — concepts need review")
+
+    if factors.get("confidence_gap", 0) >= 0.3:
+        parts.append("confidence gap — may be overconfident")
 
     if factors.get("student_preference", 0) > 0:
         parts.append("preferred course")
@@ -277,6 +308,8 @@ def score_opportunities(
             "grade_risk": _factor_grade_risk(opp),
             "grade_volatility": _factor_grade_volatility(opp),
             "student_preference": _factor_student_preference(opp, signal),
+            "mastery_gap": _factor_mastery_gap(opp),
+            "confidence_gap": _factor_confidence_gap(opp),
         }
 
         total = (
@@ -286,6 +319,8 @@ def score_opportunities(
             + W_GRADE_RISK * factors["grade_risk"]
             + W_GRADE_VOLATILITY * factors["grade_volatility"]
             + W_STUDENT_PREFERENCE * factors["student_preference"]
+            + W_MASTERY_GAP * factors["mastery_gap"]
+            + W_CONFIDENCE_GAP * factors["confidence_gap"]
         )
 
         reason = _build_reason(opp, factors, now)

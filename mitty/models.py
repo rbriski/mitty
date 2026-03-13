@@ -162,3 +162,32 @@ class CalendarEvent(BaseModel):
     end_at: datetime | None = None
     context_type: str = ""
     context_code: str = ""
+
+
+class DiscussionAuthor(BaseModel):
+    """Canvas discussion topic author."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int | None = None
+    display_name: str = ""
+
+
+class DiscussionTopic(BaseModel):
+    """Canvas discussion topic or announcement.
+
+    Maps to the Canvas ``GET /api/v1/courses/:id/discussion_topics`` response.
+    The ``message`` field contains the raw HTML body, which should be stripped
+    to plain text before storage.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    title: str
+    message: str | None = None
+    posted_at: datetime | None = None
+    author: DiscussionAuthor | None = None
+    is_announcement: bool = False
+    discussion_type: str = ""
+    html_url: str = ""
