@@ -704,6 +704,48 @@ class AICostSummaryResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Escalation + Flag
+# ---------------------------------------------------------------------------
+
+
+class EscalationResponse(BaseModel):
+    """Full escalation_log record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    signal_type: str
+    concept: str | None
+    context_data: dict | None
+    suggested_action: str | None
+    acknowledged: bool
+    acknowledged_at: str | None
+    created_at: str
+
+
+class FlagCreate(BaseModel):
+    """Request to flag a coach response."""
+
+    reason: str = Field(max_length=500)
+
+
+class FlaggedResponseResponse(BaseModel):
+    """Full flagged_responses record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    coach_message_id: int
+    reason: str
+    created_at: str
+
+
+# ---------------------------------------------------------------------------
+# Coach Chat
+# ---------------------------------------------------------------------------
+
+
 class ChatMessageCreate(BaseModel):
     """Request to send a message to the coach."""
 
