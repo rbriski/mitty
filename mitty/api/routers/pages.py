@@ -50,6 +50,14 @@ async def mastery_dashboard(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("mastery_dashboard.html", {"request": request})
 
 
+@router.get("/blocks/{block_id}/coach", response_class=HTMLResponse)
+async def coach_chat(request: Request, block_id: int) -> HTMLResponse:
+    """Render the coach chat page for a study block."""
+    return templates.TemplateResponse(
+        "coach_chat.html", {"request": request, "block_id": block_id}
+    )
+
+
 @router.get("/class/{course_id}", response_class=HTMLResponse)
 async def class_detail(request: Request, course_id: int) -> HTMLResponse:
     """Render the class detail page for a specific course."""
