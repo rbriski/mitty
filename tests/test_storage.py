@@ -1318,7 +1318,9 @@ class TestStoreAll:
         ):
             await store_all(client, {"modules": modules_data})
 
-        mock_mod_items.assert_awaited_once_with(client, items, 1, "Unit 1")
+        mock_mod_items.assert_awaited_once_with(
+            client, items, 1, "Unit 1", page_content={}
+        )
 
     async def test_phase2_pages_and_files_stored_per_course(self) -> None:
         """Pages and files are upserted per-course."""
@@ -1846,6 +1848,70 @@ class TestUpsertModuleItemsAsResources:
             await upsert_module_items_as_resources(
                 client, items, course_id=12345, module_name="Unit 1"
             )
+
+    async def test_page_content_populates_content_text(self) -> None:
+        """Resolved page content is stored as content_text on Page resources."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Intro", "Page", page_url="intro"),
+            _make_module_item(2, 100, "Guide", "Page", page_url="guide"),
+        ]
+        page_content = {
+            1: "Welcome to the course.",
+            2: "Study chapters 1-3.",
+        }
+
+        await upsert_module_items_as_resources(
+            client,
+            items,
+            course_id=12345,
+            module_name="Unit 1",
+            page_content=page_content,
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        content_map = {r["canvas_item_id"]: r.get("content_text") for r in rows}
+        assert content_map[1] == "Welcome to the course."
+        assert content_map[2] == "Study chapters 1-3."
+
+    async def test_page_content_only_for_matching_items(self) -> None:
+        """Items not in page_content don't get content_text."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Intro", "Page", page_url="intro"),
+            _make_module_item(2, 100, "File", "File"),
+        ]
+        page_content = {1: "Welcome text."}
+
+        await upsert_module_items_as_resources(
+            client,
+            items,
+            course_id=12345,
+            module_name="Unit 1",
+            page_content=page_content,
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert len(rows) == 2
+        page_row = next(r for r in rows if r["canvas_item_id"] == 1)
+        file_row = next(r for r in rows if r["canvas_item_id"] == 2)
+        assert page_row["content_text"] == "Welcome text."
+        assert "content_text" not in file_row
+
+    async def test_no_page_content_omits_content_text(self) -> None:
+        """Without page_content, no content_text key is added."""
+        client = _mock_client()
+        items = [
+            _make_module_item(1, 100, "Page", "Page", page_url="p"),
+        ]
+
+        await upsert_module_items_as_resources(
+            client, items, course_id=12345, module_name="Unit 1"
+        )
+
+        rows = client.table.return_value.upsert.call_args[0][0]
+        assert "content_text" not in rows[0]
 
 
 # ------------------------------------------------------------------ #

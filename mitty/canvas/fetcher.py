@@ -68,18 +68,30 @@ async def fetch_assignments(
     Calls ``GET /api/v1/courses/:id/assignments?include[]=submission&per_page=100``
     and parses each item into an :class:`~mitty.models.Assignment`.
 
+    The ``description`` HTML body is included in the response and stripped
+    to plain text via :func:`strip_html`.
+
     Args:
         client: An authenticated Canvas API client.
         course_id: The Canvas course ID.
 
     Returns:
-        A list of validated ``Assignment`` model instances.
+        A list of validated ``Assignment`` model instances with plain-text
+        descriptions.
     """
     raw = await client.get_paginated(
         f"/api/v1/courses/{course_id}/assignments",
         {"include[]": "submission", "per_page": "100"},
     )
-    return [Assignment.model_validate(item) for item in raw]
+    assignments: list[Assignment] = []
+    for item in raw:
+        assignment = Assignment.model_validate(item)
+        if assignment.description:
+            assignment = assignment.model_copy(
+                update={"description": strip_html(assignment.description)}
+            )
+        assignments.append(assignment)
+    return assignments
 
 
 async def fetch_enrollments(client: CanvasClient) -> list[Enrollment]:
@@ -170,6 +182,63 @@ async def fetch_module_items(
         {"per_page": "100"},
     )
     return [ModuleItem.model_validate(item) for item in raw]
+
+
+async def resolve_module_item_pages(
+    client: CanvasClient,
+    course_id: int,
+    module_items: list[ModuleItem],
+) -> dict[int, str]:
+    """Fetch page bodies for module items of type ``Page``.
+
+    For each module item with ``type="Page"`` and a non-empty ``page_url``,
+    fetches the page body via the Canvas Pages API and strips the HTML to
+    plain text.
+
+    Failures on individual pages are logged as warnings and skipped so the
+    pipeline continues.  A small delay between requests avoids hammering
+    the Canvas API.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID the module items belong to.
+        module_items: List of module items to inspect.
+
+    Returns:
+        Mapping of ``module_item.id`` to plain-text page body for items
+        that were successfully resolved.
+    """
+    page_items = [
+        item for item in module_items if item.type == "Page" and item.page_url
+    ]
+    if not page_items:
+        return {}
+
+    result: dict[int, str] = {}
+    for item in page_items:
+        try:
+            response = await client.get(
+                f"/api/v1/courses/{course_id}/pages/{item.page_url}",
+            )
+            data = response.json()
+            body = data.get("body")
+            if body:
+                result[item.id] = strip_html(body)
+            else:
+                logger.debug(
+                    "Page %r for module item %d has no body, skipping",
+                    item.page_url,
+                    item.id,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to resolve page %r for module item %d (course %d): %s",
+                item.page_url,
+                item.id,
+                course_id,
+                exc,
+            )
+    return result
 
 
 def strip_html(html: str) -> str:
@@ -358,8 +427,9 @@ async def fetch_all(
 
         Per-course data (assignments, quizzes, modules, pages, files,
         discussion_topics) is keyed by ``str(course_id)``.  The
-        ``modules`` value contains dicts with ``"modules"`` and
-        ``"module_items"`` sub-keys.
+        ``modules`` value contains dicts with ``"modules"``,
+        ``"module_items"``, and ``"resolved_page_content"`` sub-keys.
+        Assignments include plain-text ``description`` fields.
     """
     courses, enrollments = await asyncio.gather(
         fetch_courses(client),
@@ -415,6 +485,24 @@ async def fetch_all(
                 )
                 all_module_items[mod.id] = items
 
+            # Resolve page bodies for Page-type module items
+            all_items_flat = [
+                item for items_list in all_module_items.values() for item in items_list
+            ]
+            resolved_pages: dict[int, str] = {}
+            if all_items_flat:
+                try:
+                    resolved_pages = await resolve_module_item_pages(
+                        client, course.id, all_items_flat
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to resolve module item pages for course %d (%s): %s",
+                        course.id,
+                        course.name,
+                        exc,
+                    )
+
             course_pages = await _fetch_or_empty(
                 fetch_pages(client, course.id), "pages", course
             )
@@ -433,6 +521,7 @@ async def fetch_all(
                 "quizzes": course_quizzes,
                 "modules": course_modules,
                 "module_items": all_module_items,
+                "resolved_page_content": resolved_pages,
                 "pages": course_pages,
                 "files": course_files,
                 "discussion_topics": course_discussions,
@@ -458,6 +547,7 @@ async def fetch_all(
             modules[cid] = {
                 "modules": result["modules"],
                 "module_items": result["module_items"],
+                "resolved_page_content": result["resolved_page_content"],
             }
             pages[cid] = result["pages"]
             files[cid] = result["files"]

@@ -53,6 +53,9 @@ class Assignment(BaseModel):
     When fetched with ``include[]=submission``, the API nests the student's
     submission inside the assignment object. The ``submission`` field is null
     when no submission data is available.
+
+    The ``description`` field contains the assignment's body text (HTML stripped
+    to plain text during fetch).
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -64,6 +67,7 @@ class Assignment(BaseModel):
     points_possible: float | None = None
     submission: Submission | None = None
     html_url: str = ""
+    description: str | None = None
 
 
 class Enrollment(BaseModel):
