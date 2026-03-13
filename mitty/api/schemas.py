@@ -720,8 +720,8 @@ class EscalationResponse(BaseModel):
     context_data: dict | None
     suggested_action: str | None
     acknowledged: bool
-    acknowledged_at: str | None
-    created_at: str
+    acknowledged_at: datetime | None
+    created_at: datetime
 
 
 class FlagCreate(BaseModel):
@@ -738,7 +738,7 @@ class FlaggedResponseResponse(BaseModel):
     id: int
     coach_message_id: int
     reason: str
-    created_at: str
+    created_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -762,4 +762,4 @@ class CoachMessageResponse(BaseModel):
     role: str  # 'student' | 'coach'
     content: str
     sources_cited: list[dict] | None = None
-    created_at: str
+    created_at: datetime

@@ -382,6 +382,9 @@
               _flagged: false,
             }));
             this.$nextTick(() => this.scrollToBottom());
+          } else {
+            console.warn('Failed to load chat history:', messagesResp.status, messagesResp.statusText);
+            this.errorMessage = 'Could not load chat history. You can still send new messages.';
           }
         } catch (err) {
           this.errorMessage = 'Failed to load coach chat: ' + err.message;

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from mitty.api.auth import get_current_user
 from mitty.api.dependencies import get_user_client
@@ -28,10 +28,14 @@ async def get_ai_usage(
     end_date: str | None = Query(default=None),  # noqa: B008
 ) -> AICostSummaryResponse:
     """Return aggregated AI usage cost summary for the current user."""
+    user_id = current_user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid user session")
+
     query = (
         client.table("ai_audit_log")
         .select("call_type,input_tokens,output_tokens,cost_usd")
-        .eq("user_id", current_user["user_id"])
+        .eq("user_id", user_id)
     )
 
     if start_date is not None:

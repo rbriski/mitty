@@ -325,11 +325,14 @@ async def coach_chat(
         mastery_level = await _get_mastery_level(client, user_id, course_id, topic)
 
     # The coach template already wraps {student_message} in <user_input>
-    # tags, so we substitute the raw message text (no double-wrapping).
+    # tags, so we strip any embedded tags from the raw message to prevent
+    # early-close injection (DEC-007), then substitute.
+    from mitty.ai.prompts import _strip_xml_tags
+
     user_prompt = prompt_config.user_template
     user_prompt = user_prompt.replace("{topic}", topic)
     user_prompt = user_prompt.replace("{mastery_level}", str(mastery_level))
-    user_prompt = user_prompt.replace("{student_message}", message)
+    user_prompt = user_prompt.replace("{student_message}", _strip_xml_tags(message))
     user_prompt = user_prompt.replace("{resource_chunks}", chunks_text)
     user_prompt = user_prompt.replace("{conversation_history}", conversation_history)
 

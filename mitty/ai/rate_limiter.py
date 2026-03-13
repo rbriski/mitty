@@ -6,6 +6,7 @@ requests-per-minute and tokens-per-minute limits on a per-user basis.
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 from mitty.ai.errors import RateLimitError
@@ -20,6 +21,9 @@ class RateLimiter:
     Tracks per-user request counts and token usage over a rolling
     60-second window.  Raises ``RateLimitError`` when a user exceeds
     either the requests-per-minute or tokens-per-minute limit.
+
+    Uses per-user asyncio locks to prevent TOCTOU races between
+    check_rate_limit and record_usage.
 
     Args:
         requests_per_minute: Maximum requests allowed per user per minute.
@@ -38,6 +42,14 @@ class RateLimiter:
         self._request_log: dict[str, list[float]] = {}
         # user_id -> list of (timestamp, token_count) for token tracking
         self._token_log: dict[str, list[tuple[float, int]]] = {}
+        # Per-user locks to serialize check + record
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, user_id: str) -> asyncio.Lock:
+        """Return (and lazily create) the per-user lock."""
+        if user_id not in self._locks:
+            self._locks[user_id] = asyncio.Lock()
+        return self._locks[user_id]
 
     def _prune_old_entries(self, user_id: str, now: float) -> None:
         """Remove entries older than the sliding window."""
@@ -56,41 +68,48 @@ class RateLimiter:
     async def check_rate_limit(self, user_id: str) -> None:
         """Check whether *user_id* is within rate limits.
 
+        Acquires the per-user lock to prevent races with concurrent requests.
+
         Raises:
             RateLimitError: If either RPM or TPM limit is exceeded.
         """
-        now = time.monotonic()
-        self._prune_old_entries(user_id, now)
+        async with self._get_lock(user_id):
+            now = time.monotonic()
+            self._prune_old_entries(user_id, now)
 
-        # Check requests per minute
-        request_count = len(self._request_log.get(user_id, []))
-        if request_count >= self._rpm:
-            raise RateLimitError(
-                f"Rate limit exceeded: {request_count}/{self._rpm} requests per minute"
-            )
+            # Check requests per minute
+            request_count = len(self._request_log.get(user_id, []))
+            if request_count >= self._rpm:
+                raise RateLimitError(
+                    f"Rate limit exceeded: {request_count}/{self._rpm}"
+                    " requests per minute"
+                )
 
-        # Check tokens per minute
-        token_entries = self._token_log.get(user_id, [])
-        token_total = sum(count for _, count in token_entries)
-        if token_total >= self._tpm:
-            raise RateLimitError(
-                f"Rate limit exceeded: {token_total}/{self._tpm} tokens per minute"
-            )
+            # Check tokens per minute
+            token_entries = self._token_log.get(user_id, [])
+            token_total = sum(count for _, count in token_entries)
+            if token_total >= self._tpm:
+                raise RateLimitError(
+                    f"Rate limit exceeded: {token_total}/{self._tpm} tokens per minute"
+                )
 
     async def record_usage(self, user_id: str, tokens: int) -> None:
         """Record a completed request and its token usage.
+
+        Acquires the per-user lock to prevent races with concurrent checks.
 
         Args:
             user_id: The user making the request.
             tokens: Total tokens consumed (input + output).
         """
-        now = time.monotonic()
-        self._prune_old_entries(user_id, now)
+        async with self._get_lock(user_id):
+            now = time.monotonic()
+            self._prune_old_entries(user_id, now)
 
-        if user_id not in self._request_log:
-            self._request_log[user_id] = []
-        self._request_log[user_id].append(now)
+            if user_id not in self._request_log:
+                self._request_log[user_id] = []
+            self._request_log[user_id].append(now)
 
-        if user_id not in self._token_log:
-            self._token_log[user_id] = []
-        self._token_log[user_id].append((now, tokens))
+            if user_id not in self._token_log:
+                self._token_log[user_id] = []
+            self._token_log[user_id].append((now, tokens))

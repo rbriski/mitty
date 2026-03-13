@@ -293,7 +293,7 @@ async def _is_duplicate(
     if concept is not None:
         query = query.eq("concept", concept)
     else:
-        query = query.is_("concept", "null")
+        query = query.is_("concept", None)
 
     response = await query.execute()
     existing = response.data or []

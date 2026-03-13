@@ -188,7 +188,7 @@ async def get_coach_messages(
             role=row["role"],
             content=row["content"],
             sources_cited=row.get("sources_cited"),
-            created_at=row.get("created_at", ""),
+            created_at=row.get("created_at", datetime.now(UTC).isoformat()),
         )
         for row in rows
     ]

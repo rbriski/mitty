@@ -319,10 +319,16 @@ async def _evaluate_with_llm(
     # KeyError/ValueError when user-provided text (student answers,
     # LLM-generated questions) contains curly braces — e.g., math
     # notation like "f{x}" or set notation "{1, 2, 3}".
+    #
+    # The template already wraps {student} in <user_input> tags, so we
+    # strip any embedded tags from the raw student text to prevent
+    # early-close injection (DEC-007).
+    from mitty.ai.prompts import _strip_xml_tags
+
     user_prompt = (
         template.replace("{question}", practice_item.question_text)
         .replace("{correct}", practice_item.correct_answer or "(no reference answer)")
-        .replace("{student}", student_answer)
+        .replace("{student}", _strip_xml_tags(student_answer))
         .replace("{concept}", practice_item.concept)
         .replace("{explanation}", practice_item.explanation or "(none provided)")
     )
