@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS ai_audit_log (
     user_id     uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     call_type   text NOT NULL,
     model       text NOT NULL,
-    prompt_version int NOT NULL,
+    prompt_version text NOT NULL DEFAULT '',
     input_tokens   int NOT NULL,
     output_tokens  int NOT NULL,
     cost_usd    numeric(10,8) NOT NULL,
@@ -91,6 +91,14 @@ CREATE POLICY "Users can read own escalation log"
     ON escalation_log FOR SELECT
     USING (auth.uid() = user_id);
 
+CREATE POLICY "Authenticated users can insert own escalation log"
+    ON escalation_log FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own escalation log"
+    ON escalation_log FOR UPDATE
+    USING (auth.uid() = user_id);
+
 -- =========================================================================
 -- 4. flagged_responses
 -- =========================================================================
@@ -113,10 +121,10 @@ CREATE INDEX IF NOT EXISTS ix_flagged_responses_reviewed_created
 
 ALTER TABLE flagged_responses ENABLE ROW LEVEL SECURITY;
 
--- Admin-only reads (Phase 7); block all SELECT for now
-CREATE POLICY "No direct reads on flagged responses"
+-- Users can read own flagged responses (needed for INSERT RETURNING)
+CREATE POLICY "Users can read own flagged responses"
     ON flagged_responses FOR SELECT
-    USING (false);
+    USING (auth.uid() = user_id);
 
 CREATE POLICY "Authenticated users can insert own flagged responses"
     ON flagged_responses FOR INSERT

@@ -550,7 +550,9 @@ ai_audit_log = sa.Table(
     sa.Column("user_id", sa.Uuid, nullable=False),
     sa.Column("call_type", sa.String, nullable=False),
     sa.Column("model", sa.String, nullable=False),
-    sa.Column("prompt_version", sa.Integer, nullable=False),
+    sa.Column(
+        "prompt_version", sa.String, nullable=False, server_default=sa.text("''")
+    ),
     sa.Column("input_tokens", sa.Integer, nullable=False),
     sa.Column("output_tokens", sa.Integer, nullable=False),
     sa.Column("cost_usd", sa.Numeric(10, 8), nullable=False),
