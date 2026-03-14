@@ -15,6 +15,7 @@ from mitty.canvas.extract import (
     extract_text,
     extract_text_from_docx,
     extract_text_from_pdf,
+    pdf_pages_to_images,
     validate_canvas_url,
 )
 
@@ -267,3 +268,85 @@ class TestDownloadFileContent:
     async def test_max_file_size_constant(self) -> None:
         """MAX_FILE_SIZE is 10 MB."""
         assert MAX_FILE_SIZE == 10 * 1024 * 1024
+
+
+# ---------------------------------------------------------------------------
+# Helpers: multi-page PDF builder
+# ---------------------------------------------------------------------------
+
+
+def _make_pdf_pages(num_pages: int, text_prefix: str = "Page") -> bytes:
+    """Create a PDF with *num_pages* pages, each containing text."""
+    import pymupdf
+
+    doc = pymupdf.open()
+    for i in range(num_pages):
+        page = doc.new_page()
+        page.insert_text((72, 72), f"{text_prefix} {i + 1}")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+    return pdf_bytes
+
+
+# ---------------------------------------------------------------------------
+# PDF-to-images extraction
+# ---------------------------------------------------------------------------
+
+
+class TestPdfPagesToImages:
+    """pdf_pages_to_images converts PDF pages to PNG bytes."""
+
+    def test_single_page(self) -> None:
+        """A single-page PDF produces exactly 1 PNG."""
+        pdf_bytes = _make_pdf("Single page content")
+        result = pdf_pages_to_images(pdf_bytes)
+        assert len(result) == 1
+        # Verify it's a valid PNG (starts with PNG magic bytes)
+        assert result[0][:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_multi_page(self) -> None:
+        """A multi-page PDF returns the correct number of images."""
+        pdf_bytes = _make_pdf_pages(5)
+        result = pdf_pages_to_images(pdf_bytes)
+        assert len(result) == 5
+        for img in result:
+            assert img[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_max_pages(self) -> None:
+        """A 15-page PDF with max_pages=10 returns only 10 images."""
+        pdf_bytes = _make_pdf_pages(15)
+        result = pdf_pages_to_images(pdf_bytes, max_pages=10)
+        assert len(result) == 10
+
+    def test_corrupted(self) -> None:
+        """Invalid bytes raise ValueError."""
+        with pytest.raises(ValueError, match="(?i)corrupt|cannot|open|invalid"):
+            pdf_pages_to_images(b"this is not a pdf at all")
+
+    def test_empty_pdf(self) -> None:
+        """A 0-page PDF returns an empty list."""
+        # Minimal valid PDF structure with zero pages (pymupdf cannot
+        # serialize a 0-page document, so we build raw bytes).
+        empty_pdf = (
+            b"%PDF-1.0\n"
+            b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj "
+            b"2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\n"
+            b"xref\n0 3\n"
+            b"0000000000 65535 f \n"
+            b"0000000009 00000 n \n"
+            b"0000000058 00000 n \n"
+            b"trailer<</Size 3/Root 1 0 R>>\n"
+            b"startxref\n109\n%%EOF"
+        )
+        result = pdf_pages_to_images(empty_pdf)
+        assert result == []
+
+    def test_dpi_parameter(self) -> None:
+        """Higher DPI produces larger images than lower DPI."""
+        pdf_bytes = _make_pdf("DPI test content")
+        low_dpi = pdf_pages_to_images(pdf_bytes, dpi=72)
+        high_dpi = pdf_pages_to_images(pdf_bytes, dpi=300)
+        assert len(low_dpi) == 1
+        assert len(high_dpi) == 1
+        # Higher DPI should produce larger image data
+        assert len(high_dpi[0]) > len(low_dpi[0])

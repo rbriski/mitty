@@ -121,6 +121,44 @@ async def download_file_content(
     return content
 
 
+def pdf_pages_to_images(
+    pdf_bytes: bytes,
+    *,
+    max_pages: int = 10,
+    dpi: int = 200,
+) -> list[bytes]:
+    """Convert PDF pages to PNG images.
+
+    Args:
+        pdf_bytes: Raw PDF file content.
+        max_pages: Maximum number of pages to convert (default 10).
+        dpi: Resolution for rendering (default 200).
+
+    Returns:
+        List of PNG bytes, one per page (up to max_pages).
+
+    Raises:
+        ValueError: If the PDF is corrupted or cannot be opened.
+    """
+    import pymupdf
+
+    try:
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    except RuntimeError as exc:
+        raise ValueError(f"Cannot open PDF: {exc}") from exc
+
+    try:
+        pages_to_render = min(len(doc), max_pages)
+        images: list[bytes] = []
+        for i in range(pages_to_render):
+            page = doc[i]
+            pixmap = page.get_pixmap(dpi=dpi)
+            images.append(pixmap.tobytes("png"))
+        return images
+    finally:
+        doc.close()
+
+
 def extract_text_from_pdf(content: bytes) -> str:
     """Extract plain text from PDF bytes using pymupdf.
 
