@@ -922,6 +922,228 @@ class TestPracticeResultsTable:
 
 
 # ---------------------------------------------------------------------------
+# homework_analyses
+# ---------------------------------------------------------------------------
+
+
+class TestHomeworkAnalysesTable:
+    """Verify the ``homework_analyses`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "homework_analyses" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("homework_analyses").columns) == 8
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("homework_analyses").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("homework_analyses").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("homework_analyses")
+        assert isinstance(t.c.id.type, sa.BigInteger)
+        assert isinstance(t.c.user_id.type, sa.Uuid)
+        assert isinstance(t.c.assignment_id.type, sa.Integer)
+        assert isinstance(t.c.course_id.type, sa.Integer)
+        assert isinstance(t.c.page_number.type, sa.Integer)
+        assert isinstance(t.c.analysis_json.type, sa.JSON)
+        assert isinstance(t.c.image_tokens.type, sa.Integer)
+        assert isinstance(t.c.analyzed_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("homework_analyses")
+        assert t.c.id.nullable is False
+        assert t.c.user_id.nullable is False
+        assert t.c.assignment_id.nullable is False
+        assert t.c.course_id.nullable is False
+        assert t.c.page_number.nullable is False
+        assert t.c.analysis_json.nullable is False
+        assert t.c.image_tokens.nullable is True
+        assert t.c.analyzed_at.nullable is False
+
+    def test_foreign_key_to_assignments(self) -> None:
+        fks = _table("homework_analyses").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "assignments.id" in fk_targets
+
+    def test_foreign_key_to_courses(self) -> None:
+        fks = _table("homework_analyses").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "courses.id" in fk_targets
+
+    def test_user_assignment_index(self) -> None:
+        idx_cols = _index_column_sets(_table("homework_analyses"))
+        assert ("user_id", "assignment_id") in idx_cols
+
+    def test_unique_constraint(self) -> None:
+        t = _table("homework_analyses")
+        unique_constraints = [
+            c for c in t.constraints if isinstance(c, sa.UniqueConstraint)
+        ]
+        col_sets = {
+            frozenset(col.name for col in uc.columns) for uc in unique_constraints
+        }
+        assert frozenset({"user_id", "assignment_id", "page_number"}) in col_sets
+
+
+# ---------------------------------------------------------------------------
+# test_prep_sessions
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepSessionsTable:
+    """Verify the ``test_prep_sessions`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "test_prep_sessions" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("test_prep_sessions").columns) == 11
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("test_prep_sessions").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_uuid_primary_key(self) -> None:
+        col = _table("test_prep_sessions").c.id
+        assert isinstance(col.type, sa.Uuid)
+
+    def test_columns_and_types(self) -> None:
+        t = _table("test_prep_sessions")
+        assert isinstance(t.c.id.type, sa.Uuid)
+        assert isinstance(t.c.user_id.type, sa.Uuid)
+        assert isinstance(t.c.course_id.type, sa.Integer)
+        assert isinstance(t.c.assessment_id.type, sa.Integer)
+        assert isinstance(t.c.state_json.type, sa.JSON)
+        assert isinstance(t.c.started_at.type, sa.DateTime)
+        assert isinstance(t.c.completed_at.type, sa.DateTime)
+        assert isinstance(t.c.total_problems.type, sa.Integer)
+        assert isinstance(t.c.total_correct.type, sa.Integer)
+        assert isinstance(t.c.duration_seconds.type, sa.Integer)
+        assert isinstance(t.c.phase_reached.type, sa.String)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("test_prep_sessions")
+        assert t.c.id.nullable is False
+        assert t.c.user_id.nullable is False
+        assert t.c.course_id.nullable is False
+        assert t.c.assessment_id.nullable is True
+        assert t.c.state_json.nullable is False
+        assert t.c.started_at.nullable is False
+        assert t.c.completed_at.nullable is True
+        assert t.c.total_problems.nullable is False
+        assert t.c.total_correct.nullable is False
+        assert t.c.duration_seconds.nullable is True
+        assert t.c.phase_reached.nullable is True
+
+    def test_foreign_key_to_courses(self) -> None:
+        fks = _table("test_prep_sessions").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "courses.id" in fk_targets
+
+    def test_foreign_key_to_assessments(self) -> None:
+        fks = _table("test_prep_sessions").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "assessments.id" in fk_targets
+
+    def test_user_started_index(self) -> None:
+        idx_cols = _index_column_sets(_table("test_prep_sessions"))
+        assert ("user_id", "started_at") in idx_cols
+
+    def test_course_started_index(self) -> None:
+        idx_cols = _index_column_sets(_table("test_prep_sessions"))
+        assert ("course_id", "started_at") in idx_cols
+
+    def test_server_defaults(self) -> None:
+        t = _table("test_prep_sessions")
+        assert t.c.total_problems.server_default is not None
+        assert t.c.total_correct.server_default is not None
+
+
+# ---------------------------------------------------------------------------
+# test_prep_results
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepResultsTable:
+    """Verify the ``test_prep_results`` table structure."""
+
+    def test_table_exists(self) -> None:
+        assert "test_prep_results" in metadata.tables
+
+    def test_column_count(self) -> None:
+        assert len(_table("test_prep_results").columns) == 14
+
+    def test_primary_key(self) -> None:
+        pk_cols = [c.name for c in _table("test_prep_results").primary_key]
+        assert pk_cols == ["id"]
+
+    def test_id_autoincrement(self) -> None:
+        col = _table("test_prep_results").c.id
+        assert col.autoincrement in (True, "auto")
+
+    def test_columns_and_types(self) -> None:
+        t = _table("test_prep_results")
+        assert isinstance(t.c.id.type, sa.BigInteger)
+        assert isinstance(t.c.user_id.type, sa.Uuid)
+        assert isinstance(t.c.session_id.type, sa.Uuid)
+        assert isinstance(t.c.concept.type, sa.String)
+        assert isinstance(t.c.problem_json.type, sa.JSON)
+        assert isinstance(t.c.student_answer.type, sa.String)
+        assert isinstance(t.c.is_correct.type, sa.Boolean)
+        assert isinstance(t.c.score.type, sa.Float)
+        assert isinstance(t.c.feedback.type, sa.Text)
+        assert isinstance(t.c.hints_used.type, sa.Integer)
+        assert isinstance(t.c.worked_example_shown.type, sa.Boolean)
+        assert isinstance(t.c.time_spent_seconds.type, sa.Integer)
+        assert isinstance(t.c.difficulty.type, sa.Float)
+        assert isinstance(t.c.created_at.type, sa.DateTime)
+
+    def test_nullable_flags(self) -> None:
+        t = _table("test_prep_results")
+        assert t.c.id.nullable is False
+        assert t.c.user_id.nullable is False
+        assert t.c.session_id.nullable is False
+        assert t.c.concept.nullable is False
+        assert t.c.problem_json.nullable is False
+        assert t.c.student_answer.nullable is True
+        assert t.c.is_correct.nullable is True
+        assert t.c.score.nullable is True
+        assert t.c.feedback.nullable is True
+        assert t.c.hints_used.nullable is False
+        assert t.c.worked_example_shown.nullable is False
+        assert t.c.time_spent_seconds.nullable is True
+        assert t.c.difficulty.nullable is False
+        assert t.c.created_at.nullable is False
+
+    def test_foreign_key_to_test_prep_sessions(self) -> None:
+        fks = _table("test_prep_results").foreign_keys
+        fk_targets = {fk.target_fullname for fk in fks}
+        assert "test_prep_sessions.id" in fk_targets
+
+    def test_session_created_index(self) -> None:
+        idx_cols = _index_column_sets(_table("test_prep_results"))
+        assert ("session_id", "created_at") in idx_cols
+
+    def test_user_concept_correct_index(self) -> None:
+        idx_cols = _index_column_sets(_table("test_prep_results"))
+        assert ("user_id", "concept", "is_correct") in idx_cols
+
+    def test_user_created_index(self) -> None:
+        idx_cols = _index_column_sets(_table("test_prep_results"))
+        assert ("user_id", "created_at") in idx_cols
+
+    def test_server_defaults(self) -> None:
+        t = _table("test_prep_results")
+        assert t.c.hints_used.server_default is not None
+        assert t.c.worked_example_shown.server_default is not None
+
+
+# ---------------------------------------------------------------------------
 # Cross-table checks
 # ---------------------------------------------------------------------------
 
@@ -930,7 +1152,7 @@ class TestMetadata:
     """Cross-cutting checks on the full metadata."""
 
     def test_table_count(self) -> None:
-        assert len(metadata.tables) == 22
+        assert len(metadata.tables) == 25
 
     def test_all_tables_present(self) -> None:
         expected = {
@@ -956,6 +1178,9 @@ class TestMetadata:
             "study_block_guides",
             "block_artifacts",
             "guide_content_cache",
+            "homework_analyses",
+            "test_prep_sessions",
+            "test_prep_results",
         }
         assert set(metadata.tables.keys()) == expected
 

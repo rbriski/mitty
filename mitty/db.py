@@ -1,6 +1,6 @@
 """SQLAlchemy Core table definitions for the Mitty database schema.
 
-Defines 22 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
+Defines 25 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
 
 - **courses**: Canvas LMS courses with optional term info.
 - **assignments**: Assignments belonging to a course (FK -> courses).
@@ -24,6 +24,10 @@ Defines 22 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
 - **study_block_guides**: Compiled executable guides (FK -> study_blocks).
 - **block_artifacts**: Student artifacts during guided study (FK -> study_blocks).
 - **guide_content_cache**: Cached guide content keyed by concept + source hash.
+- **homework_analyses**: Per-page homework image analysis (FKs -> assignments, courses).
+- **test_prep_sessions**: Test prep session state (FKs -> courses, assessments).
+- **test_prep_results**: Individual problem results within a session
+  (FK -> test_prep_sessions).
 
 All nullable columns are explicitly marked per the project schema specification.
 """
@@ -754,4 +758,144 @@ sa.Index(
     guide_content_cache.c.concept,
     guide_content_cache.c.source_hash,
     unique=True,
+)
+
+# ---------------------------------------------------------------------------
+# homework_analyses
+# ---------------------------------------------------------------------------
+
+homework_analyses = sa.Table(
+    "homework_analyses",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("user_id", sa.Uuid, nullable=False),
+    sa.Column(
+        "assignment_id",
+        sa.Integer,
+        sa.ForeignKey("assignments.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "course_id",
+        sa.Integer,
+        sa.ForeignKey("courses.id"),
+        nullable=False,
+    ),
+    sa.Column("page_number", sa.Integer, nullable=False),
+    sa.Column("analysis_json", sa.JSON, nullable=False),
+    sa.Column("image_tokens", sa.Integer, nullable=True),
+    sa.Column("analyzed_at", sa.DateTime, nullable=False),
+    sa.UniqueConstraint("user_id", "assignment_id", "page_number"),
+)
+
+sa.Index(
+    "ix_homework_analyses_user_assignment",
+    homework_analyses.c.user_id,
+    homework_analyses.c.assignment_id,
+)
+
+# ---------------------------------------------------------------------------
+# test_prep_sessions  (DEC-006: UUID PK)
+# ---------------------------------------------------------------------------
+
+test_prep_sessions = sa.Table(
+    "test_prep_sessions",
+    metadata,
+    sa.Column("id", sa.Uuid, primary_key=True),
+    sa.Column("user_id", sa.Uuid, nullable=False),
+    sa.Column(
+        "course_id",
+        sa.Integer,
+        sa.ForeignKey("courses.id"),
+        nullable=False,
+    ),
+    sa.Column(
+        "assessment_id",
+        sa.Integer,
+        sa.ForeignKey("assessments.id"),
+        nullable=True,
+    ),
+    sa.Column("state_json", sa.JSON, nullable=False),
+    sa.Column("started_at", sa.DateTime, nullable=False),
+    sa.Column("completed_at", sa.DateTime, nullable=True),
+    sa.Column(
+        "total_problems",
+        sa.Integer,
+        nullable=False,
+        server_default=sa.text("0"),
+    ),
+    sa.Column(
+        "total_correct",
+        sa.Integer,
+        nullable=False,
+        server_default=sa.text("0"),
+    ),
+    sa.Column("duration_seconds", sa.Integer, nullable=True),
+    sa.Column("phase_reached", sa.String, nullable=True),
+)
+
+sa.Index(
+    "ix_test_prep_sessions_user_started",
+    test_prep_sessions.c.user_id,
+    test_prep_sessions.c.started_at.desc(),
+)
+sa.Index(
+    "ix_test_prep_sessions_course_started",
+    test_prep_sessions.c.course_id,
+    test_prep_sessions.c.started_at.desc(),
+)
+
+# ---------------------------------------------------------------------------
+# test_prep_results  (DEC-008: denormalized user_id)
+# ---------------------------------------------------------------------------
+
+test_prep_results = sa.Table(
+    "test_prep_results",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("user_id", sa.Uuid, nullable=False),
+    sa.Column(
+        "session_id",
+        sa.Uuid,
+        sa.ForeignKey("test_prep_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column("concept", sa.String, nullable=False),
+    sa.Column("problem_json", sa.JSON, nullable=False),
+    sa.Column("student_answer", sa.String, nullable=True),
+    sa.Column("is_correct", sa.Boolean, nullable=True),
+    sa.Column("score", sa.Float, nullable=True),
+    sa.Column("feedback", sa.Text, nullable=True),
+    sa.Column(
+        "hints_used",
+        sa.Integer,
+        nullable=False,
+        server_default=sa.text("0"),
+    ),
+    sa.Column(
+        "worked_example_shown",
+        sa.Boolean,
+        nullable=False,
+        server_default=sa.text("false"),
+    ),
+    sa.Column("time_spent_seconds", sa.Integer, nullable=True),
+    sa.Column("difficulty", sa.Float, nullable=False),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
+sa.Index(
+    "ix_test_prep_results_session_created",
+    test_prep_results.c.session_id,
+    test_prep_results.c.created_at,
+)
+sa.Index(
+    "ix_test_prep_results_user_concept_correct",
+    test_prep_results.c.user_id,
+    test_prep_results.c.concept,
+    test_prep_results.c.is_correct,
+)
+sa.Index(
+    "ix_test_prep_results_user_created",
+    test_prep_results.c.user_id,
+    test_prep_results.c.created_at.desc(),
 )
