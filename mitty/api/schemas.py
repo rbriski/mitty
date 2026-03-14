@@ -758,3 +758,47 @@ class CoachMessageResponse(BaseModel):
     content: str
     sources_cited: list[dict] | None = None
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Block Guide + Artifact (Phase 6)
+# ---------------------------------------------------------------------------
+
+
+class BlockGuideResponse(BaseModel):
+    """Full study_block_guides record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    block_id: int
+    concepts_json: list[dict] | None = None
+    source_bundle_json: list[dict] | None = None
+    steps_json: list[dict] | None = None
+    warmup_items_json: list[dict] | None = None
+    exit_items_json: list[dict] | None = None
+    completion_criteria_json: dict | None = None
+    success_criteria_json: list[str] | None = None
+    guide_version: str
+    generated_at: datetime
+
+
+class BlockArtifactCreate(BaseModel):
+    """Create a new block artifact."""
+
+    step_number: int = Field(ge=1)
+    artifact_type: str = Field(max_length=50)
+    content_json: dict
+
+
+class BlockArtifactResponse(BaseModel):
+    """Full block_artifacts record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    block_id: int
+    step_number: int
+    artifact_type: str
+    content_json: dict | None = None
+    created_at: datetime

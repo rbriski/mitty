@@ -1,6 +1,6 @@
 """SQLAlchemy Core table definitions for the Mitty database schema.
 
-Defines 19 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
+Defines 22 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
 
 - **courses**: Canvas LMS courses with optional term info.
 - **assignments**: Assignments belonging to a course (FK -> courses).
@@ -21,6 +21,9 @@ Defines 19 tables using ``sa.Table`` objects on a shared ``MetaData`` instance:
 - **coach_messages**: Student-coach chat history (FKs -> auth.users, study_blocks).
 - **escalation_log**: Detected escalation signals (FK -> auth.users).
 - **flagged_responses**: Flagged coach responses for review (FKs -> coach_messages).
+- **study_block_guides**: Compiled executable guides (FK -> study_blocks).
+- **block_artifacts**: Student artifacts during guided study (FK -> study_blocks).
+- **guide_content_cache**: Cached guide content keyed by concept + source hash.
 
 All nullable columns are explicitly marked per the project schema specification.
 """
@@ -676,4 +679,79 @@ sa.Index(
     "ix_flagged_responses_reviewed_created",
     flagged_responses.c.reviewed,
     flagged_responses.c.created_at.desc(),
+)
+
+# ---------------------------------------------------------------------------
+# study_block_guides  (Phase 6 — executable block guides, DEC-005/DEC-009)
+# ---------------------------------------------------------------------------
+
+study_block_guides = sa.Table(
+    "study_block_guides",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column(
+        "block_id",
+        sa.Integer,
+        sa.ForeignKey("study_blocks.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    ),
+    sa.Column("concepts_json", sa.JSON, nullable=True),
+    sa.Column("source_bundle_json", sa.JSON, nullable=True),
+    sa.Column("steps_json", sa.JSON, nullable=True),
+    sa.Column("warmup_items_json", sa.JSON, nullable=True),
+    sa.Column("exit_items_json", sa.JSON, nullable=True),
+    sa.Column("completion_criteria_json", sa.JSON, nullable=True),
+    sa.Column("success_criteria_json", sa.JSON, nullable=True),
+    sa.Column(
+        "guide_version",
+        sa.String,
+        nullable=False,
+        server_default=sa.text("'1.0'"),
+    ),
+    sa.Column("generated_at", sa.DateTime, nullable=False),
+)
+
+# ---------------------------------------------------------------------------
+# block_artifacts  (Phase 6 — student artifacts during guided study, DEC-009)
+# ---------------------------------------------------------------------------
+
+block_artifacts = sa.Table(
+    "block_artifacts",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column(
+        "block_id",
+        sa.Integer,
+        sa.ForeignKey("study_blocks.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column("step_number", sa.Integer, nullable=False),
+    sa.Column("artifact_type", sa.String, nullable=False),
+    sa.Column("content_json", sa.JSON, nullable=True),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
+sa.Index("ix_block_artifacts_block_id", block_artifacts.c.block_id)
+
+# ---------------------------------------------------------------------------
+# guide_content_cache  (Phase 6 — cached guide content, DEC-002/DEC-009)
+# ---------------------------------------------------------------------------
+
+guide_content_cache = sa.Table(
+    "guide_content_cache",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+    sa.Column("concept", sa.String, nullable=False),
+    sa.Column("source_hash", sa.String, nullable=False),
+    sa.Column("content_type", sa.String, nullable=False),
+    sa.Column("content_json", sa.JSON, nullable=False),
+    sa.Column("created_at", sa.DateTime, nullable=False),
+)
+
+sa.Index(
+    "ix_guide_content_cache_concept_source_hash",
+    guide_content_cache.c.concept,
+    guide_content_cache.c.source_hash,
+    unique=True,
 )

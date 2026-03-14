@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from mitty.canvas.fetcher import (
     fetch_all,
@@ -12,11 +12,13 @@ from mitty.canvas.fetcher import (
     fetch_calendar_events,
     fetch_courses,
     fetch_enrollments,
+    fetch_file_contents,
     fetch_files,
     fetch_module_items,
     fetch_modules,
     fetch_pages,
     fetch_quizzes,
+    resolve_module_item_pages,
     strip_html,
 )
 
@@ -112,7 +114,7 @@ class TestFetchAssignments:
         assert len(result) == 4
         assert all(isinstance(a, Assignment) for a in result)
 
-        # First assignment: has a graded submission
+        # First assignment: has a graded submission + description
         a0 = result[0]
         assert a0.id == 67890
         assert a0.name == "Essay: Rhetorical Analysis"
@@ -127,15 +129,28 @@ class TestFetchAssignments:
         assert a0.submission.late is False
         assert a0.submission.missing is False
 
-        # Second assignment: unsubmitted + missing
+        # Description: HTML stripped to plain text
+        assert a0.description is not None
+        assert "<" not in a0.description  # HTML tags stripped
+        assert "rhetorical analysis" in a0.description
+        assert "Minimum 1000 words" in a0.description
+
+        # Second assignment: unsubmitted + missing, null description
         a1 = result[1]
         assert a1.submission is not None
         assert a1.submission.score is None
         assert a1.submission.missing is True
+        assert a1.description is None
 
-        # Third assignment: null submission
+        # Third assignment: null submission, has description
         a2 = result[2]
         assert a2.submission is None
+        assert a2.description is not None
+        assert "Submit your project proposal" in a2.description
+
+        # Fourth assignment: no description field in JSON
+        a3 = result[3]
+        assert a3.description is None
 
     async def test_empty_response_returns_empty_list(self) -> None:
         client = AsyncMock()
@@ -333,8 +348,10 @@ def _patch_all_fetchers(**overrides):
         "fetch_quizzes": [],
         "fetch_modules": [],
         "fetch_module_items": [],
+        "resolve_module_item_pages": {},
         "fetch_pages": [],
         "fetch_files": [],
+        "fetch_file_contents": {},
         "fetch_discussion_topics": [],
         "fetch_calendar_events": [],
     }
@@ -403,8 +420,10 @@ class TestFetchAll:
             patches["fetch_quizzes"] as mock_quiz,
             patches["fetch_modules"] as mock_mod,
             patches["fetch_module_items"] as mock_mod_items,
+            patches["resolve_module_item_pages"],
             patches["fetch_pages"] as mock_pages,
             patches["fetch_files"] as mock_files,
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"] as mock_disc,
             patches["fetch_calendar_events"] as mock_cal,
         ):
@@ -423,6 +442,7 @@ class TestFetchAll:
         assert result["modules"]["1"]["module_items"][30] == items_1_30
         assert result["pages"]["1"] == pages_1
         assert result["files"]["1"] == files_1
+        assert result["file_contents"]["1"] == {}
         assert result["discussion_topics"]["1"] == discussions_1
         assert result["calendar_events"] == cal_events
         assert mock_assign.call_count == 2
@@ -467,8 +487,10 @@ class TestFetchAll:
             patches["fetch_quizzes"],
             patches["fetch_modules"],
             patches["fetch_module_items"],
+            patches["resolve_module_item_pages"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
@@ -504,8 +526,10 @@ class TestFetchAll:
             patches["fetch_quizzes"],
             patches["fetch_modules"],
             patches["fetch_module_items"],
+            patches["resolve_module_item_pages"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
@@ -519,6 +543,7 @@ class TestFetchAll:
         assert result["modules"] == {}
         assert result["pages"] == {}
         assert result["files"] == {}
+        assert result["file_contents"] == {}
         assert result["discussion_topics"] == {}
         assert result["calendar_events"] == []
         assert result["enrollments"] == [_make_enrollment(100, 1)]
@@ -549,8 +574,10 @@ class TestFetchAll:
             patches["fetch_quizzes"],
             patches["fetch_modules"],
             patches["fetch_module_items"],
+            patches["resolve_module_item_pages"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
@@ -575,8 +602,10 @@ class TestFetchAll:
             patches["fetch_quizzes"],
             patches["fetch_modules"],
             patches["fetch_module_items"],
+            patches["resolve_module_item_pages"],
             patches["fetch_pages"],
             patches["fetch_files"],
+            patches["fetch_file_contents"],
             patches["fetch_discussion_topics"],
             patches["fetch_calendar_events"],
         ):
@@ -592,6 +621,7 @@ class TestFetchAll:
             "modules",
             "pages",
             "files",
+            "file_contents",
             "discussion_topics",
             "calendar_events",
             "errors",
@@ -910,3 +940,408 @@ class TestFetchCalendarEvents:
                 "context_codes[]": "course_12345",
             },
         )
+
+
+class TestResolveModuleItemPages:
+    """resolve_module_item_pages fetches page bodies for Page-type items."""
+
+    async def test_resolves_page_items(self) -> None:
+        """Page-type items with page_url get their bodies fetched and stripped."""
+        items = [
+            ModuleItem(
+                id=101,
+                module_id=10,
+                title="Intro",
+                type="Page",
+                page_url="intro-page",
+            ),
+            ModuleItem(
+                id=102,
+                module_id=10,
+                title="Guide",
+                type="Page",
+                page_url="study-guide",
+            ),
+        ]
+
+        response_1 = MagicMock()
+        response_1.json.return_value = {
+            "body": "<p>Welcome to the <strong>course</strong>.</p>"
+        }
+        response_2 = MagicMock()
+        response_2.json.return_value = {
+            "body": "<h1>Study Guide</h1><p>Review chapters 1-3.</p>"
+        }
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[response_1, response_2])
+
+        result = await resolve_module_item_pages(
+            client, course_id=12345, module_items=items
+        )
+
+        assert len(result) == 2
+        assert 101 in result
+        assert 102 in result
+        assert "Welcome to the" in result[101]
+        assert "course" in result[101]
+        assert "<" not in result[101]  # HTML stripped
+        assert "Study Guide" in result[102]
+        assert "Review chapters 1-3" in result[102]
+
+        # Verify API paths
+        client.get.assert_any_call("/api/v1/courses/12345/pages/intro-page")
+        client.get.assert_any_call("/api/v1/courses/12345/pages/study-guide")
+
+    async def test_skips_non_page_items(self) -> None:
+        """Non-Page items are ignored."""
+        items = [
+            ModuleItem(id=201, module_id=10, title="File", type="File"),
+            ModuleItem(id=202, module_id=10, title="Link", type="ExternalUrl"),
+            ModuleItem(id=203, module_id=10, title="Header", type="SubHeader"),
+        ]
+
+        client = AsyncMock()
+
+        result = await resolve_module_item_pages(
+            client, course_id=12345, module_items=items
+        )
+
+        assert result == {}
+        client.get.assert_not_called()
+
+    async def test_skips_page_without_page_url(self) -> None:
+        """Page items with no page_url are skipped."""
+        items = [
+            ModuleItem(
+                id=301,
+                module_id=10,
+                title="No URL",
+                type="Page",
+                page_url=None,
+            ),
+        ]
+
+        client = AsyncMock()
+
+        result = await resolve_module_item_pages(
+            client, course_id=12345, module_items=items
+        )
+
+        assert result == {}
+        client.get.assert_not_called()
+
+    async def test_skips_page_with_null_body(self) -> None:
+        """Pages with null body are excluded from the result."""
+        items = [
+            ModuleItem(
+                id=401,
+                module_id=10,
+                title="Empty",
+                type="Page",
+                page_url="empty-page",
+            ),
+        ]
+
+        response = MagicMock()
+        response.json.return_value = {"body": None}
+
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=response)
+
+        result = await resolve_module_item_pages(
+            client, course_id=12345, module_items=items
+        )
+
+        assert result == {}
+
+    async def test_graceful_skip_on_api_failure(self) -> None:
+        """API errors on individual pages are logged and skipped."""
+        items = [
+            ModuleItem(
+                id=501,
+                module_id=10,
+                title="Good",
+                type="Page",
+                page_url="good-page",
+            ),
+            ModuleItem(
+                id=502,
+                module_id=10,
+                title="Bad",
+                type="Page",
+                page_url="bad-page",
+            ),
+        ]
+
+        good_response = MagicMock()
+        good_response.json.return_value = {"body": "<p>Good content</p>"}
+
+        client = AsyncMock()
+        client.get = AsyncMock(
+            side_effect=[good_response, RuntimeError("404 Not Found")]
+        )
+
+        result = await resolve_module_item_pages(
+            client, course_id=12345, module_items=items
+        )
+
+        # Only the successful page should be in the result
+        assert len(result) == 1
+        assert 501 in result
+        assert "Good content" in result[501]
+        assert 502 not in result
+
+    async def test_empty_items_returns_empty_dict(self) -> None:
+        """Empty items list returns empty dict without API calls."""
+        client = AsyncMock()
+
+        result = await resolve_module_item_pages(
+            client, course_id=12345, module_items=[]
+        )
+
+        assert result == {}
+        client.get.assert_not_called()
+
+
+class TestFetchAssignmentDescriptions:
+    """fetch_assignments strips HTML from assignment descriptions."""
+
+    async def test_strips_html_description(self) -> None:
+        """HTML descriptions are stripped to plain text."""
+        raw = [
+            {
+                "id": 1,
+                "name": "Essay",
+                "course_id": 100,
+                "description": (
+                    "<p>Write an <em>essay</em> about <strong>rhetoric</strong>.</p>"
+                ),
+            },
+        ]
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_assignments(client, course_id=100)
+
+        assert len(result) == 1
+        assert result[0].description is not None
+        assert "<" not in result[0].description
+        assert "Write an" in result[0].description
+        assert "essay" in result[0].description
+        assert "rhetoric" in result[0].description
+
+    async def test_null_description_preserved(self) -> None:
+        """Null descriptions remain None."""
+        raw = [
+            {
+                "id": 2,
+                "name": "Quiz",
+                "course_id": 100,
+                "description": None,
+            },
+        ]
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_assignments(client, course_id=100)
+
+        assert result[0].description is None
+
+    async def test_missing_description_defaults_to_none(self) -> None:
+        """Assignments without description field default to None."""
+        raw = [
+            {
+                "id": 3,
+                "name": "HW",
+                "course_id": 100,
+            },
+        ]
+        client = AsyncMock()
+        client.get_paginated = AsyncMock(return_value=raw)
+
+        result = await fetch_assignments(client, course_id=100)
+
+        assert result[0].description is None
+
+
+# ------------------------------------------------------------------ #
+#  fetch_file_contents
+# ------------------------------------------------------------------ #
+
+
+class TestFetchFileContents:
+    """fetch_file_contents downloads and extracts text from PDF/DOCX files."""
+
+    async def test_fetch_file_contents_extracts_pdf(self) -> None:
+        """PDF files are downloaded and their text extracted."""
+        file = FileMetadata(
+            id=9001,
+            display_name="study_guide.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9001/download",
+        )
+        client = AsyncMock()
+
+        with (
+            patch(
+                f"{FETCHER_MODULE}.download_file_content",
+                new_callable=AsyncMock,
+                return_value=b"fake-pdf-bytes",
+            ) as mock_download,
+            patch(
+                f"{FETCHER_MODULE}.extract_text",
+                return_value="Extracted PDF text content",
+            ) as mock_extract,
+        ):
+            result = await fetch_file_contents(client, [file])
+
+        mock_download.assert_awaited_once_with(
+            client._http,
+            "https://mitty.instructure.com/files/9001/download",
+        )
+        mock_extract.assert_called_once_with(b"fake-pdf-bytes", "application/pdf")
+        assert result == {9001: "Extracted PDF text content"}
+
+    async def test_fetch_file_contents_skips_unsupported(self) -> None:
+        """Non-PDF/DOCX files are skipped entirely."""
+        txt_file = FileMetadata(
+            id=9002,
+            display_name="notes.txt",
+            content_type="text/plain",
+            url="https://mitty.instructure.com/files/9002/download",
+        )
+        png_file = FileMetadata(
+            id=9003,
+            display_name="diagram.png",
+            content_type="image/png",
+            url="https://mitty.instructure.com/files/9003/download",
+        )
+
+        client = AsyncMock()
+
+        with patch(
+            f"{FETCHER_MODULE}.download_file_content",
+            new_callable=AsyncMock,
+        ) as mock_download:
+            result = await fetch_file_contents(client, [txt_file, png_file])
+
+        mock_download.assert_not_called()
+        assert result == {}
+
+    async def test_fetch_file_contents_handles_download_failure(self) -> None:
+        """Download failure for one file does not stop others."""
+        file_ok = FileMetadata(
+            id=9001,
+            display_name="good.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9001/download",
+        )
+        file_bad = FileMetadata(
+            id=9002,
+            display_name="bad.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9002/download",
+        )
+        client = AsyncMock()
+
+        call_count = {"n": 0}
+
+        async def _download_side_effect(_client, url, **kwargs):
+            call_count["n"] += 1
+            if "9002" in url:
+                raise RuntimeError("Network error")
+            return b"pdf-bytes"
+
+        with (
+            patch(
+                f"{FETCHER_MODULE}.download_file_content",
+                new_callable=AsyncMock,
+                side_effect=_download_side_effect,
+            ),
+            patch(
+                f"{FETCHER_MODULE}.extract_text",
+                return_value="Good PDF text",
+            ),
+        ):
+            result = await fetch_file_contents(client, [file_ok, file_bad])
+
+        # The good file succeeded, the bad one was skipped
+        assert 9001 in result
+        assert 9002 not in result
+        assert result[9001] == "Good PDF text"
+
+    async def test_fetch_file_contents_skips_empty_extraction(self) -> None:
+        """Files that produce empty extracted text are excluded."""
+        file = FileMetadata(
+            id=9001,
+            display_name="empty.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9001/download",
+        )
+        client = AsyncMock()
+
+        with (
+            patch(
+                f"{FETCHER_MODULE}.download_file_content",
+                new_callable=AsyncMock,
+                return_value=b"fake-bytes",
+            ),
+            patch(
+                f"{FETCHER_MODULE}.extract_text",
+                return_value="",
+            ),
+        ):
+            result = await fetch_file_contents(client, [file])
+
+        assert result == {}
+
+    async def test_fetch_file_contents_docx_by_extension(self) -> None:
+        """DOCX files detected by extension are processed."""
+        file = FileMetadata(
+            id=9004,
+            display_name="essay.docx",
+            content_type="application/octet-stream",
+            url="https://mitty.instructure.com/files/9004/download",
+        )
+        client = AsyncMock()
+
+        with (
+            patch(
+                f"{FETCHER_MODULE}.download_file_content",
+                new_callable=AsyncMock,
+                return_value=b"docx-bytes",
+            ) as mock_download,
+            patch(
+                f"{FETCHER_MODULE}.extract_text",
+                return_value="Essay content here",
+            ) as mock_extract,
+        ):
+            result = await fetch_file_contents(client, [file])
+
+        mock_download.assert_awaited_once()
+        # When content_type is generic, should guess from extension
+        expected_ct = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        mock_extract.assert_called_once_with(b"docx-bytes", expected_ct)
+        assert result == {9004: "Essay content here"}
+
+    async def test_fetch_file_contents_download_returns_none(self) -> None:
+        """When download returns None (rejected/oversized), file is skipped."""
+        file = FileMetadata(
+            id=9005,
+            display_name="huge.pdf",
+            content_type="application/pdf",
+            url="https://mitty.instructure.com/files/9005/download",
+        )
+        client = AsyncMock()
+
+        with patch(
+            f"{FETCHER_MODULE}.download_file_content",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await fetch_file_contents(client, [file])
+
+        assert result == {}

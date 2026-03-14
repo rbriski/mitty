@@ -11,13 +11,12 @@ from datetime import (
     date,  # noqa: TCH003 — must be available at runtime for FastAPI/Pydantic
     datetime,
 )
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from supabase import AsyncClient
 
 from mitty.api.auth import get_current_user
-from mitty.api.dependencies import get_user_client
+from mitty.api.dependencies import get_ai_client, get_user_client
 from mitty.api.schemas import (
     ListResponse,
     StudyBlockResponse,
@@ -27,6 +26,10 @@ from mitty.api.schemas import (
     StudyPlanWithBlocksResponse,
 )
 from mitty.planner.generator import PlanGenerationError, generate_plan
+from supabase import AsyncClient
+
+if TYPE_CHECKING:
+    from mitty.ai.client import AIClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,24 +37,27 @@ router = APIRouter(prefix="/study-plans", tags=["study_plans"])
 
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 UserClient = Annotated[AsyncClient, Depends(get_user_client)]
+OptionalAIClient = Annotated["AIClient | None", Depends(get_ai_client)]
 
 
 @router.post("/generate", response_model=StudyPlanWithBlocksResponse, status_code=201)
 async def generate_study_plan(
     current_user: CurrentUser,
     client: UserClient,
+    ai_client: OptionalAIClient,
 ) -> StudyPlanWithBlocksResponse:
     """Trigger study plan generation for today.
 
     - Returns 400 NO_SIGNAL_TODAY if no recent student signal.
     - Returns 409 PLAN_EXISTS if an active/completed plan already exists.
     - Silently replaces draft plans.
+    - When ai_client is available, compiles block guides in parallel.
     """
     user_id = current_user["user_id"]
     plan_date = datetime.now(UTC).date()
 
     try:
-        result = await generate_plan(client, user_id, plan_date)
+        result = await generate_plan(client, user_id, plan_date, ai_client=ai_client)
     except PlanGenerationError as exc:
         if exc.code == "NO_SIGNAL":
             raise HTTPException(

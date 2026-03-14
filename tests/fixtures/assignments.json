@@ -8,6 +8,7 @@
     "submission_types": ["online_text_entry"],
     "grading_type": "points",
     "html_url": "https://mitty.instructure.com/courses/12345/assignments/67890",
+    "description": "<p>Write a <strong>rhetorical analysis</strong> of the assigned text.</p><ul><li>Minimum 1000 words</li><li>MLA format</li></ul>",
     "published": true,
     "submission": {
       "score": 48.0,
@@ -29,6 +30,7 @@
     "submission_types": ["online_quiz"],
     "grading_type": "points",
     "html_url": "https://mitty.instructure.com/courses/12345/assignments/67891",
+    "description": null,
     "published": true,
     "submission": {
       "score": null,
@@ -49,6 +51,7 @@
     "submission_types": ["online_upload"],
     "grading_type": "points",
     "html_url": "https://mitty.instructure.com/courses/12345/assignments/67892",
+    "description": "<p>Submit your project proposal.</p>",
     "published": true,
     "submission": null
   },

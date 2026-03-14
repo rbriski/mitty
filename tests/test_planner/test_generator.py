@@ -6,15 +6,17 @@ and all error/edge-case paths.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, date, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from mitty.planner.generator import (
     PlanGenerationError,
     StudyPlan,
+    _compile_block_guides,
     generate_plan,
 )
 
@@ -137,10 +139,11 @@ def _build_mock_client(
         "courses": courses,
         "study_plans": existing_plans,
         "study_blocks": [],
+        "study_block_guides": [],
     }
 
     def _table(name: str) -> Any:
-        if name in ("study_plans", "study_blocks"):
+        if name in ("study_plans", "study_blocks", "study_block_guides"):
             # For writes, return insert chain; for reads (select), return query.
             # We use a hybrid object.
             return _WritableTable(
@@ -168,6 +171,9 @@ class _WritableTable:
         return _QueryChain(self._read_data)
 
     def insert(self, rows: Any, **_kwargs: Any) -> _InsertChain:
+        return self._insert_chain.insert(rows)
+
+    def upsert(self, rows: Any, **_kwargs: Any) -> _InsertChain:
         return self._insert_chain.insert(rows)
 
     def delete(self, **_kwargs: Any) -> _QueryChain:
@@ -609,3 +615,157 @@ async def test_mastery_gaps_missing_confidence() -> None:
     mg, cg = gaps[1]
     assert abs(mg - 0.6) < 0.01
     assert cg == 0.0  # no confidence data
+
+
+# ---------------------------------------------------------------------------
+# Tests — guide compilation integration (US-009)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_no_ai_client_skips_guides() -> None:
+    """When ai_client is None, guide compilation is skipped entirely."""
+    client = _build_mock_client()
+    with patch("mitty.planner.generator._compile_block_guides") as mock_compile:
+        result = await generate_plan(client, USER_ID, PLAN_DATE, ai_client=None)
+
+    assert isinstance(result, StudyPlan)
+    mock_compile.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_with_ai_client_calls_guides() -> None:
+    """When ai_client is provided, guide compilation is invoked."""
+    client = _build_mock_client()
+    mock_ai = AsyncMock()
+
+    with patch(
+        "mitty.planner.generator._compile_block_guides",
+        new_callable=AsyncMock,
+    ) as mock_compile:
+        result = await generate_plan(client, USER_ID, PLAN_DATE, ai_client=mock_ai)
+
+    assert isinstance(result, StudyPlan)
+    mock_compile.assert_awaited_once()
+    # Verify it was called with the ai_client, client, block_rows, user_id.
+    call_args = mock_compile.call_args
+    assert call_args[0][0] is mock_ai  # ai_client
+    assert call_args[0][3] == USER_ID  # user_id
+
+
+@pytest.mark.asyncio
+async def test_guide_compilation_failure_does_not_fail_plan() -> None:
+    """Guide compilation errors are logged but plan generation succeeds."""
+    client = _build_mock_client()
+    mock_ai = AsyncMock()
+
+    # Test the inner path: _compile_block_guides with a failing compiler.
+    block_rows = [
+        {"id": 1, "block_type": "retrieval", "course_id": 1},
+        {"id": 2, "block_type": "plan", "course_id": None},
+    ]
+    with patch(
+        "mitty.planner.generator._compile_and_persist_guide",
+        new_callable=AsyncMock,
+        side_effect=Exception("compile failed"),
+    ):
+        # Should not raise.
+        await _compile_block_guides(mock_ai, client, block_rows, USER_ID)
+
+
+@pytest.mark.asyncio
+async def test_compile_block_guides_timeout() -> None:
+    """Blocks that exceed the 4s timeout are caught as TimeoutError."""
+
+    async def _slow_compile(*_args: Any, **_kwargs: Any) -> None:
+        await asyncio.sleep(10)
+
+    block_rows = [{"id": 1, "block_type": "homework", "course_id": 1}]
+    mock_ai = AsyncMock()
+    client = _build_mock_client()
+
+    with patch(
+        "mitty.planner.generator._compile_and_persist_guide",
+        side_effect=_slow_compile,
+    ):
+        # Should not raise — timeout is caught via return_exceptions.
+        await _compile_block_guides(mock_ai, client, block_rows, USER_ID)
+
+
+@pytest.mark.asyncio
+async def test_compile_block_guides_skips_blocks_without_course_id() -> None:
+    """Blocks without a course_id are skipped by _compile_and_persist_guide."""
+    from mitty.planner.generator import _compile_and_persist_guide
+
+    block_row = {"id": 1, "block_type": "plan", "course_id": None}
+    mock_ai = AsyncMock()
+    client = _build_mock_client()
+
+    # Should return without calling compile_block_guide.
+    with patch(
+        "mitty.guides.compiler.compile_block_guide",
+        new_callable=AsyncMock,
+    ) as mock_cbg:
+        await _compile_and_persist_guide(mock_ai, client, block_row, USER_ID)
+
+    # compile_block_guide should NOT have been called — block has no course_id.
+    mock_cbg.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_compile_and_persist_guide_success() -> None:
+    """Successful compilation persists the guide to study_block_guides."""
+    from mitty.guides.compiler import BlockGuide
+    from mitty.planner.generator import _compile_and_persist_guide
+
+    mock_guide = BlockGuide(
+        block_id=42,
+        concepts_json=[{"concept": "Algebra"}],
+        source_bundle_json=[],
+        steps_json=[],
+        warmup_items_json=[{"question": "test?"}],
+        exit_items_json=[],
+        completion_criteria_json={},
+        success_criteria_json=["Can solve equations"],
+    )
+
+    block_row = {"id": 42, "block_type": "homework", "course_id": 1}
+    mock_ai = AsyncMock()
+    client = _build_mock_client()
+
+    with patch(
+        "mitty.guides.compiler.compile_block_guide",
+        new_callable=AsyncMock,
+        return_value=mock_guide,
+    ):
+        await _compile_and_persist_guide(mock_ai, client, block_row, USER_ID)
+
+    # The function should have called client.table("study_block_guides").insert()
+    # We verify that the mock client handles the call chain without error.
+
+
+@pytest.mark.asyncio
+async def test_compile_block_guides_mixed_results() -> None:
+    """Some guides succeed and some fail — plan still succeeds."""
+    call_count = 0
+
+    async def _alternate_compile(*_args: Any, **_kwargs: Any) -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count % 2 == 0:
+            raise RuntimeError("compile error")
+
+    block_rows = [
+        {"id": 1, "block_type": "homework", "course_id": 1},
+        {"id": 2, "block_type": "assessment_prep", "course_id": 1},
+        {"id": 3, "block_type": "practice", "course_id": 2},
+    ]
+    mock_ai = AsyncMock()
+    client = _build_mock_client()
+
+    with patch(
+        "mitty.planner.generator._compile_and_persist_guide",
+        side_effect=_alternate_compile,
+    ):
+        # Should not raise — failures are captured by return_exceptions.
+        await _compile_block_guides(mock_ai, client, block_rows, USER_ID)
