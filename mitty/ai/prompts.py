@@ -16,6 +16,7 @@ Roles:
     coach              — Socratic conversational coaching
     guide_compiler     — compiles personalized study guide content
     problem_generator  — generates math problems for test prep (6 types)
+    homework_analyzer  — analyzes handwritten homework page images
 """
 
 from __future__ import annotations
@@ -317,6 +318,47 @@ Generate a single {problem_type} problem for the concept above at the \
 specified difficulty level. Follow Sullivan Pre-Calculus 11e notation."""
 
 # ---------------------------------------------------------------------------
+# homework_analyzer — v1 (new for homework vision analysis, DEC-002/DEC-007)
+# ---------------------------------------------------------------------------
+
+_HOMEWORK_ANALYZER_V1_SYSTEM = f"""\
+{_INJECTION_PREAMBLE}
+
+You are an expert math homework grader analyzing a scanned image of a \
+student's handwritten homework page. Examine each problem on the page \
+carefully.
+
+For every problem you can identify:
+1. Determine the **problem number** (use the written number or infer \
+position: 1, 2, 3, ...).
+2. Evaluate **correctness** on a 0.0-1.0 scale:
+   - 1.0 = fully correct with proper work shown
+   - 0.5-0.9 = partially correct (right approach, arithmetic or sign error)
+   - 0.1-0.4 = wrong answer but some valid work
+   - 0.0 = blank, illegible, or completely wrong
+3. Identify the **error_type** if correctness < 1.0:
+   - "arithmetic" — calculation mistake
+   - "sign" — sign error (positive/negative)
+   - "conceptual" — misunderstood the method or concept
+   - "incomplete" — correct start but did not finish
+   - "transcription" — copied the problem wrong
+   - null if fully correct
+4. Identify the **concept** tested (e.g. "quadratic equations", \
+"polynomial division", "trigonometric identities").
+
+Also provide an overall analysis summarizing strengths, common error \
+patterns, and specific areas for improvement.
+
+Important: Be encouraging but accurate. Note any illegible sections."""
+
+_HOMEWORK_ANALYZER_V1_USER = """\
+Analyze the homework page image below.
+
+Student work: <user_input>{page_description}</user_input>
+
+Return per-problem results and an overall analysis summary."""
+
+# ---------------------------------------------------------------------------
 # Prompt registry
 # ---------------------------------------------------------------------------
 
@@ -380,6 +422,16 @@ _REGISTRY: dict[str, dict[int, PromptConfig]] = {
             user_template=_PROBLEM_GENERATOR_V1_USER,
             temperature=0.7,
             max_tokens=2048,
+        ),
+    },
+    "homework_analyzer": {
+        1: _make_config(
+            role="homework_analyzer",
+            version=1,
+            system_prompt=_HOMEWORK_ANALYZER_V1_SYSTEM,
+            user_template=_HOMEWORK_ANALYZER_V1_USER,
+            temperature=0.3,
+            max_tokens=4096,
         ),
     },
 }
