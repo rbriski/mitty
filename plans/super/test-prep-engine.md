@@ -6,7 +6,7 @@
 |-------|-------|
 | **Ticket** | `tickets/test-prep-engine.md` |
 | **Branch** | `feature/test-prep-engine` |
-| **Phase** | `detailing` |
+| **Phase** | `approved` |
 | **Sessions** | 2 |
 | **Last session** | 2026-03-14 |
 
@@ -25,6 +25,8 @@ Build a two-part system for Pre-Calculus Chapter 4 test preparation:
 **Urgency:** Chapter 4 Test is March 16 (2 days). Student has B (86.27%). 6 graded homeworks + 1 quiz + 2 review guides available on Canvas but untouched.
 
 **Target:** Pre-Calculus H S2 - DePalma, course_id 4127. Chapter 4: Polynomial & Rational Functions (sections 4.1, 4.3-4.7).
+
+**Textbook:** *Pre-Calculus* by Sullivan & Sullivan, III (11th Edition). Hardcopy/Kindle only (not on Canvas). Claude has training knowledge of Sullivan's section organization, notation, and problem style.
 
 ### Key Codebase Findings
 
@@ -106,6 +108,7 @@ Build a two-part system for Pre-Calculus Chapter 4 test preparation:
 - DEC-008: Add `user_id` to `test_prep_results` (denormalized, matches `practice_results`)
 - DEC-009: All 9 CHECK constraints in migration
 - DEC-010: SSE with 30-min timeout + 1 concurrent stream per user
+- DEC-011: Textbook context via prompt, no ingestion — Sullivan Pre-Calculus 11e. Claude knows the book from training. Reference in problem generator + analyzer prompts for notation/style alignment.
 
 ---
 
@@ -310,7 +313,7 @@ Build a two-part system for Pre-Calculus Chapter 4 test preparation:
 
 **Description:** Create `mitty/prep/generator.py` with `generate_problem()` that uses Claude to generate math problems at a target difficulty for a given concept. Supports 6 problem types (multiple choice, free response, worked example, error analysis, mixed, calibration). Uses `.replace()` for prompt templates.
 
-**Traces to:** DEC-001 (LLM for all problems), ticket work item 7
+**Traces to:** DEC-001 (LLM for all problems), DEC-011 (Sullivan textbook context), ticket work item 7
 
 **Acceptance criteria:**
 - Generates problems for any Chapter 4 concept at target difficulty 0.0-1.0
