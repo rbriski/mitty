@@ -37,6 +37,7 @@ from mitty.api.routers import (
     student_signals,
     study_blocks,
     study_plans,
+    test_prep,
 )
 from mitty.config import load_settings
 
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(escalations.router)
     app.include_router(ai_usage.router)
     app.include_router(block_guides.router)
+    app.include_router(test_prep.router)
 
     # Standardized error handler (covers both FastAPI and Starlette HTTPException)
     @app.exception_handler(StarletteHTTPException)
