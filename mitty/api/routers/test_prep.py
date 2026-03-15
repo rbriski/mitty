@@ -40,7 +40,7 @@ from mitty.api.schemas import (
     TestPrepSessionSummary,
 )
 from mitty.prep.analyzer import analyze_homework_set
-from mitty.prep.generator import generate_problem
+from mitty.prep.generator import build_review_own_errors, generate_problem
 from mitty.prep.profiler import build_mastery_profile
 from mitty.prep.session import PHASE_ORDER, SessionEngine, SessionPhase
 
@@ -557,6 +557,17 @@ async def submit_answer(
         concept=problem_row.get("concept"),
     )
 
+    # US-010: Record wrong answers from Phases 1-2 for review_own_errors
+    if not evaluation["is_correct"]:
+        engine.record_wrong_answer(
+            problem_id=problem_row.get("id", 0),
+            concept=problem_row.get("concept", ""),
+            problem_json=problem_json,
+            student_answer=data.student_answer,
+            feedback=evaluation["explanation"],
+            difficulty=problem_row.get("difficulty", 0.5),
+        )
+
     # Persist updated session state
     await (
         client.table("test_prep_sessions")
@@ -634,6 +645,90 @@ async def next_problem(
     concept = concepts[total % len(concepts)]
     problem_type = _PHASE_PROBLEM_TYPE.get(phase, "free_response")
 
+    # US-010: Restore session engine to determine error_analysis subtype
+    engine = SessionEngine.from_state_dict(
+        session_id=session_id,
+        user_id=UUID(user_id),
+        state_dict=state_json,
+    )
+
+    # US-010: Phase 3 alternates between find_the_mistake and review_own_errors
+    is_reflection = False
+    if phase == SessionPhase.error_analysis:
+        subtype = engine.get_error_analysis_subtype()
+
+        if subtype == "review_own_errors":
+            wrong = engine.pop_wrong_answer()
+            if wrong is not None:
+                # Build reflection problem from the student's own wrong answer
+                problem_dict = build_review_own_errors(wrong_answer=wrong)
+                problem_type = "review_own_errors"
+                concept = wrong.get("concept", concept)
+                is_reflection = True
+
+                # Persist updated engine state (popped wrong answer + counter)
+                await (
+                    client.table("test_prep_sessions")
+                    .update({"state_json": engine.to_state_dict()})
+                    .eq("id", str(session_id))
+                    .execute()
+                )
+
+                # Insert into test_prep_results
+                now = datetime.now(UTC)
+                row = {
+                    "user_id": user_id,
+                    "session_id": str(session_id),
+                    "concept": concept,
+                    "difficulty": problem_dict.get("difficulty", difficulty),
+                    "created_at": now.isoformat(),
+                    "problem_json": {
+                        "type": problem_type,
+                        "concept": concept,
+                        "difficulty": problem_dict.get("difficulty", difficulty),
+                        "prompt": problem_dict["prompt"],
+                        "choices": None,
+                        "correct_answer": problem_dict.get("correct_answer", ""),
+                        "explanation": problem_dict.get("explanation", ""),
+                        "hint": problem_dict.get("hint", ""),
+                        "is_reflection": True,
+                    },
+                }
+                result = await client.table("test_prep_results").insert(row).execute()
+                if not result.data:
+                    raise HTTPException(
+                        status_code=500,
+                        detail={
+                            "code": "INSERT_FAILED",
+                            "message": "Failed to persist reflection problem.",
+                        },
+                    )
+                inserted = result.data[0]
+                return TestPrepProblem(
+                    id=inserted["id"],
+                    problem_type=problem_type,
+                    concept=concept,
+                    difficulty=problem_dict.get("difficulty", difficulty),
+                    prompt=problem_dict["prompt"],
+                    choices=None,
+                    correct_answer=None,
+                    is_reflection=True,
+                )
+
+            # No wrong answers left — fall through to find_the_mistake
+            subtype = "find_the_mistake"
+
+        # find_the_mistake: use the LLM generator with the new subtype
+        if subtype == "find_the_mistake":
+            problem_type = "find_the_mistake"
+            # Persist updated engine state (counter increment)
+            await (
+                client.table("test_prep_sessions")
+                .update({"state_json": engine.to_state_dict()})
+                .eq("id", str(session_id))
+                .execute()
+            )
+
     if ai_client is None:
         raise HTTPException(
             status_code=503,
@@ -700,6 +795,7 @@ async def next_problem(
         prompt=problem_dict["prompt"],
         choices=problem_dict.get("choices"),
         correct_answer=None,  # Don't leak correct answer to frontend
+        is_reflection=is_reflection,
     )
 
 

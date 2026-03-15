@@ -322,6 +322,22 @@
             <span class="text-xs text-gray-400" x-text="currentProblem?.concept"></span>
           </div>
 
+          {# US-010: Reflection banner for review_own_errors #}
+          <template x-if="currentProblem?.is_reflection">
+            <div class="mb-4 px-4 py-3 bg-rose-50 border border-rose-200 rounded-lg">
+              <p class="text-sm text-rose-700 font-medium">Ungraded Reflection</p>
+              <p class="text-xs text-rose-600 mt-1">This is a self-reflection exercise. Explain what went wrong in your own words — there is no right or wrong answer here.</p>
+            </div>
+          </template>
+
+          {# US-010: Find-the-mistake instruction banner #}
+          <template x-if="currentProblem?.problem_type === 'find_the_mistake' && !currentProblem?.is_reflection">
+            <div class="mb-4 px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <p class="text-sm text-orange-700 font-medium">Find the Mistake</p>
+              <p class="text-xs text-orange-600 mt-1">The worked solution below contains one deliberate error. Identify the incorrect step and explain the correction.</p>
+            </div>
+          </template>
+
           {# Problem text with KaTeX rendering #}
           <div x-ref="problemArea" class="mb-6">
             <p class="text-gray-900 font-medium leading-relaxed whitespace-pre-wrap" x-text="currentProblem?.prompt" x-effect="renderMath()"></p>
@@ -392,24 +408,59 @@
 
           {# Submit button (before answer) #}
           <div x-show="!answered">
-            <button
-              @click="submitAnswer()"
-              :disabled="!studentAnswer || submitting"
-              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-            >
-              <span x-show="!submitting">Submit Answer</span>
-              <span x-show="submitting" class="flex items-center justify-center gap-2">
-                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                Checking...
-              </span>
-            </button>
+            {# US-010: Reflection submit (ungraded) #}
+            <template x-if="currentProblem?.is_reflection">
+              <div class="flex gap-2">
+                <button
+                  @click="submitReflection()"
+                  :disabled="!studentAnswer || submitting"
+                  class="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                >
+                  <span x-show="!submitting">Submit Reflection</span>
+                  <span x-show="submitting" class="flex items-center justify-center gap-2">
+                    <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                    Saving...
+                  </span>
+                </button>
+                <button
+                  @click="skipReflection()"
+                  class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+                >
+                  Skip
+                </button>
+              </div>
+            </template>
+            {# Standard submit #}
+            <template x-if="!currentProblem?.is_reflection">
+              <button
+                @click="submitAnswer()"
+                :disabled="!studentAnswer || submitting"
+                class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+              >
+                <span x-show="!submitting">Submit Answer</span>
+                <span x-show="submitting" class="flex items-center justify-center gap-2">
+                  <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  Checking...
+                </span>
+              </button>
+            </template>
           </div>
         </div>
 
         {# Feedback display (after answer) #}
         <div x-show="answered && lastResult" x-data="{ showWorked: false }" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
+          {# US-010: Reflection acknowledgment (ungraded) #}
+          <template x-if="lastResult?.is_reflection">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm bg-rose-100">
+                <span>&#9998;</span>
+              </div>
+              <p class="text-rose-700 font-medium" x-text="lastResult?.explanation"></p>
+            </div>
+          </template>
+
           {# Correct answer feedback: brief confirmation + answer #}
-          <template x-if="lastResult?.is_correct">
+          <template x-if="lastResult?.is_correct && !lastResult?.is_reflection">
             <div class="flex items-center gap-3 mb-4">
               <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm bg-emerald-100">
                 <span>&#10003;</span>
@@ -1218,6 +1269,7 @@
             prompt: problem.prompt || '',
             choices: problem.choices || null,
             correct_answer: null,
+            is_reflection: problem.is_reflection || false,
           };
         } catch (err) {
           this.sessionError = 'Failed to load problem: ' + err.message;
@@ -1325,6 +1377,61 @@
         } finally {
           this.submitting = false;
         }
+      },
+
+      // US-010: Submit ungraded reflection (review_own_errors)
+      async submitReflection() {
+        if (!this.studentAnswer || this.submitting || !this.currentProblem) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.submitting = true;
+        this.sessionError = '';
+
+        try {
+          // Record the reflection answer but treat it as ungraded
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/answer`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              session_id: this.sessionId,
+              problem_id: this.currentProblem.id,
+              student_answer: this.studentAnswer,
+              time_spent_seconds: null,
+            }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to save reflection.';
+            return;
+          }
+
+          // Show a simple acknowledgment — no correct/wrong judgment
+          this.lastResult = {
+            is_correct: true,
+            score: 1.0,
+            explanation: 'Thank you for reflecting on your work. Self-explanation strengthens understanding.',
+            correct_answer: null,
+            worked_solution: null,
+            is_reflection: true,
+          };
+          this.answered = true;
+          this.phaseTotal++;
+        } catch (err) {
+          this.sessionError = 'Failed to save reflection: ' + err.message;
+        } finally {
+          this.submitting = false;
+        }
+      },
+
+      // US-010: Skip reflection and move to next problem
+      skipReflection() {
+        this.phaseTotal++;
+        this.fetchNextProblem();
       },
 
       async nextProblem() {
@@ -1619,6 +1726,8 @@
           free_response: 'bg-purple-100 text-purple-700',
           worked_example: 'bg-teal-100 text-teal-700',
           error_analysis: 'bg-amber-100 text-amber-700',
+          find_the_mistake: 'bg-orange-100 text-orange-700',
+          review_own_errors: 'bg-rose-100 text-rose-700',
           mixed: 'bg-indigo-100 text-indigo-700',
           calibration: 'bg-pink-100 text-pink-700',
         };
@@ -1631,6 +1740,8 @@
           free_response: 'Free Response',
           worked_example: 'Worked Example',
           error_analysis: 'Error Analysis',
+          find_the_mistake: 'Find the Mistake',
+          review_own_errors: 'Review Your Errors',
           mixed: 'Mixed',
           calibration: 'Calibration',
         };
