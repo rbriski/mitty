@@ -131,7 +131,18 @@ def _chain_mock(
 
     chain = MagicMock()
     chain.execute = AsyncMock(return_value=result)
-    for attr in ("select", "eq", "order", "range", "in_", "limit"):
+    for attr in (
+        "select",
+        "eq",
+        "order",
+        "range",
+        "in_",
+        "limit",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+    ):
         getattr(chain, attr).return_value = chain
     return chain
 
@@ -686,3 +697,276 @@ class TestSessionHistoryEmpty:
         data = resp.json()
         assert data["sessions"] == []
         assert data["trend_text"] is None
+
+
+# ===========================================================================
+# Upcoming assessment endpoint tests: GET /mastery-dashboard/upcoming
+# ===========================================================================
+
+# Future assessment (test) — scheduled tomorrow relative to test time
+_ASSESSMENT_FUTURE_TEST = {
+    "id": 100,
+    "course_id": 10,
+    "name": "Chapter 5 Test",
+    "assessment_type": "test",
+    "scheduled_date": "2026-03-20T10:00:00",
+    "weight": 0.3,
+    "unit_or_topic": "Chapter 5",
+    "description": "Unit test on Chapter 5",
+    "canvas_assignment_id": 500,
+    "canvas_quiz_id": None,
+    "auto_created": False,
+    "source": None,
+    "created_at": "2026-03-01T10:00:00",
+    "updated_at": "2026-03-01T10:00:00",
+}
+
+# Future assessment (quiz) — scheduled further out
+_ASSESSMENT_FUTURE_QUIZ = {
+    "id": 101,
+    "course_id": 10,
+    "name": "Weekly Quiz 8",
+    "assessment_type": "quiz",
+    "scheduled_date": "2026-03-25T10:00:00",
+    "weight": 0.1,
+    "unit_or_topic": "Chapter 5-6",
+    "description": "Weekly quiz",
+    "canvas_assignment_id": 501,
+    "canvas_quiz_id": None,
+    "auto_created": False,
+    "source": None,
+    "created_at": "2026-03-01T10:00:00",
+    "updated_at": "2026-03-01T10:00:00",
+}
+
+# Past assessment (already happened)
+_ASSESSMENT_PAST = {
+    "id": 102,
+    "course_id": 10,
+    "name": "Old Test",
+    "assessment_type": "test",
+    "scheduled_date": "2026-03-01T10:00:00",
+    "weight": 0.3,
+    "unit_or_topic": "Chapter 3",
+    "description": None,
+    "canvas_assignment_id": 502,
+    "canvas_quiz_id": None,
+    "auto_created": False,
+    "source": None,
+    "created_at": "2026-02-01T10:00:00",
+    "updated_at": "2026-02-01T10:00:00",
+}
+
+# Assessment of type "essay" (should be excluded)
+_ASSESSMENT_ESSAY = {
+    "id": 103,
+    "course_id": 10,
+    "name": "Research Essay",
+    "assessment_type": "essay",
+    "scheduled_date": "2026-03-22T10:00:00",
+    "weight": 0.2,
+    "unit_or_topic": "Research",
+    "description": None,
+    "canvas_assignment_id": 503,
+    "canvas_quiz_id": None,
+    "auto_created": False,
+    "source": None,
+    "created_at": "2026-03-01T10:00:00",
+    "updated_at": "2026-03-01T10:00:00",
+}
+
+# Homework analysis with per_problem_json containing concepts
+_HOMEWORK_ANALYSIS_1 = {
+    "id": 1,
+    "user_id": USER_ID,
+    "assignment_id": 500,
+    "course_id": 10,
+    "page_number": 1,
+    "analysis_json": {"overall_score": 0.8},
+    "image_tokens": 1000,
+    "analyzed_at": "2026-03-10T10:00:00",
+    "per_problem_json": [
+        {
+            "problem_number": 1,
+            "correctness": 1.0,
+            "error_type": None,
+            "concept": "Quadratic equations",
+        },
+        {
+            "problem_number": 2,
+            "correctness": 0.5,
+            "error_type": "procedural",
+            "concept": "Factoring",
+        },
+    ],
+}
+
+_HOMEWORK_ANALYSIS_2 = {
+    "id": 2,
+    "user_id": USER_ID,
+    "assignment_id": 500,
+    "course_id": 10,
+    "page_number": 2,
+    "analysis_json": {"overall_score": 0.9},
+    "image_tokens": 800,
+    "analyzed_at": "2026-03-10T10:00:00",
+    "per_problem_json": [
+        {
+            "problem_number": 3,
+            "correctness": 1.0,
+            "error_type": None,
+            "concept": "Quadratic equations",
+        },
+        {
+            "problem_number": 4,
+            "correctness": 0.0,
+            "error_type": "conceptual",
+            "concept": "Completing the square",
+        },
+    ],
+}
+
+
+def _setup_upcoming_mock(
+    mock_client: MagicMock,
+    assessments: list[dict],
+    homework_analyses: list[dict] | None = None,
+) -> None:
+    """Configure mock for assessments and homework_analyses tables."""
+    assessment_chain = _chain_mock(assessments)
+    homework_chain = _chain_mock(homework_analyses or [])
+
+    def table_router(name: str) -> MagicMock:
+        if name == "assessments":
+            return assessment_chain
+        if name == "homework_analyses":
+            return homework_chain
+        return _chain_mock([])
+
+    mock_client.table = MagicMock(side_effect=table_router)
+
+
+class TestUpcomingReturnsNearest:
+    """GET /mastery-dashboard/upcoming returns the nearest future test/quiz."""
+
+    def test_upcoming_returns_nearest(self) -> None:
+        """Should return the assessment with the earliest future scheduled_date."""
+        mock_client = MagicMock()
+        # DB returns nearest first (ordered by scheduled_date ASC, limit 1)
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assessment_id"] == 100
+        assert data["name"] == "Chapter 5 Test"
+        assert data["assessment_type"] == "test"
+        assert data["course_id"] == 10
+        assert data["scheduled_date"] is not None
+
+
+class TestUpcomingNoFutureReturnsEmpty:
+    """When no future test/quiz exists, return null."""
+
+    def test_no_future_returns_empty(self) -> None:
+        """Should return null when no future assessments of type test/quiz exist."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(mock_client, [])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data is None
+
+
+class TestUpcomingFiltersByType:
+    """Only assessment_type IN ('test', 'quiz') are returned."""
+
+    def test_filters_by_type(self) -> None:
+        """Essay-type assessments should be excluded (filtered via DB query)."""
+        mock_client = MagicMock()
+        # The endpoint queries with .in_("assessment_type", ["test", "quiz"])
+        # so only test/quiz come back from DB. Simulating correct DB behavior:
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_QUIZ])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assessment_type"] == "quiz"
+        assert data["name"] == "Weekly Quiz 8"
+
+
+class TestUpcomingIncludesConcepts:
+    """Concepts are extracted from homework_analyses linked to the assessment."""
+
+    def test_includes_concepts(self) -> None:
+        """Should include deduplicated concepts from homework analyses."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(
+            mock_client,
+            [_ASSESSMENT_FUTURE_TEST],
+            [_HOMEWORK_ANALYSIS_1, _HOMEWORK_ANALYSIS_2],
+        )
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        concepts = data["concepts"]
+        assert isinstance(concepts, list)
+        # Should have deduplicated concepts
+        assert "Quadratic equations" in concepts
+        assert "Factoring" in concepts
+        assert "Completing the square" in concepts
+        # No duplicates
+        assert len(concepts) == len(set(concepts))
+
+    def test_no_analyses_returns_empty_concepts(self) -> None:
+        """When no homework analyses exist, concepts should be empty list."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST], [])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["concepts"] == []
+
+
+class TestUpcomingCourseIdFilter:
+    """Optional course_id query param filters assessments."""
+
+    def test_with_course_id(self) -> None:
+        """Should pass course_id filter to DB query."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/upcoming?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assessment_id"] == 100
+
+    def test_without_course_id(self) -> None:
+        """Should work without course_id param (returns from any course)."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data is not None
