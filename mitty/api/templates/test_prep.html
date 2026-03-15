@@ -2,6 +2,16 @@
 
 {% block title %}Mitty — Test Prep{% endblock %}
 
+{% block head %}
+<!-- MathLive: WYSIWYG math input web component -->
+<script src="https://unpkg.com/mathlive"></script>
+<style>
+  math-field { display: block; font-size: 1.1rem; border: 1px solid #d1d5db; border-radius: 0.5rem; padding: 0.5rem 0.75rem; min-height: 3rem; }
+  math-field:focus-within { border-color: transparent; box-shadow: 0 0 0 2px var(--color-mitty-500, #6366f1); }
+  math-field[disabled], math-field[read-only] { background: #f9fafb; cursor: not-allowed; opacity: 0.7; }
+</style>
+{% endblock %}
+
 {% block nav %}
 {# Hide default nav; Alpine.js controls nav visibility based on auth state #}
 {% endblock %}
@@ -348,17 +358,47 @@
             </div>
           </template>
 
-          {# Free-form answer input #}
+          {# Free-form answer input — math field + text toggle #}
           <template x-if="!currentProblem?.choices || currentProblem.choices.length === 0">
             <div class="mb-6">
-              <textarea
-                x-model="studentAnswer"
-                :disabled="answered"
-                rows="3"
-                maxlength="5000"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm resize-none disabled:bg-gray-50 disabled:cursor-not-allowed"
-                placeholder="Type your answer..."
-              ></textarea>
+              {# Toggle between math and text input #}
+              <div class="flex items-center gap-2 mb-2">
+                <button
+                  @click="mathMode = true"
+                  :class="mathMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
+                  class="px-3 py-1 text-xs font-medium rounded-md border transition-colors"
+                  :disabled="answered"
+                >Math</button>
+                <button
+                  @click="mathMode = false"
+                  :class="!mathMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
+                  class="px-3 py-1 text-xs font-medium rounded-md border transition-colors"
+                  :disabled="answered"
+                >Text</button>
+              </div>
+
+              {# MathLive math-field #}
+              <div x-show="mathMode" x-ref="mathFieldWrap">
+                <math-field
+                  x-ref="mathField"
+                  virtual-keyboard-mode="manual"
+                  :read-only="answered"
+                  @input="studentAnswer = $refs.mathField.getValue('latex')"
+                ></math-field>
+                <p class="text-xs text-gray-400 mt-1">Use the toolbar or type LaTeX (e.g. x^2, \frac{1}{2}, \sqrt{x})</p>
+              </div>
+
+              {# Plain text fallback #}
+              <div x-show="!mathMode">
+                <textarea
+                  x-model="studentAnswer"
+                  :disabled="answered"
+                  rows="3"
+                  maxlength="5000"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm resize-none disabled:bg-gray-50 disabled:cursor-not-allowed"
+                  placeholder="Type your answer..."
+                ></textarea>
+              </div>
             </div>
           </template>
 
@@ -616,6 +656,7 @@
       currentProblem: null,
       studentAnswer: '',
       answered: false,
+      mathMode: true,
       submitting: false,
       problemLoading: false,
       lastResult: null,
@@ -900,6 +941,8 @@
         this.studentAnswer = '';
         this.answered = false;
         this.lastResult = null;
+        // Clear the math field if it exists
+        if (this.$refs.mathField) this.$refs.mathField.setValue('');
 
         try {
           const resp = await fetch(`/test-prep/sessions/${this.sessionId}/next-problem`, {
