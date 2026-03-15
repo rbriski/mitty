@@ -675,6 +675,26 @@ class MasteryDashboardResponse(BaseModel):
     concepts: list[MasteryConceptRow]
 
 
+class SessionHistoryEntry(BaseModel):
+    """A single completed test prep session in the history list."""
+
+    session_id: str
+    started_at: datetime
+    total_problems: int
+    total_correct: int
+    accuracy: float
+    duration_seconds: int | None
+    phase_reached: str | None
+    session_type: str
+
+
+class SessionHistoryResponse(BaseModel):
+    """Response for the session history endpoint."""
+
+    sessions: list[SessionHistoryEntry]
+    trend_text: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # AI Usage / Cost Summary
 # ---------------------------------------------------------------------------

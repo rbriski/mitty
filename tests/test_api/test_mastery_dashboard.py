@@ -131,7 +131,7 @@ def _chain_mock(
 
     chain = MagicMock()
     chain.execute = AsyncMock(return_value=result)
-    for attr in ("select", "eq", "order", "range", "in_"):
+    for attr in ("select", "eq", "order", "range", "in_", "limit"):
         getattr(chain, attr).return_value = chain
     return chain
 
@@ -478,3 +478,211 @@ class TestMasteryPage:
         response = page_client.get("/mastery")
 
         assert "sort" in response.text.lower()
+
+
+# ===========================================================================
+# Session History endpoint tests: GET /mastery-dashboard/session-history
+# ===========================================================================
+
+_SESSION_BASE = {
+    "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "user_id": USER_ID,
+    "course_id": 10,
+    "assessment_id": None,
+    "state_json": {},
+    "started_at": "2026-03-10T10:00:00",
+    "completed_at": "2026-03-10T11:00:00",
+    "total_problems": 20,
+    "total_correct": 15,
+    "duration_seconds": 3600,
+    "phase_reached": "calibration",
+    "session_type": "full",
+}
+
+
+def _make_session(
+    idx: int,
+    *,
+    total_problems: int = 20,
+    total_correct: int = 15,
+    duration_seconds: int = 3600,
+) -> dict:
+    """Create a session dict with a unique id and started_at shifted by idx hours."""
+    return {
+        **_SESSION_BASE,
+        "id": f"aaaaaaaa-bbbb-cccc-dddd-{idx:012d}",
+        "started_at": f"2026-03-{10 + idx:02d}T10:00:00",
+        "completed_at": f"2026-03-{10 + idx:02d}T11:00:00",
+        "total_problems": total_problems,
+        "total_correct": total_correct,
+        "duration_seconds": duration_seconds,
+    }
+
+
+def _setup_session_history_mock(
+    mock_client: MagicMock,
+    sessions: list[dict],
+) -> None:
+    """Configure mock for test_prep_sessions table queries."""
+    session_chain = _chain_mock(sessions)
+
+    def table_router(name: str) -> MagicMock:
+        if name == "test_prep_sessions":
+            return session_chain
+        return _chain_mock([])
+
+    mock_client.table = MagicMock(side_effect=table_router)
+
+
+class TestSessionHistoryReturnsLast5:
+    """GET /mastery-dashboard/session-history returns last 5 completed sessions."""
+
+    def test_returns_last_5(self) -> None:
+        """When 6 sessions exist, only 5 are returned (DB LIMIT)."""
+        sessions = [_make_session(i) for i in range(5)]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["sessions"]) == 5
+        # Verify each session has required fields
+        for session in data["sessions"]:
+            assert "session_id" in session
+            assert "started_at" in session
+            assert "total_problems" in session
+            assert "total_correct" in session
+            assert "accuracy" in session
+            assert "duration_seconds" in session
+            assert "phase_reached" in session
+            assert "session_type" in session
+
+    def test_accuracy_computed_correctly(self) -> None:
+        """Accuracy should be total_correct / total_problems as a percentage."""
+        sessions = [_make_session(0, total_problems=20, total_correct=15)]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        session = resp.json()["sessions"][0]
+        assert session["accuracy"] == pytest.approx(75.0)
+
+
+class TestSessionHistoryTrend:
+    """trend_text computation from 3+ sessions."""
+
+    def test_trend_text_3_sessions_improving(self) -> None:
+        """With 3+ sessions showing improving accuracy, trend_text is present."""
+        # Mock returns newest-first (DESC order from DB)
+        sessions = [
+            _make_session(2, total_problems=20, total_correct=16),  # 80% newest
+            _make_session(1, total_problems=20, total_correct=14),  # 70%
+            _make_session(0, total_problems=20, total_correct=10),  # 50% oldest
+        ]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trend_text"] is not None
+        assert "Improving" in data["trend_text"]
+
+    def test_trend_text_3_sessions_declining(self) -> None:
+        """With 3+ sessions showing declining accuracy, trend_text reflects it."""
+        # Mock returns newest-first (DESC order from DB)
+        sessions = [
+            _make_session(2, total_problems=20, total_correct=10),  # 50% newest
+            _make_session(1, total_problems=20, total_correct=14),  # 70%
+            _make_session(0, total_problems=20, total_correct=16),  # 80% oldest
+        ]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trend_text"] is not None
+        assert "Declining" in data["trend_text"]
+
+    def test_trend_text_3_sessions_steady(self) -> None:
+        """With 3+ sessions showing similar accuracy, trend_text says Steady."""
+        sessions = [
+            _make_session(0, total_problems=20, total_correct=15),  # 75%
+            _make_session(1, total_problems=20, total_correct=15),  # 75%
+            _make_session(2, total_problems=20, total_correct=15),  # 75%
+        ]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trend_text"] is not None
+        assert "Steady" in data["trend_text"]
+
+    def test_trend_text_fewer_than_3_sessions_is_none(self) -> None:
+        """With fewer than 3 sessions, trend_text should be None."""
+        sessions = [
+            _make_session(0, total_problems=20, total_correct=15),
+            _make_session(1, total_problems=20, total_correct=18),
+        ]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trend_text"] is None
+
+
+class TestSessionHistoryEmpty:
+    """Edge case: no sessions."""
+
+    def test_no_sessions_empty(self) -> None:
+        """When no sessions exist, return empty list and no trend_text."""
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, [])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sessions"] == []
+        assert data["trend_text"] is None

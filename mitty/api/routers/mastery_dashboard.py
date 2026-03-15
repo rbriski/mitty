@@ -13,6 +13,8 @@ from mitty.api.schemas import (
     CalibrationStatus,
     MasteryConceptRow,
     MasteryDashboardResponse,
+    SessionHistoryEntry,
+    SessionHistoryResponse,
 )
 
 if TYPE_CHECKING:
@@ -69,6 +71,77 @@ def _sort_concepts(
             c.calibration_gap if c.calibration_gap is not None else 0.0,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Trend computation helpers
+# ---------------------------------------------------------------------------
+
+_TREND_THRESHOLD = 5.0  # percentage-point change to count as improving/declining
+
+
+def _compute_trend_text(sessions: list[SessionHistoryEntry]) -> str | None:
+    """Compute trend text from session accuracies.
+
+    Requires at least 3 sessions. Compares oldest vs newest accuracy
+    in the list (which is ordered newest-first from DB).
+    """
+    if len(sessions) < 3:
+        return None
+
+    # Sessions are ordered newest-first; oldest is last
+    newest_accuracy = sessions[0].accuracy
+    oldest_accuracy = sessions[-1].accuracy
+    delta = newest_accuracy - oldest_accuracy
+
+    count = len(sessions)
+    if delta > _TREND_THRESHOLD:
+        return f"Improving: +{delta:.0f}% over {count} sessions"
+    if delta < -_TREND_THRESHOLD:
+        return f"Declining: {delta:.0f}% over {count} sessions"
+    return f"Steady over {count} sessions"
+
+
+@router.get("/session-history", response_model=SessionHistoryResponse)
+async def get_session_history(
+    current_user: CurrentUser,
+    client: SupaClient,
+    course_id: int = Query(),  # noqa: B008
+) -> SessionHistoryResponse:
+    """Return the last 5 completed test prep sessions for a course with trend."""
+    result = (
+        await client.table("test_prep_sessions")
+        .select("*")
+        .eq("user_id", current_user["user_id"])
+        .eq("course_id", course_id)
+        .order("started_at", desc=True)
+        .limit(5)
+        .execute()
+    )
+    rows = result.data or []
+
+    sessions: list[SessionHistoryEntry] = []
+    for row in rows:
+        total = row.get("total_problems", 0)
+        correct = row.get("total_correct", 0)
+        accuracy = (correct / total * 100.0) if total > 0 else 0.0
+
+        sessions.append(
+            SessionHistoryEntry(
+                session_id=str(row["id"]),
+                started_at=row["started_at"],
+                total_problems=total,
+                total_correct=correct,
+                accuracy=round(accuracy, 1),
+                duration_seconds=row.get("duration_seconds"),
+                phase_reached=row.get("phase_reached"),
+                session_type=row.get("session_type", "full"),
+            )
+        )
+
+    trend_text = _compute_trend_text(sessions)
+
+    return SessionHistoryResponse(sessions=sessions, trend_text=trend_text)
 
 
 @router.get("/{course_id}", response_model=MasteryDashboardResponse)
