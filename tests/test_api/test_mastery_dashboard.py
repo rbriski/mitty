@@ -276,9 +276,9 @@ class TestMasteryDashboardSorting:
         non_none = [d for d in dates if d is not None]
         assert non_none == sorted(non_none)
         none_indices = [i for i, d in enumerate(dates) if d is None]
-        assert all(
-            i >= len(non_none) for i in none_indices
-        ), "None values should sort last"
+        assert all(i >= len(non_none) for i in none_indices), (
+            "None values should sort last"
+        )
 
     def test_sort_by_calibration_gap(self) -> None:
         concepts = self._get_sorted("calibration_gap")
@@ -286,9 +286,9 @@ class TestMasteryDashboardSorting:
         non_none = [g for g in gaps if g is not None]
         assert non_none == sorted(non_none)
         none_indices = [i for i, d in enumerate(gaps) if d is None]
-        assert all(
-            i >= len(non_none) for i in none_indices
-        ), "None values should sort last"
+        assert all(i >= len(non_none) for i in none_indices), (
+            "None values should sort last"
+        )
 
     def test_invalid_sort_by_returns_422(self) -> None:
         mock_client = MagicMock()
@@ -473,9 +473,7 @@ class TestMasteryPage:
 
         assert "calibration_status" in response.text
 
-    def test_contains_start_practice_cta(
-        self, page_client: TestClient
-    ) -> None:
+    def test_contains_start_practice_cta(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
 
         assert "startPractice" in response.text
