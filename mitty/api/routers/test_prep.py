@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from mitty.api.auth import get_current_user
-from mitty.api.dependencies import get_ai_client, get_user_client
+from mitty.api.dependencies import get_ai_client, get_canvas_client, get_user_client
 from mitty.api.schemas import (
     AnalysisProgressEvent,
     HomeworkAnalysisTrigger,
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from mitty.ai.client import AIClient
+    from mitty.canvas.client import CanvasClient
     from supabase import AsyncClient
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ router = APIRouter(prefix="/test-prep", tags=["test_prep"])
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 UserClient = Annotated["AsyncClient", Depends(get_user_client)]
 OptionalAI = Annotated["AIClient | None", Depends(get_ai_client)]
+OptionalCanvas = Annotated["CanvasClient | None", Depends(get_canvas_client)]
 
 # DEC-010: 1 concurrent analysis per user
 _active_analyses: dict[str, asyncio.Event] = {}
@@ -133,6 +135,7 @@ async def _analysis_event_stream(
     user_id: str,
     ai_client: AIClient,
     supabase_client: AsyncClient,
+    canvas_client: CanvasClient | None = None,
 ) -> AsyncGenerator[str]:
     """Yield SSE events as homework analysis progresses."""
     # Emit started event
@@ -150,6 +153,7 @@ async def _analysis_event_stream(
                 user_id=user_id,
                 ai_client=ai_client,
                 supabase_client=supabase_client,
+                canvas_client=canvas_client,
             ),
             timeout=_SSE_TIMEOUT_SECONDS,
         )
@@ -179,7 +183,7 @@ async def _analysis_event_stream(
         )
         yield f"data: {error.model_dump_json()}\n\n"
 
-    except Exception as exc:
+    except Exception:
         logger.warning(
             "Homework analysis failed for user=%s assignment=%d",
             user_id,
@@ -188,7 +192,7 @@ async def _analysis_event_stream(
         )
         error = AnalysisProgressEvent(
             status="error",
-            message=f"Analysis failed: {exc}",
+            message="Analysis failed. Please try again later.",
         )
         yield f"data: {error.model_dump_json()}\n\n"
 
@@ -205,6 +209,7 @@ async def analyze_homework(
     current_user: CurrentUser,
     client: UserClient,
     ai_client: OptionalAI,
+    canvas_client: OptionalCanvas,
 ) -> StreamingResponse:
     """Trigger homework analysis and stream progress via SSE.
 
@@ -242,6 +247,7 @@ async def analyze_homework(
             user_id=user_id,
             ai_client=ai_client,
             supabase_client=client,
+            canvas_client=canvas_client,
         ),
         media_type="text/event-stream",
         headers={

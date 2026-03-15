@@ -85,7 +85,7 @@ def _mock_ai_client(
     return ai
 
 
-def _fake_attachments() -> list[dict]:
+def _fake_attachments(assignment_id: int = 42) -> list[dict]:
     """Return fake attachment dicts as fetch_submission_attachments would."""
     return [
         {
@@ -93,6 +93,7 @@ def _fake_attachments() -> list[dict]:
             "filename": "hw1.pdf",
             "content_type": "application/pdf",
             "size": 1024,
+            "assignment_id": assignment_id,
         },
     ]
 

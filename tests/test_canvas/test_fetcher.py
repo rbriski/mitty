@@ -1472,7 +1472,9 @@ class TestFetchSubmissionAttachments:
 
         assert len(result) == 2
         assert result[0]["filename"] == "hw1.pdf"
+        assert result[0]["assignment_id"] == 100
         assert result[1]["filename"] == "hw2.pdf"
+        assert result[1]["assignment_id"] == 200
 
         client.get.assert_any_call(
             "/api/v1/courses/12345/assignments/100/submissions/self",

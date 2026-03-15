@@ -908,8 +908,22 @@
           this.answered = false;
           this.lastResult = null;
         } else {
-          // No problem in queue: refresh session state
-          this.refreshSession();
+          // No problems queued server-side; generate a placeholder problem
+          // using the session's concepts and current difficulty
+          const concepts = stateJson?.concepts || this.selectedConcepts || [];
+          const concept = concepts[this.phaseProblems % concepts.length] || 'General';
+          this.currentProblem = {
+            id: 'local-' + Date.now(),
+            problem_type: 'free_response',
+            concept: concept,
+            difficulty: stateJson?.difficulty || this.currentDifficulty,
+            prompt: 'Solve the following problem related to ' + concept + '. Show your work.',
+            choices: null,
+            correct_answer: null,
+          };
+          this.studentAnswer = '';
+          this.answered = false;
+          this.lastResult = null;
         }
       },
 

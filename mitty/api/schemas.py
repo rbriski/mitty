@@ -832,6 +832,9 @@ ErrorType = Literal[
     "careless",
     "incomplete",
     "unknown",
+    "arithmetic",
+    "sign",
+    "transcription",
 ]
 
 AnalysisStatus = Literal[
@@ -951,7 +954,7 @@ class TestPrepAnswerSubmit(BaseModel):
     """POST request to submit an answer for a test prep problem."""
 
     session_id: UUID
-    problem_id: str
+    problem_id: int
     student_answer: str = Field(max_length=5000)
     time_spent_seconds: int | None = Field(default=None, ge=0)
 

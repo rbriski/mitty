@@ -216,7 +216,7 @@ class TestAuthRequired:
                 f"/test-prep/sessions/{sid}/answer",
                 json={
                     "session_id": sid,
-                    "problem_id": "p-1",
+                    "problem_id": 1,
                     "student_answer": "42",
                 },
             )
@@ -583,7 +583,7 @@ class TestSubmitAnswer:
                 f"/test-prep/sessions/{SESSION_ID}/answer",
                 json={
                     "session_id": SESSION_ID,
-                    "problem_id": "p-1",
+                    "problem_id": 1,
                     "student_answer": "x^2 + 2",
                     "time_spent_seconds": 30,
                 },
@@ -617,7 +617,7 @@ class TestSubmitAnswer:
             f"/test-prep/sessions/{SESSION_ID}/answer",
             json={
                 "session_id": SESSION_ID,
-                "problem_id": "p-1",
+                "problem_id": 1,
                 "student_answer": "x^2 + 2",
             },
         )

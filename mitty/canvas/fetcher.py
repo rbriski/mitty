@@ -555,6 +555,7 @@ async def fetch_submission_attachments(
                         "filename": att.get("filename", ""),
                         "content_type": att.get("content-type", ""),
                         "size": att.get("size", 0),
+                        "assignment_id": assignment_id,
                     }
                 )
         except (CanvasAPIError, CanvasAuthError) as exc:

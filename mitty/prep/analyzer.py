@@ -270,6 +270,7 @@ async def analyze_homework_set(
 
         # Step 3: Download PDF
         # Use an httpx client for download; canvas_client may be None in tests
+        # (when download_file_content is patched)
         http_client = getattr(canvas_client, "_http", None)
         pdf_bytes = await download_file_content(http_client, url)
 
@@ -292,12 +293,8 @@ async def analyze_homework_set(
             logger.debug("No pages extracted from %s", filename)
             continue
 
-        # Determine assignment_id for this attachment
-        # For simplicity, use the first assignment_id since Canvas returns
-        # attachments per assignment via fetch_submission_attachments
-        assignment_id = (
-            assignment_ids[0] if len(assignment_ids) == 1 else assignment_ids[0]
-        )
+        # Each attachment carries its assignment_id from fetch_submission_attachments
+        assignment_id = attachment.get("assignment_id", assignment_ids[0])
 
         # Step 4: Cache check
         cached_pages = await _get_cached_pages(supabase_client, user_id, assignment_id)

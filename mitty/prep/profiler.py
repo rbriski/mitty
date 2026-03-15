@@ -249,6 +249,9 @@ async def build_mastery_profile(
             "careless",
             "incomplete",
             "unknown",
+            "arithmetic",
+            "sign",
+            "transcription",
         }
         for et in data["error_types"]:
             if et in valid_error_types:

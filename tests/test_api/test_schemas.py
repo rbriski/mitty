@@ -1576,7 +1576,7 @@ class TestTestPrepAnswerSubmit:
         obj = TestPrepAnswerSubmit.model_validate(
             {
                 "session_id": str(sid),
-                "problem_id": "prob-001",
+                "problem_id": 1,
                 "student_answer": "x = +/-2",
                 "time_spent_seconds": 45,
             }
@@ -1589,7 +1589,7 @@ class TestTestPrepAnswerSubmit:
         obj = TestPrepAnswerSubmit.model_validate(
             {
                 "session_id": str(sid),
-                "problem_id": "p1",
+                "problem_id": 2,
                 "student_answer": "42",
             }
         )
@@ -1600,7 +1600,7 @@ class TestTestPrepAnswerSubmit:
             TestPrepAnswerSubmit.model_validate(
                 {
                     "session_id": str(uuid4()),
-                    "problem_id": "p1",
+                    "problem_id": 2,
                     "student_answer": "x" * 5001,
                 }
             )
@@ -1610,7 +1610,7 @@ class TestTestPrepAnswerSubmit:
             TestPrepAnswerSubmit.model_validate(
                 {
                     "session_id": str(uuid4()),
-                    "problem_id": "p1",
+                    "problem_id": 2,
                     "student_answer": "42",
                     "time_spent_seconds": -1,
                 }
