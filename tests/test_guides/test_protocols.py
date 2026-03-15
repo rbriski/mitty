@@ -44,9 +44,9 @@ class TestGetProtocolAllTypes:
         """Each protocol has between 4 and 6 steps."""
         protocol = get_protocol(block_type)
         step_count = len(protocol.steps)
-        assert 4 <= step_count <= 6, (
-            f"{block_type}: expected 4-6 steps, got {step_count}"
-        )
+        assert (
+            4 <= step_count <= 6
+        ), f"{block_type}: expected 4-6 steps, got {step_count}"
 
     def test_protocol_step_types_are_valid(self, block_type: str) -> None:
         """Every step_type value belongs to VALID_STEP_TYPES."""
@@ -89,9 +89,9 @@ class TestPlanProtocol:
         goal_commit step."""
         protocol = get_protocol("plan")
         step_types = {s.step_type for s in protocol.steps}
-        assert "practice_item" in step_types, (
-            "Plan protocol must have a warm-up (practice_item) step"
-        )
+        assert (
+            "practice_item" in step_types
+        ), "Plan protocol must have a warm-up (practice_item) step"
         assert "goal_commit" in step_types, "Plan protocol must have a goal_commit step"
 
     def test_plan_warmup_is_first_step(self) -> None:
@@ -120,12 +120,12 @@ class TestReflectionProtocol:
         a teach_back step."""
         protocol = get_protocol("reflection")
         step_types = {s.step_type for s in protocol.steps}
-        assert "practice_item" in step_types, (
-            "Reflection protocol must have an exit ticket (practice_item)"
-        )
-        assert "teach_back" in step_types, (
-            "Reflection protocol must have a teach_back step"
-        )
+        assert (
+            "practice_item" in step_types
+        ), "Reflection protocol must have an exit ticket (practice_item)"
+        assert (
+            "teach_back" in step_types
+        ), "Reflection protocol must have a teach_back step"
 
     def test_reflection_has_misconception_log(self) -> None:
         """Reflection protocol includes a misconception_log step."""
@@ -194,9 +194,9 @@ class TestDataclassInvariants:
             protocol = get_protocol(block_type)
             numbers = [s.step_number for s in protocol.steps]
             expected = list(range(1, len(protocol.steps) + 1))
-            assert numbers == expected, (
-                f"{block_type}: step numbers {numbers} != {expected}"
-            )
+            assert (
+                numbers == expected
+            ), f"{block_type}: step numbers {numbers} != {expected}"
 
     def test_artifact_required_implies_artifact_type(self) -> None:
         """Steps with requires_artifact=True must have a non-None
