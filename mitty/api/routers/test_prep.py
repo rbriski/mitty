@@ -788,6 +788,31 @@ async def next_problem(
         concept=concept,
     )
 
+    # Fetch previously asked prompts to avoid duplicate questions
+    try:
+        prev_result = await (
+            client.table("test_prep_results")
+            .select("problem_json")
+            .eq("session_id", str(session_id))
+            .execute()
+        )
+        if prev_result.data:
+            prev_prompts = [
+                r["problem_json"].get("prompt", "")
+                for r in prev_result.data
+                if r.get("problem_json")
+            ]
+            if prev_prompts:
+                avoid_section = "PREVIOUSLY ASKED (do NOT repeat these):\n" + "\n".join(
+                    f"- {p[:150]}" for p in prev_prompts
+                )
+                if student_context:
+                    student_context += "\n\n" + avoid_section
+                else:
+                    student_context = avoid_section
+    except Exception:
+        logger.debug("Failed to fetch previous prompts", exc_info=True)
+
     problem_dict = await generate_problem(
         concept=concept,
         difficulty=difficulty,

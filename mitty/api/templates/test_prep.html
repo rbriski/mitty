@@ -938,6 +938,8 @@
       mathMode: true,
       submitting: false,
       problemLoading: false,
+      _prefetchedProblem: null,
+      _prefetchPromise: null,
       lastResult: null,
       phaseTotal: 0,
       phaseCorrect: 0,
@@ -1236,6 +1238,19 @@
         }
       },
 
+      _parseProblem(problem) {
+        return {
+          id: problem.id,
+          problem_type: problem.problem_type || 'free_response',
+          concept: problem.concept || '',
+          difficulty: problem.difficulty || this.currentDifficulty,
+          prompt: problem.prompt || '',
+          choices: problem.choices || null,
+          correct_answer: null,
+          is_reflection: problem.is_reflection || false,
+        };
+      },
+
       async fetchNextProblem(token) {
         if (!this.sessionId) return;
         if (!token) token = this.session?.access_token;
@@ -1250,6 +1265,26 @@
         if (this.$refs.mathField) this.$refs.mathField.setValue('');
 
         try {
+          // Use prefetched problem if available
+          if (this._prefetchedProblem) {
+            this.currentProblem = this._prefetchedProblem;
+            this._prefetchedProblem = null;
+            this._prefetchPromise = null;
+            return;
+          }
+          // Wait for in-flight prefetch if one is running
+          if (this._prefetchPromise) {
+            try {
+              const problem = await this._prefetchPromise;
+              this._prefetchPromise = null;
+              if (problem) {
+                this.currentProblem = problem;
+                return;
+              }
+            } catch { /* fall through to fresh fetch */ }
+            this._prefetchPromise = null;
+          }
+
           const resp = await fetch(`/test-prep/sessions/${this.sessionId}/next-problem`, {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + token },
@@ -1261,22 +1296,30 @@
             return;
           }
 
-          const problem = await resp.json();
-          this.currentProblem = {
-            id: problem.id,
-            problem_type: problem.problem_type || 'free_response',
-            concept: problem.concept || '',
-            difficulty: problem.difficulty || this.currentDifficulty,
-            prompt: problem.prompt || '',
-            choices: problem.choices || null,
-            correct_answer: null,
-            is_reflection: problem.is_reflection || false,
-          };
+          this.currentProblem = this._parseProblem(await resp.json());
         } catch (err) {
           this.sessionError = 'Failed to load problem: ' + err.message;
         } finally {
           this.problemLoading = false;
         }
+      },
+
+      // Pre-fetch the next problem while the student reviews feedback
+      _startPrefetch() {
+        if (!this.sessionId) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this._prefetchedProblem = null;
+        this._prefetchPromise = fetch(`/test-prep/sessions/${this.sessionId}/next-problem`, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token },
+        }).then(async (resp) => {
+          if (!resp.ok) return null;
+          const problem = this._parseProblem(await resp.json());
+          this._prefetchedProblem = problem;
+          return problem;
+        }).catch(() => null);
       },
 
       async refreshSession() {
@@ -1374,6 +1417,9 @@
 
           // Track for calibration
           this.answerResults.push(result.is_correct ? 1 : 0);
+
+          // Pre-fetch next problem while student reviews feedback
+          this._startPrefetch();
         } catch (err) {
           this.sessionError = 'Failed to submit answer: ' + err.message;
         } finally {
@@ -1423,6 +1469,9 @@
           };
           this.answered = true;
           this.phaseTotal++;
+
+          // Pre-fetch next problem while student reviews
+          this._startPrefetch();
         } catch (err) {
           this.sessionError = 'Failed to save reflection: ' + err.message;
         } finally {
