@@ -395,12 +395,13 @@ async def get_mastery_profile(
     current_user: CurrentUser,
     client: UserClient,
     course_id: int = Query(...),
-    assignment_id: int = Query(...),
+    assignment_id: int | None = Query(default=None),  # noqa: B008
 ) -> list[TestPrepMasteryProfile]:
     """Fetch per-concept mastery profile from homework analyses.
 
-    Aggregates homework analysis results for the specified course
-    and assignment, returning mastery profiles sorted by weakest first.
+    Aggregates ALL homework analyses for the course, returning mastery
+    profiles sorted by weakest first. The assignment_id parameter is
+    accepted but ignored (kept for backward compatibility).
     """
     user_id = current_user["user_id"]
 
@@ -408,7 +409,6 @@ async def get_mastery_profile(
         client=client,
         user_id=UUID(user_id),
         course_id=course_id,
-        assignment_id=assignment_id,
     )
 
 

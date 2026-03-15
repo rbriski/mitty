@@ -1133,7 +1133,7 @@
             id: a.id,
             name: a.name,
             due_at: a.due_at,
-            selected: !analyzedIds.has(a.id),  // pre-select un-analyzed ones
+            selected: false,
             analyzed: analyzedIds.has(a.id),
           }));
         } catch (err) {

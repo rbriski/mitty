@@ -171,13 +171,14 @@ async def build_mastery_profile(
     client: AsyncClient,
     user_id: UUID,
     course_id: int,
-    assignment_id: int,
+    assignment_id: int | None = None,
+    assignment_ids: list[int] | None = None,
     _update_mastery_fn: (Callable[..., Coroutine[Any, Any, Any]] | None) = None,
 ) -> list[TestPrepMasteryProfile]:
     """Build a per-concept mastery profile from homework analyses.
 
     Steps:
-      1. Query ``homework_analyses`` for the given user + assignment.
+      1. Query ``homework_analyses`` for the given user + assignments.
       2. Flatten per-problem results and aggregate by concept.
       3. Compute accuracy (correct / total) per concept.
       4. Map concepts to Sullivan sections (4.1, 4.3-4.7).
@@ -188,7 +189,10 @@ async def build_mastery_profile(
         client: Async Supabase client.
         user_id: The student's user ID.
         course_id: The course ID.
-        assignment_id: The assignment ID whose analyses to aggregate.
+        assignment_id: Single assignment ID (deprecated, kept for compat).
+        assignment_ids: List of assignment IDs to aggregate. If neither
+            this nor assignment_id is provided, queries ALL homework
+            analyses for the course.
         _update_mastery_fn: Optional override for ``update_mastery`` (for
             testing). If None, uses the real ``update_mastery`` function.
 
@@ -199,20 +203,46 @@ async def build_mastery_profile(
     do_update = _update_mastery_fn or update_mastery
 
     # 1. Fetch homework_analyses rows.
-    response = await (
-        client.table("homework_analyses")
-        .select("*")
-        .eq("user_id", str(user_id))
-        .eq("assignment_id", assignment_id)
-        .execute()
-    )
+    # Build the list of assignment IDs to query
+    ids_to_query: list[int] | None = None
+    if assignment_ids:
+        ids_to_query = assignment_ids
+    elif assignment_id:
+        ids_to_query = [assignment_id]
+
+    if ids_to_query:
+        response = await (
+            client.table("homework_analyses")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .in_("assignment_id", ids_to_query)
+            .execute()
+        )
+    else:
+        # No specific IDs — get all analyses for assignments in this course
+        assign_result = await (
+            client.table("assignments")
+            .select("id")
+            .eq("course_id", course_id)
+            .execute()
+        )
+        all_ids = [r["id"] for r in (assign_result.data or [])]
+        if not all_ids:
+            return []
+        response = await (
+            client.table("homework_analyses")
+            .select("*")
+            .eq("user_id", str(user_id))
+            .in_("assignment_id", all_ids)
+            .execute()
+        )
     rows: list[dict[str, Any]] = response.data or []
 
     if not rows:
         logger.info(
-            "No homework analyses found for user=%s assignment=%d",
+            "No homework analyses found for user=%s course=%d",
             user_id,
-            assignment_id,
+            course_id,
         )
         return []
 
