@@ -74,7 +74,7 @@ class TestAssignmentsTable:
         assert "assignments" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("assignments").columns) == 7
+        assert len(_table("assignments").columns) == 8
 
     def test_primary_key(self) -> None:
         pk_cols = [c.name for c in _table("assignments").primary_key]
@@ -1002,7 +1002,7 @@ class TestTestPrepSessionsTable:
         assert "test_prep_sessions" in metadata.tables
 
     def test_column_count(self) -> None:
-        assert len(_table("test_prep_sessions").columns) == 11
+        assert len(_table("test_prep_sessions").columns) == 12
 
     def test_primary_key(self) -> None:
         pk_cols = [c.name for c in _table("test_prep_sessions").primary_key]
