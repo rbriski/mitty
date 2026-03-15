@@ -127,6 +127,12 @@ class SessionState:
     phase_problems: dict[str, int] = field(default_factory=dict)
     phase_correct: dict[str, int] = field(default_factory=dict)
 
+    # Per-concept confidence ratings at phase transitions (US-009 / DEC-008, R5)
+    # Structure: { concept: [ {phase, rating, timestamp}, ... ] }
+    per_concept_confidence: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+
 
 # ---------------------------------------------------------------------------
 # Session engine
@@ -334,6 +340,91 @@ class SessionEngine:
             entry["correct"] += 1
         entry["mastery"] = entry["correct"] / entry["attempted"]
 
+    # -- Confidence tracking (US-009 / DEC-008, R5) --------------------------
+
+    def record_confidence(
+        self,
+        *,
+        concept: str,
+        rating: int,
+        phase: str | None = None,
+    ) -> None:
+        """Record a confidence self-rating (1-5) for a concept.
+
+        Called at phase transitions so we can compare confidence vs
+        actual performance.  Stored in ``state_json.per_concept_confidence``.
+
+        Args:
+            concept: The concept being rated.
+            rating: Student confidence 1-5.
+            phase: Phase label (defaults to current phase).
+        """
+        if rating < 1 or rating > 5:
+            msg = f"Confidence rating must be 1-5, got {rating}"
+            raise ValueError(msg)
+
+        phase_label = phase or self._state.phase.value
+        entry = {
+            "phase": phase_label,
+            "rating": rating,
+        }
+        self._state.per_concept_confidence.setdefault(concept, []).append(entry)
+        logger.debug(
+            "Session %s: confidence %s=%d at phase %s",
+            self._session_id,
+            concept,
+            rating,
+            phase_label,
+        )
+
+    def get_confidence_vs_performance(self) -> list[dict[str, Any]]:
+        """Build a comparison of confidence ratings vs actual performance.
+
+        Returns a list of dicts with concept, confidence checkpoints,
+        and actual mastery for the summary/calibration view.
+        """
+        rows: list[dict[str, Any]] = []
+        all_concepts = set(self._state.per_concept_confidence.keys()) | set(
+            self._state.concept_mastery.keys()
+        )
+        for concept in sorted(all_concepts):
+            checkpoints = self._state.per_concept_confidence.get(concept, [])
+            mastery = self._state.concept_mastery.get(concept, {})
+            attempted = mastery.get("attempted", 0)
+            correct = mastery.get("correct", 0)
+            accuracy = mastery.get("mastery", 0.0)
+
+            # Compute average confidence (normalised to 0-1 scale)
+            ratings = [c["rating"] for c in checkpoints]
+            avg_confidence = (sum(ratings) / len(ratings) / 5.0) if ratings else None
+
+            gap = None
+            gap_label = None
+            if avg_confidence is not None and attempted > 0:
+                gap = avg_confidence - accuracy
+                if abs(gap) < 0.15:
+                    gap_label = "calibrated"
+                elif gap > 0:
+                    gap_label = "overconfident"
+                else:
+                    gap_label = "underconfident"
+
+            rows.append(
+                {
+                    "concept": concept,
+                    "checkpoints": checkpoints,
+                    "attempted": attempted,
+                    "correct": correct,
+                    "accuracy": round(accuracy, 3),
+                    "avg_confidence": (
+                        round(avg_confidence, 3) if avg_confidence is not None else None
+                    ),
+                    "gap": round(gap, 3) if gap is not None else None,
+                    "gap_label": gap_label,
+                }
+            )
+        return rows
+
     # -- Serialization -------------------------------------------------------
 
     def to_state_dict(self) -> dict[str, Any]:
@@ -357,6 +448,7 @@ class SessionEngine:
             "consecutive_wrong": self._state.consecutive_wrong,
             "phase_problems": self._state.phase_problems,
             "phase_correct": self._state.phase_correct,
+            "per_concept_confidence": self._state.per_concept_confidence,
         }
 
     def to_json(self) -> str:
@@ -400,6 +492,9 @@ class SessionEngine:
         engine._state.consecutive_wrong = state_dict.get("consecutive_wrong", 0)
         engine._state.phase_problems = dict(state_dict.get("phase_problems", {}))
         engine._state.phase_correct = dict(state_dict.get("phase_correct", {}))
+        engine._state.per_concept_confidence = {
+            k: list(v) for k, v in state_dict.get("per_concept_confidence", {}).items()
+        }
         return engine
 
     @classmethod
