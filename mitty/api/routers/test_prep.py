@@ -208,9 +208,7 @@ async def _evaluate_answer(
 
     is_correct = normalised_student == normalised_correct
     score = 1.0 if is_correct else 0.0
-    explanation = (
-        "Correct!" if is_correct else f"The correct answer is: {correct_answer}"
-    )
+    explanation = "Correct!" if is_correct else "Not quite."
 
     return {
         "is_correct": is_correct,

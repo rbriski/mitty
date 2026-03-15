@@ -480,9 +480,10 @@
                 </div>
                 <div x-ref="feedbackArea" x-effect="renderMath()">
                   <p class="text-red-700 font-medium" x-text="lastResult?.explanation"></p>
-                  <p class="text-sm text-gray-700 mt-1">
-                    Correct answer: <span class="font-medium" x-text="lastResult?.correct_answer"></span>
-                  </p>
+                  <div class="text-sm text-gray-700 mt-1">
+                    <span class="text-gray-500">Correct answer:</span>
+                    <p class="font-medium whitespace-pre-wrap mt-0.5" x-text="lastResult?.correct_answer"></p>
+                  </div>
                 </div>
               </div>
 
