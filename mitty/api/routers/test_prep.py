@@ -412,6 +412,7 @@ async def create_session(
         user_id=UUID(user_id),
         course_id=data.course_id,
         concepts=data.concepts,
+        session_type=data.session_type,
     )
 
     row = {
@@ -426,6 +427,7 @@ async def create_session(
         "total_correct": 0,
         "duration_seconds": None,
         "phase_reached": engine.current_phase.value,
+        "session_type": data.session_type,
     }
 
     result = await client.table("test_prep_sessions").insert(row).execute()

@@ -790,20 +790,53 @@
           </template>
         </div>
 
+        {# Post-session suggestion (US-006) #}
+        <template x-if="postSessionSuggestionText">
+          <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl mb-6 flex items-start gap-3">
+            <svg class="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <p class="text-sm font-medium text-emerald-800" x-text="postSessionSuggestionText"></p>
+          </div>
+        </template>
+
         {# Action buttons #}
         <div class="flex gap-3">
-          <button
-            @click="resetToSetup()"
-            class="flex-1 py-2.5 text-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
-          >
-            Start New Session
-          </button>
-          <a
-            href="/"
-            class="flex-1 py-2.5 text-center bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
-          >
-            Back to Dashboard
-          </a>
+          {# Back to Mastery Hub when launched from Mastery (US-006) #}
+          <template x-if="fromMastery">
+            <a
+              :href="masteryReturnUrl()"
+              class="flex-1 py-2.5 text-center bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+            >
+              Back to Mastery Hub
+            </a>
+          </template>
+          {# Default: Start New Session + Back to Dashboard #}
+          <template x-if="!fromMastery">
+            <button
+              @click="resetToSetup()"
+              class="flex-1 py-2.5 text-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
+            >
+              Start New Session
+            </button>
+          </template>
+          <template x-if="!fromMastery">
+            <a
+              href="/"
+              class="flex-1 py-2.5 text-center bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+            >
+              Back to Dashboard
+            </a>
+          </template>
+          {# Quick Review CTA (US-006) #}
+          <template x-if="fromMastery && weakestSummaryConcept()">
+            <button
+              @click="startQuickReviewFromSummary()"
+              class="flex-1 py-2.5 text-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
+            >
+              Quick Review
+            </button>
+          </template>
         </div>
       </div>
 
@@ -873,6 +906,9 @@
       postFocusedGaps: [],  // after focused_practice: [{concept, rating, correct, total, gap_label}]
       confidenceComparison: [],  // full comparison from summary
 
+      // Whether user navigated from Mastery Hub (US-006 return flow)
+      fromMastery: false,
+
       // Phase definitions
       phases: [
         { key: 'diagnostic', label: 'Diagnostic' },
@@ -893,7 +929,24 @@
           if (session && this.courses.length === 0) this.fetchCourses();
         });
 
-        if (this.session) this.fetchCourses();
+        if (this.session) {
+          this.fetchCourses();
+
+          // US-006: Check for session_id param (created by Mastery Hub)
+          const urlParams = new URLSearchParams(window.location.search);
+          const sessionIdParam = urlParams.get('session_id');
+          this.fromMastery = urlParams.get('from') === 'mastery';
+
+          if (sessionIdParam) {
+            // Resume a pre-created session
+            this.sessionId = sessionIdParam;
+            this.view = 'session';
+            // Clean URL
+            window.history.replaceState({}, '', '/test-prep');
+            // Load the session and first problem
+            await this.resumeSession(sessionIdParam);
+          }
+        }
       },
 
       async signOut() {
@@ -1193,6 +1246,38 @@
           this.currentDifficulty = sessionData.state_json?.difficulty || this.currentDifficulty;
         } catch (err) {
           this.sessionError = 'Failed to refresh session: ' + err.message;
+        }
+      },
+
+      // ── Resume pre-created session (US-006) ──
+
+      async resumeSession(sessionId) {
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${sessionId}`, {
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+          if (!resp.ok) {
+            this.sessionError = 'Failed to load session.';
+            this.view = 'setup';
+            return;
+          }
+          const sessionData = await resp.json();
+          this.sessionId = sessionData.id;
+          this.currentPhase = sessionData.phase_reached || 'diagnostic';
+          this.currentDifficulty = sessionData.state_json?.difficulty || 0.5;
+          this.selectedCourseId = String(sessionData.course_id || '');
+          this.phaseTotal = 0;
+          this.phaseCorrect = 0;
+          this.confidenceRatings = [];
+          this.answerResults = [];
+          this.view = 'session';
+          await this.fetchNextProblem(token);
+        } catch (err) {
+          this.sessionError = 'Failed to resume session: ' + err.message;
+          this.view = 'setup';
         }
       },
 
@@ -1581,6 +1666,95 @@
           return 'You were more confident than your results suggest. Consider reviewing this material more carefully.';
         } else {
           return 'You performed better than expected! You may know more than you think.';
+        }
+      },
+
+      // ── Post-session helpers (US-006) ──
+
+      get postSessionSuggestionText() {
+        if (!this.summaryData?.mastery_profile || this.summaryData.mastery_profile.length === 0) return '';
+        const best = this.bestImprovedConcept();
+        const weakest = this.weakestSummaryConcept();
+        if (!best) return '';
+        const pct = Math.round(best.mastery_level * 100);
+        let text = `You improved on ${best.concept} (+${pct}%).`;
+        if (weakest && weakest.concept !== best.concept) {
+          text += ` Next focus: ${weakest.concept}.`;
+        }
+        return text;
+      },
+
+      bestImprovedConcept() {
+        const mp = this.summaryData?.mastery_profile || [];
+        if (mp.length === 0) return null;
+        // Pick concept with best accuracy (highest correct/attempted ratio)
+        return [...mp].sort((a, b) => {
+          const aRate = a.problems_attempted > 0 ? a.problems_correct / a.problems_attempted : 0;
+          const bRate = b.problems_attempted > 0 ? b.problems_correct / b.problems_attempted : 0;
+          return bRate - aRate;
+        })[0];
+      },
+
+      weakestSummaryConcept() {
+        const mp = this.summaryData?.mastery_profile || [];
+        if (mp.length === 0) return null;
+        return [...mp].sort((a, b) => a.mastery_level - b.mastery_level)[0];
+      },
+
+      masteryReturnUrl() {
+        const params = new URLSearchParams();
+        params.set('from_session', '1');
+        const best = this.bestImprovedConcept();
+        const weakest = this.weakestSummaryConcept();
+        if (best) {
+          params.set('improved', best.concept);
+          params.set('delta', String(Math.round(best.mastery_level * 100)));
+        }
+        if (weakest && (!best || weakest.concept !== best.concept)) {
+          params.set('next_focus', weakest.concept);
+        }
+        return '/mastery?' + params.toString();
+      },
+
+      async startQuickReviewFromSummary() {
+        const token = this.session?.access_token;
+        if (!token) return;
+        const weakest = this.weakestSummaryConcept();
+        if (!weakest) return;
+        const courseId = this.selectedCourseId || this.summaryData?.course_id;
+        if (!courseId) return;
+
+        try {
+          const resp = await fetch('/test-prep/sessions', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              course_id: parseInt(courseId),
+              concepts: [weakest.concept],
+              session_type: 'quick',
+            }),
+          });
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to create session.';
+            return;
+          }
+          const sessionData = await resp.json();
+          this.sessionId = sessionData.id;
+          this.currentPhase = sessionData.phase_reached || 'diagnostic';
+          this.currentDifficulty = sessionData.state_json?.difficulty || 0.5;
+          this.summaryData = null;
+          this.phaseTotal = 0;
+          this.phaseCorrect = 0;
+          this.confidenceRatings = [];
+          this.answerResults = [];
+          this.view = 'session';
+          await this.fetchNextProblem(token);
+        } catch (err) {
+          this.sessionError = 'Failed to start quick review: ' + err.message;
         }
       },
 
