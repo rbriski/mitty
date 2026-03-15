@@ -967,6 +967,8 @@ class TestPrepAnswerResult(BaseModel):
     is_correct: bool
     score: float = Field(ge=0.0, le=1.0)
     explanation: str
+    correct_answer: str | None = None
+    worked_solution: str | None = None
     next_problem: TestPrepProblem | None = None
 
 

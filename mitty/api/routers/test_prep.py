@@ -571,6 +571,8 @@ async def submit_answer(
         is_correct=evaluation["is_correct"],
         score=evaluation["score"],
         explanation=evaluation["explanation"],
+        correct_answer=str(problem_json.get("correct_answer", "")),
+        worked_solution=problem_json.get("explanation", None),
         next_problem=None,  # Next problem generated on demand by the client
     )
 
