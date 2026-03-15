@@ -99,6 +99,96 @@ async def _verify_session_ownership(
     return result.data
 
 
+async def _build_student_context(
+    client: AsyncClient,
+    *,
+    user_id: str,
+    course_id: int | None,
+    assessment_id: int | None,
+    concept: str,
+) -> str | None:
+    """Build context string from homework analysis and resource chunks.
+
+    Gives the problem generator real data about:
+    - What the student got right/wrong on the homework
+    - Relevant textbook/resource content for the concept
+    """
+    parts: list[str] = []
+
+    # 1. Homework analysis — what the student struggled with
+    if assessment_id:
+        try:
+            hw_result = await (
+                client.table("homework_analyses")
+                .select("analysis_json")
+                .eq("user_id", user_id)
+                .eq("assignment_id", assessment_id)
+                .limit(3)
+                .execute()
+            )
+            if hw_result.data:
+                hw_lines: list[str] = []
+                for row in hw_result.data:
+                    aj = row.get("analysis_json", {})
+                    for prob in aj.get("per_problem", []):
+                        prob_concept = prob.get("concept", "")
+                        correctness = prob.get("correctness", 0)
+                        error = prob.get("error_type")
+                        line = (
+                            f"  Problem {prob.get('problem_number', '?')}: "
+                            f"concept={prob_concept}, "
+                            f"correctness={correctness}"
+                        )
+                        if error:
+                            line += f", error_type={error}"
+                        hw_lines.append(line)
+                    summary = aj.get("summary", {})
+                    if summary.get("areas_for_improvement"):
+                        hw_lines.append(
+                            "  Areas for improvement: "
+                            + "; ".join(summary["areas_for_improvement"])
+                        )
+                if hw_lines:
+                    parts.append(
+                        "HOMEWORK ANALYSIS (student's recent work):\n"
+                        + "\n".join(hw_lines)
+                    )
+        except Exception:
+            logger.debug("Failed to fetch homework analysis", exc_info=True)
+
+    # 2. Resource chunks — relevant textbook/course content
+    #    Join through resources table to filter by course_id and get title.
+    if course_id:
+        try:
+            chunk_result = await (
+                client.table("resource_chunks")
+                .select("content_text, resources!inner(title, course_id)")
+                .eq("resources.course_id", course_id)
+                .ilike("content_text", f"%{concept}%")
+                .limit(3)
+                .execute()
+            )
+            if chunk_result.data:
+                chunk_lines = []
+                for chunk in chunk_result.data:
+                    res = chunk.get("resources", {})
+                    title = res.get("title", "") if res else ""
+                    text = chunk.get("content_text", "")
+                    # Truncate long chunks
+                    if len(text) > 500:
+                        text = text[:500] + "..."
+                    prefix = f"  [{title}] " if title else "  "
+                    chunk_lines.append(prefix + text)
+                if chunk_lines:
+                    parts.append(
+                        "TEXTBOOK/RESOURCE CONTENT:\n" + "\n".join(chunk_lines)
+                    )
+        except Exception:
+            logger.debug("Failed to fetch resource chunks", exc_info=True)
+
+    return "\n\n".join(parts) if parts else None
+
+
 async def _evaluate_answer(
     *,
     problem_json: dict[str, Any],
@@ -547,11 +637,21 @@ async def next_problem(
             },
         )
 
+    # Build student context from homework analysis + resource chunks
+    student_context = await _build_student_context(
+        client,
+        user_id=user_id,
+        course_id=state_json.get("course_id"),
+        assessment_id=session_data.get("assessment_id"),
+        concept=concept,
+    )
+
     problem_dict = await generate_problem(
         concept=concept,
         difficulty=difficulty,
         problem_type=problem_type,
         ai_client=ai_client,
+        student_context=student_context,
         user_id=user_id,
         supabase_client=client,
     )
