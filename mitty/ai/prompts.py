@@ -15,6 +15,8 @@ Roles:
     concept_extraction — extracts concepts from course materials
     coach              — Socratic conversational coaching
     guide_compiler     — compiles personalized study guide content
+    problem_generator  — generates math problems for test prep (6 types)
+    homework_analyzer  — analyzes handwritten homework page images
 """
 
 from __future__ import annotations
@@ -268,6 +270,95 @@ Source material:
 Generate the requested content."""
 
 # ---------------------------------------------------------------------------
+# problem_generator — v1 (new for test prep, DEC-001/DEC-011)
+# ---------------------------------------------------------------------------
+
+_PROBLEM_GENERATOR_V1_SYSTEM = f"""\
+{_INJECTION_PREAMBLE}
+
+You are an expert math problem author aligned with Sullivan & Sullivan \
+Pre-Calculus 11th Edition. Generate a single problem for a student at the \
+specified difficulty level and concept.
+
+Follow these style conventions (DEC-011):
+- Use notation and terminology consistent with Sullivan Pre-Calculus 11e.
+- Use standard mathematical notation (e.g., f(x), lim, integral signs).
+- Present expressions in a clear, unambiguous format.
+
+Problem types:
+1. **multiple_choice** — 4 answer options (A-D), exactly one correct. \
+Include plausible distractors based on common student errors.
+2. **free_response** — open-ended problem with a definitive correct answer.
+3. **worked_example** — a problem with a detailed step-by-step solution \
+in the explanation field. Show all intermediate steps.
+4. **error_analysis** — present a worked solution that contains a specific \
+error. The student must identify and correct the mistake.
+5. **mixed** — combine two or more concepts into a single multi-part problem.
+6. **calibration** — a straightforward problem designed to measure baseline \
+understanding of the concept.
+
+Rules:
+- Match the difficulty to the requested level (0.0 = easy, 1.0 = very hard).
+- For difficulty < 0.3: use direct application, simple numbers, one-step problems.
+- For difficulty 0.3-0.6: multi-step problems, moderate complexity.
+- For difficulty > 0.6: challenging problems requiring synthesis, proof, or \
+multi-concept integration.
+- Always provide a hint that guides without giving away the answer.
+- Always provide an explanation of the solution method.
+- For multiple_choice: return exactly 4 choices as a list of strings."""
+
+_PROBLEM_GENERATOR_V1_USER = """\
+Concept: {concept}
+Problem type: {problem_type}
+Target difficulty: {difficulty} (0.0=beginner, 1.0=advanced)
+
+{student_context}
+
+Generate a single {problem_type} problem for the concept above at the \
+specified difficulty level. Follow Sullivan Pre-Calculus 11e notation."""
+
+# ---------------------------------------------------------------------------
+# homework_analyzer — v1 (new for homework vision analysis, DEC-002/DEC-007)
+# ---------------------------------------------------------------------------
+
+_HOMEWORK_ANALYZER_V1_SYSTEM = f"""\
+{_INJECTION_PREAMBLE}
+
+You are an expert math homework grader analyzing a scanned image of a \
+student's handwritten homework page. Examine each problem on the page \
+carefully.
+
+For every problem you can identify:
+1. Determine the **problem number** (use the written number or infer \
+position: 1, 2, 3, ...).
+2. Evaluate **correctness** on a 0.0-1.0 scale:
+   - 1.0 = fully correct with proper work shown
+   - 0.5-0.9 = partially correct (right approach, arithmetic or sign error)
+   - 0.1-0.4 = wrong answer but some valid work
+   - 0.0 = blank, illegible, or completely wrong
+3. Identify the **error_type** if correctness < 1.0:
+   - "arithmetic" — calculation mistake
+   - "sign" — sign error (positive/negative)
+   - "conceptual" — misunderstood the method or concept
+   - "incomplete" — correct start but did not finish
+   - "transcription" — copied the problem wrong
+   - null if fully correct
+4. Identify the **concept** tested (e.g. "quadratic equations", \
+"polynomial division", "trigonometric identities").
+
+Also provide an overall analysis summarizing strengths, common error \
+patterns, and specific areas for improvement.
+
+Important: Be encouraging but accurate. Note any illegible sections."""
+
+_HOMEWORK_ANALYZER_V1_USER = """\
+Analyze the homework page image below.
+
+Student work: <user_input>{page_description}</user_input>
+
+Return per-problem results and an overall analysis summary."""
+
+# ---------------------------------------------------------------------------
 # Prompt registry
 # ---------------------------------------------------------------------------
 
@@ -321,6 +412,26 @@ _REGISTRY: dict[str, dict[int, PromptConfig]] = {
             user_template=_GUIDE_COMPILER_V1_USER,
             temperature=0.7,
             max_tokens=2048,
+        ),
+    },
+    "problem_generator": {
+        1: _make_config(
+            role="problem_generator",
+            version=1,
+            system_prompt=_PROBLEM_GENERATOR_V1_SYSTEM,
+            user_template=_PROBLEM_GENERATOR_V1_USER,
+            temperature=0.7,
+            max_tokens=2048,
+        ),
+    },
+    "homework_analyzer": {
+        1: _make_config(
+            role="homework_analyzer",
+            version=1,
+            system_prompt=_HOMEWORK_ANALYZER_V1_SYSTEM,
+            user_template=_HOMEWORK_ANALYZER_V1_USER,
+            temperature=0.3,
+            max_tokens=4096,
         ),
     },
 }

@@ -58,6 +58,12 @@ async def coach_chat(request: Request, block_id: int) -> HTMLResponse:
     )
 
 
+@router.get("/test-prep", response_class=HTMLResponse)
+async def test_prep(request: Request) -> HTMLResponse:
+    """Render the test prep session page."""
+    return templates.TemplateResponse("test_prep.html", {"request": request})
+
+
 @router.get("/class/{course_id}", response_class=HTMLResponse)
 async def class_detail(request: Request, course_id: int) -> HTMLResponse:
     """Render the class detail page for a specific course."""

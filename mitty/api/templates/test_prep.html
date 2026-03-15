@@ -1,0 +1,1212 @@
+{% extends "base.html" %}
+
+{% block title %}Mitty — Test Prep{% endblock %}
+
+{% block nav %}
+{# Hide default nav; Alpine.js controls nav visibility based on auth state #}
+{% endblock %}
+
+{% block content %}
+<div x-data="testPrepApp()" x-init="init()" x-cloak>
+
+  {# ── Nav (only when authenticated) ── #}
+  <template x-if="session">
+    <nav class="bg-white shadow-sm border-b border-gray-200 -mx-4 -mt-6 mb-6">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="flex items-center justify-between h-14">
+          <a href="/" class="text-xl font-bold text-mitty-700 hover:text-mitty-600 transition-colors">
+            Mitty
+          </a>
+          <div class="flex items-center space-x-6">
+            <a href="/"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Dashboard
+            </a>
+            <a href="/study-plan"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Study Plan
+            </a>
+            <a href="/mastery"
+               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
+              Mastery
+            </a>
+            <a href="/test-prep"
+               class="text-sm font-medium text-mitty-600 border-b-2 border-mitty-600 pb-0.5">
+              Test Prep
+            </a>
+            <button
+              @click="signOut()"
+              class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </template>
+
+  {# ── Not authenticated ── #}
+  <template x-if="!session">
+    <div class="text-center py-16">
+      <p class="text-gray-500 mb-4">Please sign in to start a test prep session.</p>
+      <a href="/" class="text-mitty-600 hover:text-mitty-700 font-medium">Go to Dashboard</a>
+    </div>
+  </template>
+
+  {# ── Authenticated Content ── #}
+  <template x-if="session">
+    <div class="max-w-4xl mx-auto py-8">
+
+      {# Back button #}
+      <a href="/" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1 mb-6 transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Dashboard
+      </a>
+
+      {# ════════════════════════════════════════════
+         View 1: Setup / Homework Analysis
+         ════════════════════════════════════════════ #}
+      <div x-show="view === 'setup'">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Test Prep</h1>
+          <p class="text-sm text-gray-500 mt-1">Analyze your homework and start an adaptive practice session</p>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Homework Analysis</h2>
+
+          {# Course selector #}
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Course</label>
+            <select
+              x-model="selectedCourseId"
+              @change="selectedAssignmentId = ''; assignments = []; fetchAssignments()"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
+            >
+              <option value="">Select a course</option>
+              <template x-for="c in courses" :key="c.id">
+                <option :value="c.id" x-text="c.name"></option>
+              </template>
+            </select>
+          </div>
+
+          {# Assignment selector #}
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Assignment</label>
+            <select
+              x-model="selectedAssignmentId"
+              :disabled="!selectedCourseId"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
+            >
+              <option value="">Select an assignment</option>
+              <template x-for="a in assignments" :key="a.id">
+                <option :value="a.id" x-text="a.name"></option>
+              </template>
+            </select>
+          </div>
+
+          {# Analyze button #}
+          <button
+            @click="analyzeHomework()"
+            :disabled="!selectedCourseId || !selectedAssignmentId || analyzing"
+            class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+          >
+            <span x-show="!analyzing">Analyze Homework</span>
+            <span x-show="analyzing" class="flex items-center justify-center gap-2">
+              <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+              Analyzing...
+            </span>
+          </button>
+        </div>
+
+        {# SSE progress display #}
+        <div x-show="analysisEvents.length > 0" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+          <h3 class="text-sm font-semibold text-gray-900 mb-3">Analysis Progress</h3>
+          <div class="space-y-2">
+            <template x-for="(evt, idx) in analysisEvents" :key="'evt-' + idx">
+              <div class="flex items-center gap-2 text-sm">
+                <span
+                  class="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-full text-xs"
+                  :class="{
+                    'bg-mitty-100 text-mitty-600': evt.status === 'started',
+                    'bg-emerald-100 text-emerald-600': evt.status === 'page_complete' || evt.status === 'complete',
+                    'bg-red-100 text-red-600': evt.status === 'error'
+                  }"
+                >
+                  <span x-show="evt.status === 'started'">...</span>
+                  <span x-show="evt.status === 'page_complete' || evt.status === 'complete'">&#10003;</span>
+                  <span x-show="evt.status === 'error'">&#10007;</span>
+                </span>
+                <span class="text-gray-700" x-text="evt.message"></span>
+              </div>
+            </template>
+          </div>
+
+          {# View Mastery Profile button after analysis complete #}
+          <button
+            x-show="analysisComplete"
+            @click="fetchMasteryProfile()"
+            class="mt-4 w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+          >
+            View Mastery Profile
+          </button>
+
+          {# Error retry button #}
+          <button
+            x-show="analysisError"
+            @click="analysisEvents = []; analysisError = false; analysisComplete = false"
+            class="mt-4 w-full py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
+
+        {# Setup error message #}
+        <div x-show="setupError" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-6">
+          <p class="text-sm text-red-700" x-text="setupError"></p>
+        </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         View 2: Mastery Heat Map
+         ════════════════════════════════════════════ #}
+      <div x-show="view === 'mastery'">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900">Mastery Profile</h1>
+            <p class="text-sm text-gray-500 mt-1">Concept mastery from homework analysis</p>
+          </div>
+          <button
+            @click="view = 'setup'"
+            class="text-sm text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            Back to Setup
+          </button>
+        </div>
+
+        {# Loading state #}
+        <div x-show="masteryLoading" class="text-center py-12">
+          <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+          <p class="text-sm text-gray-500 mt-3">Loading mastery profile...</p>
+        </div>
+
+        {# Empty state #}
+        <div x-show="!masteryLoading && masteryProfile.length === 0" class="text-center py-12">
+          <p class="text-gray-500">No mastery data found for this assignment.</p>
+          <button @click="view = 'setup'" class="text-mitty-600 hover:text-mitty-700 font-medium mt-2">Back to Setup</button>
+        </div>
+
+        {# Heat map grid #}
+        <div x-show="!masteryLoading && masteryProfile.length > 0">
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mb-6">
+            <template x-for="concept in masteryProfile" :key="concept.concept">
+              <div
+                class="rounded-xl p-4 border cursor-pointer transition-all"
+                :class="{
+                  'bg-red-50 border-red-200 hover:border-red-400': concept.mastery_level < 0.3,
+                  'bg-yellow-50 border-yellow-200 hover:border-yellow-400': concept.mastery_level >= 0.3 && concept.mastery_level < 0.7,
+                  'bg-emerald-50 border-emerald-200 hover:border-emerald-400': concept.mastery_level >= 0.7,
+                }"
+                @click="toggleConceptSelection(concept.concept)"
+              >
+                <div class="flex items-center justify-between mb-1">
+                  <input
+                    type="checkbox"
+                    :checked="selectedConcepts.includes(concept.concept)"
+                    class="w-4 h-4 text-mitty-600 rounded border-gray-300 focus:ring-mitty-500"
+                    @click.stop="toggleConceptSelection(concept.concept)"
+                  >
+                  <span
+                    class="text-xs font-bold"
+                    :class="{
+                      'text-red-700': concept.mastery_level < 0.3,
+                      'text-yellow-700': concept.mastery_level >= 0.3 && concept.mastery_level < 0.7,
+                      'text-emerald-700': concept.mastery_level >= 0.7,
+                    }"
+                    x-text="Math.round(concept.mastery_level * 100) + '%'"
+                  ></span>
+                </div>
+                <p class="text-sm font-medium text-gray-900 leading-snug" x-text="concept.concept"></p>
+                <p class="text-xs text-gray-500 mt-1" x-text="concept.problems_attempted + ' attempted, ' + concept.problems_correct + ' correct'"></p>
+              </div>
+            </template>
+          </div>
+
+          {# Start session button #}
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-sm text-gray-600">
+                <span x-text="selectedConcepts.length"></span> concepts selected
+              </p>
+              <button
+                @click="selectAllConcepts()"
+                class="text-xs text-mitty-600 hover:text-mitty-700 font-medium"
+              >
+                Select All
+              </button>
+            </div>
+            <button
+              @click="startSession()"
+              :disabled="selectedConcepts.length === 0 || sessionStarting"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+            >
+              <span x-show="!sessionStarting">Start Test Prep Session</span>
+              <span x-show="sessionStarting" class="flex items-center justify-center gap-2">
+                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                Starting...
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         View 3: Active Session (5 phases)
+         ════════════════════════════════════════════ #}
+      <div x-show="view === 'session'">
+
+        {# Phase indicator bar #}
+        <div class="mb-6">
+          <div class="flex items-center gap-1 mb-4">
+            <template x-for="(phase, idx) in phases" :key="phase.key">
+              <div class="flex items-center" :class="idx < phases.length - 1 ? 'flex-1' : ''">
+                <div
+                  class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+                  :class="{
+                    'bg-mitty-600 text-white': currentPhase === phase.key,
+                    'bg-emerald-100 text-emerald-700': phaseIndex(phase.key) < phaseIndex(currentPhase),
+                    'bg-gray-100 text-gray-400': phaseIndex(phase.key) > phaseIndex(currentPhase),
+                  }"
+                >
+                  <span x-text="idx + 1"></span>
+                  <span class="hidden sm:inline" x-text="phase.label"></span>
+                </div>
+                <div
+                  x-show="idx < phases.length - 1"
+                  class="flex-1 h-0.5 mx-1"
+                  :class="phaseIndex(phase.key) < phaseIndex(currentPhase) ? 'bg-emerald-300' : 'bg-gray-200'"
+                ></div>
+              </div>
+            </template>
+          </div>
+
+          {# Phase progress #}
+          <div class="flex items-center justify-between text-sm">
+            <div class="flex items-center gap-2">
+              <span class="font-medium text-gray-900" x-text="phaseLabel(currentPhase)"></span>
+              <span
+                class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600"
+                x-text="'Difficulty: ' + Math.round(currentDifficulty * 100) + '%'"
+              ></span>
+            </div>
+            <span class="text-gray-500" x-text="phaseCorrect + '/' + phaseTotal + ' correct'"></span>
+          </div>
+        </div>
+
+        {# Problem loading state #}
+        <div x-show="problemLoading" class="text-center py-16">
+          <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+          <p class="text-sm text-gray-500 mt-3">Loading next problem...</p>
+        </div>
+
+        {# Problem display #}
+        <div x-show="!problemLoading && currentProblem" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
+          {# Problem type + concept badges #}
+          <div class="flex items-center gap-2 mb-4">
+            <span
+              class="inline-block px-2.5 py-0.5 rounded-full text-xs font-medium"
+              :class="problemTypeBadge(currentProblem?.problem_type)"
+              x-text="problemTypeLabel(currentProblem?.problem_type)"
+            ></span>
+            <span class="text-xs text-gray-400" x-text="currentProblem?.concept"></span>
+          </div>
+
+          {# Problem text with KaTeX rendering #}
+          <div x-ref="problemArea" class="mb-6">
+            <p class="text-gray-900 font-medium leading-relaxed whitespace-pre-wrap" x-text="currentProblem?.prompt" x-effect="renderMath()"></p>
+          </div>
+
+          {# Multiple choice options #}
+          <template x-if="currentProblem?.choices && currentProblem.choices.length > 0">
+            <div x-ref="choicesArea" class="space-y-2 mb-6">
+              <template x-for="(choice, idx) in currentProblem.choices" :key="'choice-' + idx">
+                <button
+                  type="button"
+                  @click="studentAnswer = choice"
+                  :disabled="answered"
+                  class="w-full text-left px-4 py-3 rounded-lg border transition-colors text-sm"
+                  :class="studentAnswer === choice
+                    ? 'bg-mitty-50 border-mitty-400 text-mitty-900'
+                    : 'bg-white border-gray-200 text-gray-700 hover:border-mitty-300 disabled:opacity-50'"
+                >
+                  <span x-text="choice"></span>
+                </button>
+              </template>
+            </div>
+          </template>
+
+          {# Free-form answer input #}
+          <template x-if="!currentProblem?.choices || currentProblem.choices.length === 0">
+            <div class="mb-6">
+              <textarea
+                x-model="studentAnswer"
+                :disabled="answered"
+                rows="3"
+                maxlength="5000"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm resize-none disabled:bg-gray-50 disabled:cursor-not-allowed"
+                placeholder="Type your answer..."
+              ></textarea>
+            </div>
+          </template>
+
+          {# Submit button (before answer) #}
+          <div x-show="!answered">
+            <button
+              @click="submitAnswer()"
+              :disabled="!studentAnswer || submitting"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+            >
+              <span x-show="!submitting">Submit Answer</span>
+              <span x-show="submitting" class="flex items-center justify-center gap-2">
+                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                Checking...
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {# Feedback display (after answer) #}
+        <div x-show="answered && lastResult" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
+          <div class="flex items-center gap-3 mb-4">
+            <div
+              class="w-10 h-10 rounded-full flex items-center justify-center text-lg"
+              :class="lastResult?.is_correct ? 'bg-emerald-100' : 'bg-red-100'"
+            >
+              <span x-text="lastResult?.is_correct ? '\u2713' : '\u2717'"></span>
+            </div>
+            <div>
+              <p
+                class="font-semibold"
+                :class="lastResult?.is_correct ? 'text-emerald-700' : 'text-red-700'"
+                x-text="lastResult?.is_correct ? 'Correct!' : 'Incorrect'"
+              ></p>
+              <p class="text-xs text-gray-500" x-text="'Score: ' + Math.round((lastResult?.score || 0) * 100) + '%'"></p>
+            </div>
+          </div>
+
+          {# Explanation #}
+          <div x-ref="feedbackArea" class="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4">
+            <p class="text-sm text-gray-700 leading-relaxed" x-text="lastResult?.explanation" x-effect="renderMath()"></p>
+          </div>
+
+          {# Next problem / skip phase / complete buttons #}
+          <div class="flex gap-2">
+            <button
+              @click="nextProblem()"
+              class="flex-1 py-2.5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+            >
+              Next Problem
+            </button>
+            <button
+              @click="skipPhase()"
+              :disabled="skippingPhase"
+              class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+            >
+              Skip Phase
+            </button>
+            <button
+              @click="completeSession()"
+              :disabled="completing"
+              class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+            >
+              Finish
+            </button>
+          </div>
+        </div>
+
+        {# Session error #}
+        <div x-show="sessionError" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-4">
+          <p class="text-sm text-red-700" x-text="sessionError"></p>
+        </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         View 4: Session Complete / Summary
+         ════════════════════════════════════════════ #}
+      <div x-show="view === 'summary'">
+
+        {# Summary header #}
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 text-center mb-6">
+          <div class="inline-flex items-center justify-center w-16 h-16 rounded-full mb-4"
+               :class="summaryData?.total_problems > 0 && (summaryData?.total_correct / summaryData?.total_problems) >= 0.7 ? 'bg-emerald-100' : 'bg-amber-100'">
+            <span class="text-3xl" x-text="summaryData?.total_problems > 0 && (summaryData?.total_correct / summaryData?.total_problems) >= 0.7 ? '\u2713' : '\u270F'"></span>
+          </div>
+          <h2 class="text-xl font-bold text-gray-900 mb-1">Session Complete</h2>
+
+          {# Score summary #}
+          <div class="inline-flex items-center gap-4 bg-gray-50 rounded-xl px-6 py-4 mb-4">
+            <div class="text-center">
+              <p class="text-2xl font-bold"
+                 :class="summaryData?.total_problems > 0 && (summaryData?.total_correct / summaryData?.total_problems) >= 0.7 ? 'text-emerald-600' : 'text-amber-600'"
+                 x-text="(summaryData?.total_correct || 0) + '/' + (summaryData?.total_problems || 0)"></p>
+              <p class="text-xs text-gray-500">Correct</p>
+            </div>
+            <div class="w-px h-10 bg-gray-200"></div>
+            <div class="text-center">
+              <p class="text-2xl font-bold text-gray-700"
+                 x-text="summaryData?.duration_seconds ? formatDuration(summaryData.duration_seconds) : '--'"></p>
+              <p class="text-xs text-gray-500">Duration</p>
+            </div>
+          </div>
+        </div>
+
+        {# Phase score breakdown #}
+        <template x-if="summaryData?.phase_scores && summaryData.phase_scores.length > 0">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h3 class="text-sm font-semibold text-gray-900 mb-3">Phase Breakdown</h3>
+            <div class="space-y-3">
+              <template x-for="ps in summaryData.phase_scores" :key="ps.phase">
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm text-gray-700" x-text="phaseLabel(ps.phase)"></span>
+                    <span class="text-xs font-medium text-gray-500" x-text="ps.correct + '/' + ps.total + ' (' + Math.round(ps.accuracy * 100) + '%)'"></span>
+                  </div>
+                  <div class="w-full bg-gray-100 rounded-full h-2">
+                    <div
+                      class="h-2 rounded-full transition-all duration-500"
+                      :class="ps.accuracy >= 0.7 ? 'bg-emerald-500' : ps.accuracy >= 0.4 ? 'bg-yellow-500' : 'bg-red-400'"
+                      :style="'width: ' + Math.round(ps.accuracy * 100) + '%'"
+                    ></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        {# Per-concept mastery profile #}
+        <template x-if="summaryData?.mastery_profile && summaryData.mastery_profile.length > 0">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h3 class="text-sm font-semibold text-gray-900 mb-3">Concept Mastery</h3>
+            <div class="space-y-3">
+              <template x-for="mp in summaryData.mastery_profile" :key="mp.concept">
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm text-gray-700" x-text="mp.concept"></span>
+                    <span class="text-xs font-medium text-gray-500" x-text="Math.round(mp.mastery_level * 100) + '%'"></span>
+                  </div>
+                  <div class="w-full bg-gray-100 rounded-full h-2">
+                    <div
+                      class="h-2 rounded-full transition-all duration-500"
+                      :class="mp.mastery_level >= 0.7 ? 'bg-emerald-500' : mp.mastery_level >= 0.3 ? 'bg-yellow-500' : 'bg-red-400'"
+                      :style="'width: ' + Math.round(mp.mastery_level * 100) + '%'"
+                    ></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        {# Recommendations #}
+        <template x-if="summaryData?.recommendations && summaryData.recommendations.length > 0">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h3 class="text-sm font-semibold text-gray-900 mb-3">Recommendations</h3>
+            <div class="space-y-2">
+              <template x-for="(rec, idx) in summaryData.recommendations" :key="'rec-' + idx">
+                <div class="flex items-start gap-2 text-sm">
+                  <svg class="w-4 h-4 text-mitty-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                  </svg>
+                  <span class="text-gray-700" x-text="rec"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        {# Confidence calibration chart #}
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+          <h3 class="text-sm font-semibold text-gray-900 mb-3">Confidence Calibration</h3>
+          <p class="text-sm text-gray-500 mb-4" x-text="calibrationMessage"></p>
+          <div class="flex items-end gap-4 justify-center">
+            <div class="text-center">
+              <div class="w-16 bg-gray-100 rounded-t-lg relative" style="height: 120px;">
+                <div
+                  class="absolute bottom-0 w-full bg-blue-400 rounded-t-lg transition-all duration-500"
+                  :style="'height: ' + Math.round(avgConfidence * 100) + '%'"
+                ></div>
+              </div>
+              <p class="text-xs text-gray-500 mt-2">Confidence</p>
+              <p class="text-sm font-medium text-gray-700" x-text="Math.round(avgConfidence * 100) + '%'"></p>
+            </div>
+            <div class="text-center">
+              <div class="w-16 bg-gray-100 rounded-t-lg relative" style="height: 120px;">
+                <div
+                  class="absolute bottom-0 w-full bg-emerald-400 rounded-t-lg transition-all duration-500"
+                  :style="'height: ' + Math.round(avgAccuracy * 100) + '%'"
+                ></div>
+              </div>
+              <p class="text-xs text-gray-500 mt-2">Accuracy</p>
+              <p class="text-sm font-medium text-gray-700" x-text="Math.round(avgAccuracy * 100) + '%'"></p>
+            </div>
+          </div>
+        </div>
+
+        {# Action buttons #}
+        <div class="flex gap-3">
+          <button
+            @click="resetToSetup()"
+            class="flex-1 py-2.5 text-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
+          >
+            Start New Session
+          </button>
+          <a
+            href="/"
+            class="flex-1 py-2.5 text-center bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+          >
+            Back to Dashboard
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
+
+  function testPrepApp() {
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    return {
+      session: null,
+
+      // View state: setup | mastery | session | summary
+      view: 'setup',
+
+      // ── Setup state ──
+      courses: [],
+      assignments: [],
+      selectedCourseId: '',
+      selectedAssignmentId: '',
+      analyzing: false,
+      analysisEvents: [],
+      analysisComplete: false,
+      analysisError: false,
+      setupError: '',
+
+      // ── Mastery state ──
+      masteryProfile: [],
+      masteryLoading: false,
+      selectedConcepts: [],
+
+      // ── Session state ──
+      sessionId: null,
+      sessionStarting: false,
+      currentPhase: 'diagnostic',
+      currentDifficulty: 0.5,
+      currentProblem: null,
+      studentAnswer: '',
+      answered: false,
+      submitting: false,
+      problemLoading: false,
+      lastResult: null,
+      phaseTotal: 0,
+      phaseCorrect: 0,
+      skippingPhase: false,
+      completing: false,
+      sessionError: '',
+
+      // ── Summary state ──
+      summaryData: null,
+
+      // ── Confidence tracking ──
+      confidenceRatings: [],
+      answerResults: [],
+
+      // Phase definitions
+      phases: [
+        { key: 'diagnostic', label: 'Diagnostic' },
+        { key: 'focused_practice', label: 'Practice' },
+        { key: 'error_analysis', label: 'Errors' },
+        { key: 'mixed_test', label: 'Mixed' },
+        { key: 'calibration', label: 'Calibration' },
+      ],
+
+      // ── Lifecycle ──
+
+      async init() {
+        const { data: { session } } = await supabase.auth.getSession();
+        this.session = session;
+
+        supabase.auth.onAuthStateChange((_event, session) => {
+          this.session = session;
+          if (session && this.courses.length === 0) this.fetchCourses();
+        });
+
+        if (this.session) this.fetchCourses();
+      },
+
+      async signOut() {
+        await supabase.auth.signOut();
+        this.session = null;
+        window.location.href = '/';
+      },
+
+      // ── Setup helpers ──
+
+      async fetchCourses() {
+        try {
+          const CURRENT_TERM = '2025-2026 Second Semester';
+          const { data, error } = await supabase
+            .from('enrollments')
+            .select('course_id, courses (id, name, workflow_state, term_name)')
+            .eq('enrollment_state', 'active');
+          if (error) {
+            this.setupError = 'Failed to load courses.';
+            return;
+          }
+          this.courses = (data || [])
+            .filter(e => e.courses
+              && e.courses.workflow_state === 'available'
+              && e.courses.term_name === CURRENT_TERM)
+            .map(e => ({ id: e.courses.id, name: e.courses.name }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+          // Deduplicate
+          const seen = new Set();
+          this.courses = this.courses.filter(c => {
+            if (seen.has(c.id)) return false;
+            seen.add(c.id);
+            return true;
+          });
+        } catch (err) {
+          this.setupError = 'Failed to load courses: ' + err.message;
+        }
+      },
+
+      async fetchAssignments() {
+        if (!this.selectedCourseId) {
+          this.assignments = [];
+          return;
+        }
+        try {
+          const { data, error } = await supabase
+            .from('assignments')
+            .select('id, name')
+            .eq('course_id', parseInt(this.selectedCourseId))
+            .order('due_at', { ascending: false });
+          if (error) {
+            this.setupError = 'Failed to load assignments.';
+            return;
+          }
+          this.assignments = data || [];
+        } catch (err) {
+          this.setupError = 'Failed to load assignments: ' + err.message;
+        }
+      },
+
+      // ── Homework Analysis (SSE) ──
+
+      async analyzeHomework() {
+        if (!this.selectedCourseId || !this.selectedAssignmentId || this.analyzing) return;
+        const token = this.session?.access_token;
+        if (!token) {
+          this.setupError = 'Not authenticated.';
+          return;
+        }
+
+        this.analyzing = true;
+        this.analysisEvents = [];
+        this.analysisComplete = false;
+        this.analysisError = false;
+        this.setupError = '';
+
+        try {
+          const resp = await fetch('/test-prep/analyze-homework', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              assignment_id: parseInt(this.selectedAssignmentId),
+              course_id: parseInt(this.selectedCourseId),
+            }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            const msg = errData?.detail?.message || errData?.detail || 'Analysis request failed';
+            this.setupError = typeof msg === 'string' ? msg : JSON.stringify(msg);
+            this.analyzing = false;
+            return;
+          }
+
+          // Read SSE stream
+          const reader = resp.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const evt = JSON.parse(line.slice(6));
+                  this.analysisEvents.push(evt);
+
+                  if (evt.status === 'complete') {
+                    this.analysisComplete = true;
+                  } else if (evt.status === 'error') {
+                    this.analysisError = true;
+                  }
+                } catch (parseErr) {
+                  // Skip malformed events
+                }
+              }
+            }
+          }
+        } catch (err) {
+          this.setupError = 'Analysis failed: ' + err.message;
+          this.analysisError = true;
+        } finally {
+          this.analyzing = false;
+        }
+      },
+
+      // ── Mastery Profile ──
+
+      async fetchMasteryProfile() {
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.view = 'mastery';
+        this.masteryLoading = true;
+        this.masteryProfile = [];
+        this.selectedConcepts = [];
+
+        try {
+          const resp = await fetch(
+            `/test-prep/mastery-profile?course_id=${this.selectedCourseId}&assignment_id=${this.selectedAssignmentId}`,
+            { headers: { 'Authorization': 'Bearer ' + token } }
+          );
+
+          if (!resp.ok) {
+            this.setupError = 'Failed to load mastery profile.';
+            this.view = 'setup';
+            return;
+          }
+
+          this.masteryProfile = await resp.json();
+          // Pre-select concepts with mastery < 0.7 (weak areas)
+          this.selectedConcepts = this.masteryProfile
+            .filter(c => c.mastery_level < 0.7)
+            .map(c => c.concept);
+          // If none are weak, select all
+          if (this.selectedConcepts.length === 0) {
+            this.selectedConcepts = this.masteryProfile.map(c => c.concept);
+          }
+        } catch (err) {
+          this.setupError = 'Failed to load mastery profile: ' + err.message;
+          this.view = 'setup';
+        } finally {
+          this.masteryLoading = false;
+        }
+      },
+
+      toggleConceptSelection(concept) {
+        const idx = this.selectedConcepts.indexOf(concept);
+        if (idx >= 0) {
+          this.selectedConcepts.splice(idx, 1);
+        } else {
+          this.selectedConcepts.push(concept);
+        }
+      },
+
+      selectAllConcepts() {
+        this.selectedConcepts = this.masteryProfile.map(c => c.concept);
+      },
+
+      // ── Session Management ──
+
+      async startSession() {
+        if (this.selectedConcepts.length === 0 || this.sessionStarting) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.sessionStarting = true;
+        this.sessionError = '';
+
+        try {
+          const resp = await fetch('/test-prep/sessions', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              course_id: parseInt(this.selectedCourseId),
+              concepts: this.selectedConcepts,
+            }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.setupError = errData?.detail?.message || 'Failed to create session.';
+            this.sessionStarting = false;
+            return;
+          }
+
+          const sessionData = await resp.json();
+          this.sessionId = sessionData.id;
+          this.currentPhase = sessionData.phase_reached || 'diagnostic';
+          this.currentDifficulty = sessionData.state_json?.difficulty || 0.5;
+          this.phaseTotal = 0;
+          this.phaseCorrect = 0;
+          this.confidenceRatings = [];
+          this.answerResults = [];
+          this.view = 'session';
+
+          // Load first problem from server
+          await this.fetchNextProblem(token);
+        } catch (err) {
+          this.setupError = 'Failed to create session: ' + err.message;
+        } finally {
+          this.sessionStarting = false;
+        }
+      },
+
+      async fetchNextProblem(token) {
+        if (!this.sessionId) return;
+        if (!token) token = this.session?.access_token;
+        if (!token) return;
+
+        this.problemLoading = true;
+        this.currentProblem = null;
+        this.studentAnswer = '';
+        this.answered = false;
+        this.lastResult = null;
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/next-problem`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to generate problem.';
+            return;
+          }
+
+          const problem = await resp.json();
+          this.currentProblem = {
+            id: problem.id,
+            problem_type: problem.problem_type || 'free_response',
+            concept: problem.concept || '',
+            difficulty: problem.difficulty || this.currentDifficulty,
+            prompt: problem.prompt || '',
+            choices: problem.choices || null,
+            correct_answer: null,
+          };
+        } catch (err) {
+          this.sessionError = 'Failed to load problem: ' + err.message;
+        } finally {
+          this.problemLoading = false;
+        }
+      },
+
+      async refreshSession() {
+        if (!this.sessionId) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}`, {
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (!resp.ok) {
+            this.sessionError = 'Failed to refresh session.';
+            return;
+          }
+
+          const sessionData = await resp.json();
+          this.currentPhase = sessionData.phase_reached || this.currentPhase;
+          this.currentDifficulty = sessionData.state_json?.difficulty || this.currentDifficulty;
+        } catch (err) {
+          this.sessionError = 'Failed to refresh session: ' + err.message;
+        }
+      },
+
+      // ── Answer Submission ──
+
+      async submitAnswer() {
+        if (!this.studentAnswer || this.submitting || !this.currentProblem) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.submitting = true;
+        this.sessionError = '';
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/answer`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              session_id: this.sessionId,
+              problem_id: this.currentProblem.id,
+              student_answer: this.studentAnswer,
+              time_spent_seconds: null,
+            }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to submit answer.';
+            return;
+          }
+
+          const result = await resp.json();
+          this.lastResult = result;
+          this.answered = true;
+          this.phaseTotal++;
+          if (result.is_correct) this.phaseCorrect++;
+
+          // Track for calibration
+          this.answerResults.push(result.is_correct ? 1 : 0);
+        } catch (err) {
+          this.sessionError = 'Failed to submit answer: ' + err.message;
+        } finally {
+          this.submitting = false;
+        }
+      },
+
+      async nextProblem() {
+        await this.fetchNextProblem();
+      },
+
+      // ── Phase Skip ──
+
+      async skipPhase() {
+        if (this.skippingPhase || !this.sessionId) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.skippingPhase = true;
+        this.sessionError = '';
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/skip-phase`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            if (errData?.detail?.code === 'FINAL_PHASE') {
+              // At final phase, complete instead
+              this.completeSession();
+              return;
+            }
+            this.sessionError = errData?.detail?.message || 'Failed to skip phase.';
+            return;
+          }
+
+          const sessionData = await resp.json();
+          this.currentPhase = sessionData.phase_reached || this.currentPhase;
+          this.currentDifficulty = sessionData.state_json?.difficulty || this.currentDifficulty;
+          this.phaseTotal = 0;
+          this.phaseCorrect = 0;
+          await this.fetchNextProblem(token);
+        } catch (err) {
+          this.sessionError = 'Failed to skip phase: ' + err.message;
+        } finally {
+          this.skippingPhase = false;
+        }
+      },
+
+      // ── Session Complete ──
+
+      async completeSession() {
+        if (this.completing || !this.sessionId) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.completing = true;
+        this.sessionError = '';
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/complete`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to complete session.';
+            return;
+          }
+
+          this.summaryData = await resp.json();
+          this.view = 'summary';
+        } catch (err) {
+          this.sessionError = 'Failed to complete session: ' + err.message;
+        } finally {
+          this.completing = false;
+        }
+      },
+
+      // ── Reset ──
+
+      resetToSetup() {
+        this.view = 'setup';
+        this.sessionId = null;
+        this.currentProblem = null;
+        this.studentAnswer = '';
+        this.answered = false;
+        this.lastResult = null;
+        this.summaryData = null;
+        this.analysisEvents = [];
+        this.analysisComplete = false;
+        this.analysisError = false;
+        this.phaseTotal = 0;
+        this.phaseCorrect = 0;
+        this.confidenceRatings = [];
+        this.answerResults = [];
+        this.sessionError = '';
+        this.setupError = '';
+      },
+
+      // ── KaTeX rendering ──
+
+      renderMath() {
+        // Read reactive deps so Alpine re-runs this effect on changes
+        void this.currentProblem;
+        void this.lastResult;
+        this.$nextTick(() => {
+          if (typeof renderMathInElement === 'function') {
+            const areas = [this.$refs.problemArea, this.$refs.feedbackArea, this.$refs.choicesArea];
+            for (const el of areas) {
+              if (el) {
+                renderMathInElement(el, {
+                  delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                    { left: '\\(', right: '\\)', display: false },
+                    { left: '\\[', right: '\\]', display: true },
+                  ],
+                  throwOnError: false,
+                });
+              }
+            }
+          }
+        });
+      },
+
+      // ── Phase helpers ──
+
+      phaseIndex(key) {
+        const order = ['diagnostic', 'focused_practice', 'error_analysis', 'mixed_test', 'calibration'];
+        return order.indexOf(key);
+      },
+
+      phaseLabel(key) {
+        const map = {
+          diagnostic: 'Diagnostic',
+          focused_practice: 'Focused Practice',
+          error_analysis: 'Error Analysis',
+          mixed_test: 'Mixed Test',
+          calibration: 'Calibration',
+        };
+        return map[key] || key;
+      },
+
+      // ── Problem type helpers ──
+
+      problemTypeBadge(type) {
+        const map = {
+          multiple_choice: 'bg-blue-100 text-blue-700',
+          free_response: 'bg-purple-100 text-purple-700',
+          worked_example: 'bg-teal-100 text-teal-700',
+          error_analysis: 'bg-amber-100 text-amber-700',
+          mixed: 'bg-indigo-100 text-indigo-700',
+          calibration: 'bg-pink-100 text-pink-700',
+        };
+        return map[type] || 'bg-gray-100 text-gray-600';
+      },
+
+      problemTypeLabel(type) {
+        const map = {
+          multiple_choice: 'Multiple Choice',
+          free_response: 'Free Response',
+          worked_example: 'Worked Example',
+          error_analysis: 'Error Analysis',
+          mixed: 'Mixed',
+          calibration: 'Calibration',
+        };
+        return map[type] || type;
+      },
+
+      // ── Calibration helpers ──
+
+      get avgConfidence() {
+        if (this.confidenceRatings.length === 0) {
+          // Default estimate from answer results
+          return this.answerResults.length > 0
+            ? this.answerResults.reduce((s, v) => s + v, 0) / this.answerResults.length
+            : 0.5;
+        }
+        const sum = this.confidenceRatings.reduce((s, v) => s + v, 0);
+        return sum / this.confidenceRatings.length;
+      },
+
+      get avgAccuracy() {
+        if (this.answerResults.length === 0) return 0;
+        return this.answerResults.reduce((s, v) => s + v, 0) / this.answerResults.length;
+      },
+
+      get calibrationMessage() {
+        const gap = this.avgConfidence - this.avgAccuracy;
+        if (this.answerResults.length === 0) {
+          return 'Complete some problems to see your calibration.';
+        }
+        if (Math.abs(gap) < 0.15) {
+          return 'Your confidence closely matches your performance. Great self-awareness!';
+        } else if (gap > 0) {
+          return 'You were more confident than your results suggest. Consider reviewing this material more carefully.';
+        } else {
+          return 'You performed better than expected! You may know more than you think.';
+        }
+      },
+
+      // ── Formatting helpers ──
+
+      formatDuration(seconds) {
+        if (!seconds) return '--';
+        const mins = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        if (mins === 0) return secs + 's';
+        return mins + 'm ' + secs + 's';
+      },
+    };
+  }
+</script>
+{% endblock %}

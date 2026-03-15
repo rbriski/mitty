@@ -15,6 +15,7 @@ from mitty.api.auth import get_current_user  # noqa: TCH001
 
 if TYPE_CHECKING:
     from mitty.ai.client import AIClient
+    from mitty.canvas.client import CanvasClient
     from supabase import AsyncClient
 
 logger = logging.getLogger("mitty.api.dependencies")
@@ -97,3 +98,43 @@ async def get_user_client(
     # Set the user's JWT so PostgREST enforces RLS as this user
     client.postgrest.auth(current_user["access_token"])
     return client
+
+
+_CANVAS_NOT_CONFIGURED = object()
+
+
+async def get_canvas_client(request: Request) -> CanvasClient | None:
+    """Return a CanvasClient instance, or None if not configured.
+
+    The CanvasClient is lazily created on first request and cached on
+    ``app.state.canvas_client``.  Returns None when CANVAS_TOKEN is
+    not set, allowing endpoints to degrade gracefully.
+    """
+    existing = getattr(request.app.state, "canvas_client", None)
+    if existing is _CANVAS_NOT_CONFIGURED:
+        return None
+    if existing is not None:
+        return existing
+
+    try:
+        from mitty.canvas.client import CanvasClient as _CanvasClient
+        from mitty.config import load_settings
+
+        settings = load_settings()
+        client = _CanvasClient(settings)
+        await client.__aenter__()
+        request.app.state.canvas_client = client
+
+        # Register cleanup so __aexit__ is called on shutdown
+        async def _close_canvas() -> None:
+            try:
+                await client.__aexit__(None, None, None)
+            except Exception:
+                logger.debug("CanvasClient cleanup error", exc_info=True)
+
+        request.app.state._close_canvas = _close_canvas
+        return client
+    except Exception:
+        logger.warning("Failed to create CanvasClient", exc_info=True)
+        request.app.state.canvas_client = _CANVAS_NOT_CONFIGURED
+        return None

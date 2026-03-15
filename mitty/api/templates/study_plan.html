@@ -332,8 +332,8 @@
                         ></span>
                         <span x-show="block._course_name" class="text-xs text-gray-400" x-text="block._course_name"></span>
                         {# Concept tags from guide #}
-                        <template x-for="concept in getBlockConcepts(block).slice(0, 3)" :key="concept.name">
-                          <span class="inline-block px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600" x-text="concept.name"></span>
+                        <template x-for="concept in getBlockConcepts(block).slice(0, 3)" :key="concept.concept">
+                          <span class="inline-block px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600" x-text="concept.concept"></span>
                         </template>
                         <span
                           x-show="getBlockConcepts(block).length > 3"
@@ -525,7 +525,7 @@
                       <div class="space-y-3">
                         <template x-for="(concept, cIdx) in getBlockConcepts(block)" :key="'conf-' + block.id + '-' + cIdx">
                           <div class="flex items-center gap-3">
-                            <span class="text-sm text-gray-700 min-w-0 flex-1" x-text="concept.name"></span>
+                            <span class="text-sm text-gray-700 min-w-0 flex-1" x-text="concept.concept"></span>
                             <div class="flex gap-1">
                               <template x-for="level in [1, 2, 3, 4, 5]" :key="'cl-' + block.id + '-' + cIdx + '-' + level">
                                 <button
@@ -553,7 +553,7 @@
                       <div class="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
                         <template x-for="(concept, cIdx) in getBlockConcepts(block)" :key="'cal-' + block.id + '-' + cIdx">
                           <div class="flex items-center justify-between py-1.5" x-show="getConceptConfidence(block, cIdx)">
-                            <span class="text-sm text-gray-700" x-text="concept.name"></span>
+                            <span class="text-sm text-gray-700" x-text="concept.concept"></span>
                             <div class="flex items-center gap-3 text-xs">
                               <span class="text-gray-500">
                                 Confidence: <span class="font-medium" x-text="getConceptConfidence(block, cIdx) + '/5'"></span>
@@ -706,7 +706,7 @@
                       <div class="space-y-3">
                         <template x-for="(concept, cIdx) in getBlockConcepts(block)" :key="'reconf-' + block.id + '-' + cIdx">
                           <div class="flex items-center gap-3">
-                            <span class="text-sm text-gray-700 min-w-0 flex-1" x-text="concept.name"></span>
+                            <span class="text-sm text-gray-700 min-w-0 flex-1" x-text="concept.concept"></span>
                             <div class="flex gap-1">
                               <template x-for="level in [1, 2, 3, 4, 5]" :key="'rcl-' + block.id + '-' + cIdx + '-' + level">
                                 <button
@@ -1173,7 +1173,7 @@
         let text = step.instruction_template || step.instruction || '';
         // Interpolate placeholders
         const concepts = this.getBlockConcepts(block);
-        const concept = concepts.length > 0 ? concepts[0].name || concepts[0] : '';
+        const concept = concepts.length > 0 ? concepts[0].concept || concepts[0] : '';
         const sources = this.getSourceBundle(block);
         const resourceTitle = sources.length > 0 ? (sources[0].resource_title || sources[0].title || 'your study materials') : 'your study materials';
         text = text.replace(/\{concept\}/g, concept || 'this topic');
@@ -1279,7 +1279,7 @@
         const concepts = this.getBlockConcepts(block);
         const concept = concepts[conceptIdx];
         this.saveArtifact(block, 2, 'confidence_rating', {
-          concept: concept?.name,
+          concept: concept?.concept,
           confidence: level,
         });
       },
