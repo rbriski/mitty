@@ -853,6 +853,8 @@ TestPrepProblemType = Literal[
     "free_response",
     "worked_example",
     "error_analysis",
+    "find_the_mistake",
+    "review_own_errors",
     "mixed",
     "calibration",
 ]
@@ -977,6 +979,10 @@ class TestPrepProblem(BaseModel):
     prompt: str = Field(max_length=10000)
     choices: list[str] | None = None
     correct_answer: str | None = Field(default=None, max_length=10000)
+    is_reflection: bool = Field(
+        default=False,
+        description="True for review_own_errors (ungraded reflection).",
+    )
 
 
 # ---------------------------------------------------------------------------

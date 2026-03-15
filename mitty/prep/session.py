@@ -7,8 +7,14 @@ to [0.1, 0.95]).  Tracks running per-concept mastery.  Serializes
 state to JSON for DB persistence (``test_prep_sessions.state_json``)
 and supports phase-level resume.
 
+Phase 3 (error_analysis) alternates between two subtypes (US-010, R6):
+- ``find_the_mistake``: LLM generates a worked solution with one
+  deliberate error; the student identifies and explains it.
+- ``review_own_errors``: pulls a wrong answer from Phases 1-2 and
+  presents it for ungraded self-explanation reflection.
+
 Traces: DEC-004 (5 session phases), DEC-006 (UUID PKs),
-        DEC-008 (server-authoritative state).
+        DEC-008 (server-authoritative state), US-010 (error analysis).
 
 Public API:
     SessionEngine        — main engine class
@@ -132,6 +138,13 @@ class SessionState:
     per_concept_confidence: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
+
+    # Wrong answers from Phases 1-2 for review_own_errors (US-010)
+    # Keys: problem_id, concept, problem_json, student_answer, feedback
+    wrong_answers: list[dict[str, Any]] = field(default_factory=list)
+
+    # Counter for alternating error_analysis subtypes in Phase 3 (US-010)
+    error_analysis_count: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +353,77 @@ class SessionEngine:
             entry["correct"] += 1
         entry["mastery"] = entry["correct"] / entry["attempted"]
 
+    # -- Error analysis subtypes (US-010, R6) ---------------------------------
+
+    def record_wrong_answer(
+        self,
+        *,
+        problem_id: int | str,
+        concept: str,
+        problem_json: dict[str, Any],
+        student_answer: str,
+        feedback: str,
+        difficulty: float,
+    ) -> None:
+        """Record a wrong answer for potential review in Phase 3.
+
+        Only recorded during Phases 1 (diagnostic) and 2 (focused_practice)
+        so Phase 3 can present them as review_own_errors reflections.
+        """
+        if self._state.phase not in (
+            SessionPhase.diagnostic,
+            SessionPhase.focused_practice,
+        ):
+            return
+
+        self._state.wrong_answers.append(
+            {
+                "problem_id": str(problem_id),
+                "concept": concept,
+                "problem_json": problem_json,
+                "student_answer": student_answer,
+                "feedback": feedback,
+                "difficulty": difficulty,
+            }
+        )
+        logger.debug(
+            "Session %s: recorded wrong answer (concept=%s, total=%d)",
+            self._session_id,
+            concept,
+            len(self._state.wrong_answers),
+        )
+
+    def get_error_analysis_subtype(self) -> str:
+        """Return the next error analysis subtype, alternating between them.
+
+        Alternation order (US-010, R6 desirable difficulty effect):
+        - Even count -> ``find_the_mistake`` (LLM-generated)
+        - Odd count  -> ``review_own_errors`` (if wrong answers available)
+
+        Falls back to ``find_the_mistake`` if no wrong answers are
+        available for review.
+
+        Side effect: increments the internal counter.
+
+        Returns:
+            ``"find_the_mistake"`` or ``"review_own_errors"``.
+        """
+        count = self._state.error_analysis_count
+        self._state.error_analysis_count += 1
+
+        if count % 2 == 1 and self._state.wrong_answers:
+            return "review_own_errors"
+        return "find_the_mistake"
+
+    def pop_wrong_answer(self) -> dict[str, Any] | None:
+        """Remove and return the next wrong answer for review.
+
+        Returns ``None`` if no wrong answers remain.
+        """
+        if self._state.wrong_answers:
+            return self._state.wrong_answers.pop(0)
+        return None
+
     # -- Confidence tracking (US-009 / DEC-008, R5) --------------------------
 
     def record_confidence(
@@ -449,6 +533,8 @@ class SessionEngine:
             "phase_problems": self._state.phase_problems,
             "phase_correct": self._state.phase_correct,
             "per_concept_confidence": self._state.per_concept_confidence,
+            "wrong_answers": self._state.wrong_answers,
+            "error_analysis_count": self._state.error_analysis_count,
         }
 
     def to_json(self) -> str:
@@ -495,6 +581,8 @@ class SessionEngine:
         engine._state.per_concept_confidence = {
             k: list(v) for k, v in state_dict.get("per_concept_confidence", {}).items()
         }
+        engine._state.wrong_answers = list(state_dict.get("wrong_answers", []))
+        engine._state.error_analysis_count = state_dict.get("error_analysis_count", 0)
         return engine
 
     @classmethod
