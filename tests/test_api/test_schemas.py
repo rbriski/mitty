@@ -1458,7 +1458,7 @@ class TestTestPrepProblem:
     def test_valid_multiple_choice(self) -> None:
         obj = TestPrepProblem.model_validate(
             {
-                "id": "prob-001",
+                "id": 1,
                 "problem_type": "multiple_choice",
                 "concept": "Quadratics",
                 "difficulty": 0.5,
@@ -1473,7 +1473,7 @@ class TestTestPrepProblem:
     def test_valid_free_response(self) -> None:
         obj = TestPrepProblem.model_validate(
             {
-                "id": "prob-002",
+                "id": 2,
                 "problem_type": "free_response",
                 "concept": "Integration",
                 "difficulty": 0.7,
@@ -1494,7 +1494,7 @@ class TestTestPrepProblem:
         ):
             obj = TestPrepProblem.model_validate(
                 {
-                    "id": "p1",
+                    "id": 3,
                     "problem_type": pt,
                     "concept": "X",
                     "difficulty": 0.5,
@@ -1507,7 +1507,7 @@ class TestTestPrepProblem:
         with pytest.raises(ValueError):
             TestPrepProblem.model_validate(
                 {
-                    "id": "p1",
+                    "id": 3,
                     "problem_type": "essay",
                     "concept": "X",
                     "difficulty": 0.5,
@@ -1519,7 +1519,7 @@ class TestTestPrepProblem:
         for d in (0.0, 0.5, 1.0):
             obj = TestPrepProblem.model_validate(
                 {
-                    "id": "p1",
+                    "id": 3,
                     "problem_type": "free_response",
                     "concept": "X",
                     "difficulty": d,
@@ -1532,7 +1532,7 @@ class TestTestPrepProblem:
         with pytest.raises(ValueError):
             TestPrepProblem.model_validate(
                 {
-                    "id": "p1",
+                    "id": 3,
                     "problem_type": "free_response",
                     "concept": "X",
                     "difficulty": 1.1,
@@ -1544,7 +1544,7 @@ class TestTestPrepProblem:
         with pytest.raises(ValueError):
             TestPrepProblem.model_validate(
                 {
-                    "id": "p1",
+                    "id": 3,
                     "problem_type": "free_response",
                     "concept": "X",
                     "difficulty": -0.1,
@@ -1556,7 +1556,7 @@ class TestTestPrepProblem:
         with pytest.raises(ValueError):
             TestPrepProblem.model_validate(
                 {
-                    "id": "p1",
+                    "id": 3,
                     "problem_type": "free_response",
                     "concept": "X",
                     "difficulty": 0.5,
@@ -1630,7 +1630,7 @@ class TestTestPrepAnswerResult:
                 "score": 1.0,
                 "explanation": "Well done!",
                 "next_problem": {
-                    "id": "prob-002",
+                    "id": 2,
                     "problem_type": "free_response",
                     "concept": "Derivatives",
                     "difficulty": 0.6,

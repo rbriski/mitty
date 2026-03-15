@@ -122,7 +122,7 @@ def _aggregate_concepts(
 
         entry["total_correctness"] += correctness
         entry["problems_attempted"] += 1
-        if correctness == 1.0:
+        if correctness >= 0.9999:
             entry["problems_correct"] += 1
 
         error_type = p.get("error_type")

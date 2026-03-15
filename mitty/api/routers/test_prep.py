@@ -228,7 +228,7 @@ async def analyze_homework(
             },
         )
 
-    # DEC-010: 1 concurrent analysis per user
+    # DEC-010: 1 concurrent analysis per user (atomic check-and-set)
     if user_id in _active_analyses:
         raise HTTPException(
             status_code=429,
@@ -238,7 +238,7 @@ async def analyze_homework(
                 "Please wait for it to complete.",
             },
         )
-
+    # No await between check and set, so this is safe under CPython's GIL.
     _active_analyses[user_id] = asyncio.Event()
 
     return StreamingResponse(
@@ -433,12 +433,20 @@ async def submit_answer(
     if data.time_spent_seconds is not None:
         update_data["time_spent_seconds"] = data.time_spent_seconds
 
-    await (
+    update_result = await (
         client.table("test_prep_results")
         .update(update_data)
         .eq("id", data.problem_id)
         .execute()
     )
+    if not update_result.data:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "Failed to update problem result.",
+            },
+        )
 
     # Update session engine state
     state_dict = session_data.get("state_json", {})
@@ -588,7 +596,7 @@ async def complete_session(
     )
 
     # Update session as completed
-    await (
+    complete_result = await (
         client.table("test_prep_sessions")
         .update(
             {
@@ -601,6 +609,14 @@ async def complete_session(
         .eq("id", str(session_id))
         .execute()
     )
+    if not complete_result.data:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "Failed to complete session.",
+            },
+        )
 
     # Build per-phase scores from engine state
     from mitty.api.schemas import PhaseScore

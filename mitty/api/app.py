@@ -81,7 +81,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     yield
 
-    # Shutdown: nothing to clean up for Supabase async client currently.
+    # Shutdown: clean up lazily-created clients.
+    close_canvas = getattr(app.state, "_close_canvas", None)
+    if close_canvas is not None:
+        await close_canvas()
     logger.info("Application shutdown")
 
 

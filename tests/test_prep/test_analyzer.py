@@ -386,6 +386,7 @@ class TestNonPdfSkipped:
                     ".wordprocessingml.document"
                 ),
                 "size": 1024,
+                "assignment_id": 101,
             },
         ]
         ai_client = _mock_ai_client()

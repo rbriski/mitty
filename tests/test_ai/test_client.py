@@ -597,7 +597,7 @@ class TestCallVisionAuditLogging:
             mock_create.return_value = mock_msg
 
             await client.call_vision(
-                images=[b"fake-png"],
+                images=[b"\x89PNG\r\n\x1a\nfake"],
                 system="Analyze.",
                 user_prompt="Identify this.",
                 response_model=FruitClassification,
@@ -634,7 +634,7 @@ class TestCallVisionAuditLogging:
             mock_create.return_value = mock_msg
 
             await client.call_vision(
-                images=[b"fake-png"],
+                images=[b"\x89PNG\r\n\x1a\nfake"],
                 system="Analyze.",
                 user_prompt="Identify this.",
                 response_model=FruitClassification,
@@ -670,7 +670,7 @@ class TestCallVisionCostCalculation:
             mock_create.return_value = mock_msg
 
             await client.call_vision(
-                images=[b"fake-png"],
+                images=[b"\x89PNG\r\n\x1a\nfake"],
                 system="Analyze.",
                 user_prompt="Identify.",
                 response_model=FruitClassification,
@@ -713,7 +713,7 @@ class TestCallVisionRateLimited:
 
             # First call should succeed
             await client.call_vision(
-                images=[b"fake-png"],
+                images=[b"\x89PNG\r\n\x1a\nfake"],
                 system="Analyze.",
                 user_prompt="Identify.",
                 response_model=FruitClassification,
@@ -723,7 +723,7 @@ class TestCallVisionRateLimited:
             # Second call should be rate limited (1 RPM)
             with pytest.raises(RateLimitError):
                 await client.call_vision(
-                    images=[b"fake-png"],
+                    images=[b"\x89PNG\r\n\x1a\nfake"],
                     system="Analyze.",
                     user_prompt="Identify.",
                     response_model=FruitClassification,
@@ -753,7 +753,7 @@ class TestCallVisionRateLimited:
             mock_create.return_value = mock_msg
 
             await client.call_vision(
-                images=[b"fake-png"],
+                images=[b"\x89PNG\r\n\x1a\nfake"],
                 system="Analyze.",
                 user_prompt="Identify.",
                 response_model=FruitClassification,
@@ -788,7 +788,7 @@ class TestCallVisionRetries:
             mock_create.side_effect = [rate_err, mock_msg]
 
             result = await client.call_vision(
-                images=[b"fake-png"],
+                images=[b"\x89PNG\r\n\x1a\nfake"],
                 system="Analyze.",
                 user_prompt="Identify.",
                 response_model=FruitClassification,
@@ -814,7 +814,7 @@ class TestCallVisionErrorAuditLogging:
 
             with pytest.raises(AIClientError):
                 await client.call_vision(
-                    images=[b"fake-png"],
+                    images=[b"\x89PNG\r\n\x1a\nfake"],
                     system="Analyze.",
                     user_prompt="Identify.",
                     response_model=FruitClassification,

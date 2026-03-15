@@ -294,7 +294,16 @@ async def analyze_homework_set(
             continue
 
         # Each attachment carries its assignment_id from fetch_submission_attachments
-        assignment_id = attachment.get("assignment_id", assignment_ids[0])
+        assignment_id = attachment.get("assignment_id")
+        if assignment_id is None:
+            if len(assignment_ids) == 1:
+                assignment_id = assignment_ids[0]
+            else:
+                logger.warning(
+                    "Attachment %s missing assignment_id, skipping",
+                    filename,
+                )
+                continue
 
         # Step 4: Cache check
         cached_pages = await _get_cached_pages(supabase_client, user_id, assignment_id)

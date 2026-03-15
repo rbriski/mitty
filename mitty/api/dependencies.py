@@ -124,6 +124,15 @@ async def get_canvas_client(request: Request) -> CanvasClient | None:
         client = _CanvasClient(settings)
         await client.__aenter__()
         request.app.state.canvas_client = client
+
+        # Register cleanup so __aexit__ is called on shutdown
+        async def _close_canvas() -> None:
+            try:
+                await client.__aexit__(None, None, None)
+            except Exception:
+                logger.debug("CanvasClient cleanup error", exc_info=True)
+
+        request.app.state._close_canvas = _close_canvas
         return client
     except Exception:
         logger.warning("Failed to create CanvasClient", exc_info=True)

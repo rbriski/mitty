@@ -936,7 +936,9 @@ class TestPrepSessionResponse(BaseModel):
 class TestPrepProblem(BaseModel):
     """A single problem presented to the student during a test prep session."""
 
-    id: str = Field(description="Opaque problem identifier (e.g. UUID or sequence key)")
+    id: int = Field(
+        description="Problem identifier (sequence key from test_prep_results)"
+    )
     problem_type: TestPrepProblemType
     concept: str
     difficulty: float = Field(ge=0.0, le=1.0)

@@ -48,6 +48,27 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}
 _BASE_BACKOFF = 0.5
 
 
+def _detect_media_type(data: bytes) -> str:
+    """Detect image media type from magic bytes.
+
+    Raises ``ValueError`` for empty data or unrecognised formats so
+    callers get a clear error instead of a silent PNG fallback.
+    """
+    if not data:
+        raise ValueError("Cannot detect media type of empty image data")
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:2] == b"\xff\xd8":
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and len(data) > 11 and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:3] == b"GIF":
+        return "image/gif"
+    raise ValueError(
+        "Unsupported image format: unable to detect media type from magic bytes"
+    )
+
+
 def _calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     """Calculate USD cost for a given model and token usage.
 
@@ -352,7 +373,7 @@ class AIClient:
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/png",
+                    "media_type": _detect_media_type(img),
                     "data": base64.b64encode(img).decode(),
                 },
             }

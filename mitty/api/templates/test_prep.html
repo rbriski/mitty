@@ -331,7 +331,7 @@
 
           {# Multiple choice options #}
           <template x-if="currentProblem?.choices && currentProblem.choices.length > 0">
-            <div class="space-y-2 mb-6">
+            <div x-ref="choicesArea" class="space-y-2 mb-6">
               <template x-for="(choice, idx) in currentProblem.choices" :key="'choice-' + idx">
                 <button
                   type="button"
@@ -342,7 +342,7 @@
                     ? 'bg-mitty-50 border-mitty-400 text-mitty-900'
                     : 'bg-white border-gray-200 text-gray-700 hover:border-mitty-300 disabled:opacity-50'"
                 >
-                  <span x-ref="'choiceRef' + idx" x-text="choice" x-effect="renderMath()"></span>
+                  <span x-text="choice"></span>
                 </button>
               </template>
             </div>
@@ -911,7 +911,7 @@
           // No problems queued server-side; generate a placeholder problem
           // using the session's concepts and current difficulty
           const concepts = stateJson?.concepts || this.selectedConcepts || [];
-          const concept = concepts[this.phaseProblems % concepts.length] || 'General';
+          const concept = concepts.length > 0 ? concepts[this.phaseTotal % concepts.length] : 'General';
           this.currentProblem = {
             id: 'local-' + Date.now(),
             problem_type: 'free_response',
@@ -1107,9 +1107,12 @@
       // ── KaTeX rendering ──
 
       renderMath() {
+        // Read reactive deps so Alpine re-runs this effect on changes
+        void this.currentProblem;
+        void this.lastResult;
         this.$nextTick(() => {
           if (typeof renderMathInElement === 'function') {
-            const areas = [this.$refs.problemArea, this.$refs.feedbackArea];
+            const areas = [this.$refs.problemArea, this.$refs.feedbackArea, this.$refs.choicesArea];
             for (const el of areas) {
               if (el) {
                 renderMathInElement(el, {

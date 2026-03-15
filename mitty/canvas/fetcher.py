@@ -558,9 +558,25 @@ async def fetch_submission_attachments(
                         "assignment_id": assignment_id,
                     }
                 )
-        except (CanvasAPIError, CanvasAuthError) as exc:
-            logger.debug(
-                "No submission for assignment %d in course %d: %s",
+        except CanvasAPIError as exc:
+            exc_str = str(exc)
+            if "404" in exc_str or "403" in exc_str:
+                logger.debug(
+                    "No submission for assignment %d in course %d: %s",
+                    assignment_id,
+                    course_id,
+                    exc,
+                )
+            else:
+                logger.warning(
+                    "Failed to fetch submission for assignment %d in course %d: %s",
+                    assignment_id,
+                    course_id,
+                    exc,
+                )
+        except CanvasAuthError as exc:
+            logger.warning(
+                "Auth error fetching submission for assignment %d in course %d: %s",
                 assignment_id,
                 course_id,
                 exc,
