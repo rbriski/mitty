@@ -84,12 +84,12 @@
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
           <h2 class="text-lg font-semibold text-gray-900 mb-4">Homework Analysis</h2>
 
-          {# Course selector #}
+          {# Step 1: Course selector #}
           <div class="mb-4">
             <label class="block text-sm font-medium text-gray-700 mb-1">Course</label>
             <select
               x-model="selectedCourseId"
-              @change="selectedAssignmentId = ''; assignments = []; fetchAssignments()"
+              @change="selectedAssessmentId = ''; assessments = []; homeworkList = []; fetchAssessments()"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
             >
               <option value="">Select a course</option>
@@ -99,31 +99,70 @@
             </select>
           </div>
 
-          {# Assignment selector #}
+          {# Step 2: Quiz/Test selector #}
           <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1">Assignment</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Preparing for</label>
             <select
-              x-model="selectedAssignmentId"
-              :disabled="!selectedCourseId"
+              x-model="selectedAssessmentId"
+              :disabled="!selectedCourseId || assessments.length === 0"
+              @change="homeworkList = []; if (selectedAssessmentId) fetchHomework()"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
             >
-              <option value="">Select an assignment</option>
-              <template x-for="a in assignments" :key="a.id">
-                <option :value="a.id" x-text="a.name"></option>
+              <option value="">Select a quiz or test</option>
+              <template x-for="a in assessments" :key="a.id">
+                <option :value="a.id" x-text="a.name + (a.scheduled_date ? ' — ' + new Date(a.scheduled_date).toLocaleDateString() : '')"></option>
               </template>
             </select>
+            <p x-show="selectedCourseId && assessments.length === 0 && !setupError" class="text-xs text-gray-400 mt-1">No upcoming quizzes or tests found for this course.</p>
           </div>
 
-          {# Analyze button #}
+          {# Step 3: Homework checklist #}
+          <div x-show="selectedAssessmentId && homeworkList.length > 0" class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700">Homework to analyze</label>
+              <button
+                @click="toggleAllHomework()"
+                class="text-xs text-mitty-600 hover:text-mitty-700 font-medium"
+                x-text="homeworkList.every(h => h.selected) ? 'Deselect All' : 'Select All'"
+              ></button>
+            </div>
+            <div class="max-h-64 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+              <template x-for="hw in homeworkList" :key="hw.id">
+                <label class="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    :checked="hw.selected"
+                    @change="hw.selected = !hw.selected"
+                    class="w-4 h-4 text-mitty-600 rounded border-gray-300 focus:ring-mitty-500"
+                  >
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-gray-900 truncate" x-text="hw.name"></p>
+                    <p class="text-xs text-gray-400" x-text="hw.due_at ? 'Due ' + new Date(hw.due_at).toLocaleDateString() : 'No due date'"></p>
+                  </div>
+                  <span x-show="hw.analyzed" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                    &#10003; Analyzed
+                  </span>
+                </label>
+              </template>
+            </div>
+            <p class="text-xs text-gray-500 mt-1.5">
+              <span x-text="homeworkList.filter(h => h.selected).length"></span> selected,
+              <span x-text="homeworkList.filter(h => h.analyzed).length"></span> already analyzed
+            </p>
+          </div>
+
+          <p x-show="selectedAssessmentId && homeworkList.length === 0 && !setupError" class="text-xs text-gray-400 mb-4">No homework assignments found for this course.</p>
+
+          {# Step 4: Analyze button #}
           <button
             @click="analyzeHomework()"
-            :disabled="!selectedCourseId || !selectedAssignmentId || analyzing"
+            :disabled="!selectedAssessmentId || unanalyzedSelectedCount() === 0 || analyzing"
             class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
           >
-            <span x-show="!analyzing">Analyze Homework</span>
+            <span x-show="!analyzing" x-text="unanalyzedSelectedCount() > 0 ? 'Analyze ' + unanalyzedSelectedCount() + ' Homework Assignment' + (unanalyzedSelectedCount() !== 1 ? 's' : '') : 'Analyze Homework'"></span>
             <span x-show="analyzing" class="flex items-center justify-center gap-2">
               <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-              Analyzing...
+              <span x-text="'Analyzing ' + (currentAnalysisIndex + 1) + ' of ' + totalAnalysisCount + '...'"></span>
             </span>
           </button>
         </div>
@@ -150,15 +189,6 @@
               </div>
             </template>
           </div>
-
-          {# View Mastery Profile button after analysis complete #}
-          <button
-            x-show="analysisComplete"
-            @click="fetchMasteryProfile()"
-            class="mt-4 w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
-          >
-            View Mastery Profile
-          </button>
 
           {# Error retry button #}
           <button
@@ -917,10 +947,13 @@
 
       // ── Setup state ──
       courses: [],
-      assignments: [],
+      assessments: [],
+      homeworkList: [],
       selectedCourseId: '',
-      selectedAssignmentId: '',
+      selectedAssessmentId: '',
       analyzing: false,
+      currentAnalysisIndex: 0,
+      totalAnalysisCount: 0,
       analysisEvents: [],
       analysisComplete: false,
       analysisError: false,
@@ -1044,93 +1077,174 @@
         }
       },
 
-      async fetchAssignments() {
+      async fetchAssessments() {
         if (!this.selectedCourseId) {
-          this.assignments = [];
+          this.assessments = [];
           return;
         }
         try {
           const { data, error } = await supabase
-            .from('assignments')
-            .select('id, name')
+            .from('assessments')
+            .select('id, name, assessment_type, scheduled_date')
             .eq('course_id', parseInt(this.selectedCourseId))
-            .order('due_at', { ascending: false });
+            .in('assessment_type', ['test', 'quiz'])
+            .order('scheduled_date', { ascending: false });
           if (error) {
-            this.setupError = 'Failed to load assignments.';
+            this.setupError = 'Failed to load assessments.';
             return;
           }
-          this.assignments = data || [];
+          this.assessments = data || [];
         } catch (err) {
-          this.setupError = 'Failed to load assignments: ' + err.message;
+          this.setupError = 'Failed to load assessments: ' + err.message;
         }
+      },
+
+      async fetchHomework() {
+        if (!this.selectedCourseId) {
+          this.homeworkList = [];
+          return;
+        }
+        try {
+          // Fetch assignments for this course
+          const { data: assignments, error: assignErr } = await supabase
+            .from('assignments')
+            .select('id, name, due_at')
+            .eq('course_id', parseInt(this.selectedCourseId))
+            .order('due_at', { ascending: true });
+          if (assignErr) {
+            this.setupError = 'Failed to load homework.';
+            return;
+          }
+
+          // Fetch existing homework analyses to mark already-analyzed ones
+          const assignmentIds = (assignments || []).map(a => a.id);
+          let analyzedIds = new Set();
+          if (assignmentIds.length > 0) {
+            const { data: analyses, error: analysisErr } = await supabase
+              .from('homework_analyses')
+              .select('assignment_id')
+              .in('assignment_id', assignmentIds);
+            if (!analysisErr && analyses) {
+              analyzedIds = new Set(analyses.map(a => a.assignment_id));
+            }
+          }
+
+          this.homeworkList = (assignments || []).map(a => ({
+            id: a.id,
+            name: a.name,
+            due_at: a.due_at,
+            selected: !analyzedIds.has(a.id),  // pre-select un-analyzed ones
+            analyzed: analyzedIds.has(a.id),
+          }));
+        } catch (err) {
+          this.setupError = 'Failed to load homework: ' + err.message;
+        }
+      },
+
+      toggleAllHomework() {
+        const allSelected = this.homeworkList.every(h => h.selected);
+        this.homeworkList.forEach(h => h.selected = !allSelected);
+      },
+
+      unanalyzedSelectedCount() {
+        return this.homeworkList.filter(h => h.selected && !h.analyzed).length;
       },
 
       // ── Homework Analysis (SSE) ──
 
       async analyzeHomework() {
-        if (!this.selectedCourseId || !this.selectedAssignmentId || this.analyzing) return;
+        if (!this.selectedCourseId || !this.selectedAssessmentId || this.analyzing) return;
         const token = this.session?.access_token;
         if (!token) {
           this.setupError = 'Not authenticated.';
           return;
         }
 
+        // Get un-analyzed selected homework
+        const toAnalyze = this.homeworkList.filter(h => h.selected && !h.analyzed);
+        if (toAnalyze.length === 0) return;
+
         this.analyzing = true;
         this.analysisEvents = [];
         this.analysisComplete = false;
         this.analysisError = false;
         this.setupError = '';
+        this.currentAnalysisIndex = 0;
+        this.totalAnalysisCount = toAnalyze.length;
 
         try {
-          const resp = await fetch('/test-prep/analyze-homework', {
-            method: 'POST',
-            headers: {
-              'Authorization': 'Bearer ' + token,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              assignment_id: parseInt(this.selectedAssignmentId),
-              course_id: parseInt(this.selectedCourseId),
-            }),
-          });
+          for (let i = 0; i < toAnalyze.length; i++) {
+            this.currentAnalysisIndex = i;
+            const hw = toAnalyze[i];
 
-          if (!resp.ok) {
-            const errData = await resp.json().catch(() => null);
-            const msg = errData?.detail?.message || errData?.detail || 'Analysis request failed';
-            this.setupError = typeof msg === 'string' ? msg : JSON.stringify(msg);
-            this.analyzing = false;
-            return;
-          }
+            // Add a separator event for multi-homework analysis
+            if (toAnalyze.length > 1) {
+              this.analysisEvents.push({
+                status: 'started',
+                message: `Analyzing "${hw.name}" (${i + 1} of ${toAnalyze.length})...`,
+              });
+            }
 
-          // Read SSE stream
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
+            const resp = await fetch('/test-prep/analyze-homework', {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Bearer ' + token,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                assignment_id: parseInt(hw.id),
+                course_id: parseInt(this.selectedCourseId),
+              }),
+            });
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+            if (!resp.ok) {
+              const errData = await resp.json().catch(() => null);
+              const msg = errData?.detail?.message || errData?.detail || 'Analysis request failed';
+              this.analysisEvents.push({
+                status: 'error',
+                message: `Failed to analyze "${hw.name}": ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`,
+              });
+              // Continue with remaining homework
+              continue;
+            }
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+            // Read SSE stream
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                try {
-                  const evt = JSON.parse(line.slice(6));
-                  this.analysisEvents.push(evt);
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
 
-                  if (evt.status === 'complete') {
-                    this.analysisComplete = true;
-                  } else if (evt.status === 'error') {
-                    this.analysisError = true;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const evt = JSON.parse(line.slice(6));
+                    this.analysisEvents.push(evt);
+
+                    if (evt.status === 'error') {
+                      this.analysisError = true;
+                    }
+                  } catch (parseErr) {
+                    // Skip malformed events
                   }
-                } catch (parseErr) {
-                  // Skip malformed events
                 }
               }
             }
+
+            // Mark this homework as analyzed
+            hw.analyzed = true;
+          }
+
+          // All done — auto-proceed to mastery profile
+          this.analysisComplete = true;
+          if (!this.analysisError) {
+            await this.fetchMasteryProfile();
           }
         } catch (err) {
           this.setupError = 'Analysis failed: ' + err.message;
@@ -1153,7 +1267,7 @@
 
         try {
           const resp = await fetch(
-            `/test-prep/mastery-profile?course_id=${this.selectedCourseId}&assignment_id=${this.selectedAssignmentId}`,
+            `/test-prep/mastery-profile?course_id=${this.selectedCourseId}&assignment_id=${this.selectedAssessmentId}`,
             { headers: { 'Authorization': 'Bearer ' + token } }
           );
 
@@ -1723,6 +1837,8 @@
         this.analysisEvents = [];
         this.analysisComplete = false;
         this.analysisError = false;
+        this.currentAnalysisIndex = 0;
+        this.totalAnalysisCount = 0;
         this.phaseTotal = 0;
         this.phaseCorrect = 0;
         this.confidenceRatings = [];
