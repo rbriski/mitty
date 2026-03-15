@@ -142,7 +142,7 @@ async def get_upcoming_assessment(
     if canvas_assignment_id is not None:
         ha_result = (
             await client.table("homework_analyses")
-            .select("per_problem_json")
+            .select("analysis_json")
             .eq("assignment_id", canvas_assignment_id)
             .eq("user_id", current_user["user_id"])
             .execute()
@@ -151,7 +151,8 @@ async def get_upcoming_assessment(
 
         seen: set[str] = set()
         for ha_row in ha_rows:
-            problems = ha_row.get("per_problem_json") or []
+            aj = ha_row.get("analysis_json") or {}
+            problems = aj.get("per_problem", [])
             for problem in problems:
                 concept = problem.get("concept")
                 if concept and concept not in seen:
@@ -180,6 +181,7 @@ async def get_session_history(
         .select("*")
         .eq("user_id", current_user["user_id"])
         .eq("course_id", course_id)
+        .not_.is_("completed_at", "null")
         .order("started_at", desc=True)
         .limit(5)
         .execute()

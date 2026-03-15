@@ -167,7 +167,7 @@ async def generate_problem(
     Args:
         concept: The math concept/topic (e.g. "polynomial long division").
         difficulty: Target difficulty as a float 0.0-1.0.
-        problem_type: One of the six ``ProblemType`` values.
+        problem_type: One of the eight ``ProblemType`` values.
         ai_client: ``AIClient`` instance for Claude API calls.
         student_context: Optional student-provided context (wrapped via
             ``wrap_user_input`` for injection defense).

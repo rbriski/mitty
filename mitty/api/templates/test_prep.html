@@ -1321,6 +1321,7 @@
           this.currentPhase = sessionData.phase_reached || 'diagnostic';
           this.currentDifficulty = sessionData.state_json?.difficulty || 0.5;
           this.selectedCourseId = String(sessionData.course_id || '');
+          this.selectedConcepts = sessionData.state_json?.concepts || [];
           this.phaseTotal = 0;
           this.phaseCorrect = 0;
           this.confidenceRatings = [];
@@ -1788,7 +1789,7 @@
         const weakest = this.weakestSummaryConcept();
         if (!best) return '';
         const pct = Math.round(best.mastery_level * 100);
-        let text = `You improved on ${best.concept} (+${pct}%).`;
+        let text = `You scored ${pct}% on ${best.concept}.`;
         if (weakest && weakest.concept !== best.concept) {
           text += ` Next focus: ${weakest.concept}.`;
         }
@@ -1832,7 +1833,7 @@
         if (!token) return;
         const weakest = this.weakestSummaryConcept();
         if (!weakest) return;
-        const courseId = this.selectedCourseId || this.summaryData?.course_id;
+        const courseId = this.selectedCourseId;
         if (!courseId) return;
 
         try {

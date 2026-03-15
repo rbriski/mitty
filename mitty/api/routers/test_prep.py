@@ -42,7 +42,7 @@ from mitty.api.schemas import (
 from mitty.prep.analyzer import analyze_homework_set
 from mitty.prep.generator import build_review_own_errors, generate_problem
 from mitty.prep.profiler import build_mastery_profile
-from mitty.prep.session import PHASE_ORDER, SessionEngine, SessionPhase
+from mitty.prep.session import SessionEngine, SessionPhase
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -514,11 +514,20 @@ async def submit_answer(
     problem_row = problem_result.data
     problem_json = problem_row.get("problem_json", {})
 
-    # Evaluate the answer
-    evaluation = await _evaluate_answer(
-        problem_json=problem_json,
-        student_answer=data.student_answer,
-    )
+    # Reflections (review_own_errors) are ungraded — auto-accept
+    is_reflection = problem_json.get("is_reflection", False)
+    if is_reflection:
+        evaluation = {
+            "is_correct": True,
+            "score": 1.0,
+            "explanation": "Reflection recorded. Nice work!",
+        }
+    else:
+        # Evaluate the answer
+        evaluation = await _evaluate_answer(
+            problem_json=problem_json,
+            student_answer=data.student_answer,
+        )
 
     # Update the result row
     update_data: dict[str, Any] = {
@@ -534,6 +543,7 @@ async def submit_answer(
         client.table("test_prep_results")
         .update(update_data)
         .eq("id", data.problem_id)
+        .eq("session_id", str(session_id))
         .execute()
     )
     if not update_result.data:
@@ -558,7 +568,7 @@ async def submit_answer(
     )
 
     # US-010: Record wrong answers from Phases 1-2 for review_own_errors
-    if not evaluation["is_correct"]:
+    if not evaluation["is_correct"] and not is_reflection:
         engine.record_wrong_answer(
             problem_id=problem_row.get("id", 0),
             concept=problem_row.get("concept", ""),
@@ -993,7 +1003,7 @@ async def complete_session(
     from mitty.api.schemas import PhaseScore
 
     phase_scores: list[PhaseScore] = []
-    for phase in PHASE_ORDER:
+    for phase in engine.phase_order:
         p_key = phase.value
         total = engine.state.phase_problems.get(p_key, 0)
         correct = engine.state.phase_correct.get(p_key, 0)

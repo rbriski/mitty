@@ -6,7 +6,7 @@ request/response models (US-002).
 """
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -960,6 +960,7 @@ class TestPrepSessionResponse(BaseModel):
     total_correct: int = 0
     duration_seconds: int | None = None
     phase_reached: SessionPhase | None = None
+    session_type: Literal["full", "quick"] = "full"
 
 
 # ---------------------------------------------------------------------------
@@ -1043,8 +1044,9 @@ class PhaseScore(BaseModel):
 class TestPrepConfidenceSubmit(BaseModel):
     """POST request to submit confidence ratings at a phase transition."""
 
-    ratings: dict[str, int] = Field(
-        description="Mapping of concept -> confidence rating (1-5)"
+    ratings: dict[str, Annotated[int, Field(ge=1, le=5)]] = Field(
+        max_length=50,
+        description="Mapping of concept -> confidence rating (1-5)",
     )
 
 

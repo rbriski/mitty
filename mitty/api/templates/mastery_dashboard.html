@@ -488,7 +488,7 @@
           const nextFocus = urlParams.get('next_focus');
           if (improved && delta) {
             this.postSessionSuggestion =
-              `You improved on ${improved} (+${delta}%). ` +
+              `You scored ${delta}% on ${improved}. ` +
               (nextFocus ? `Next focus: ${nextFocus}.` : '');
           }
           // Clean URL without reloading
@@ -592,6 +592,7 @@
         const { data, error } = await supabase
           .from('assessments')
           .select('id, name, scheduled_date, assessment_type, course_id')
+          .eq('course_id', courseId)
           .in('assessment_type', ['test', 'quiz'])
           .gt('scheduled_date', now)
           .lt('scheduled_date', twoWeeks)

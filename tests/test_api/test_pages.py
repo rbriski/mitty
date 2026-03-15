@@ -252,13 +252,19 @@ class TestPracticeSessionPage:
         assert "View Mastery" in response.text
 
 
-class TestTestPrepPageRemoved:
-    """GET /test-prep page route is removed (returns 404)."""
+class TestTestPrepPage:
+    """GET /test-prep returns the test prep HTML page."""
 
-    def test_test_prep_returns_404(self, client: TestClient) -> None:
+    def test_returns_html(self, client: TestClient) -> None:
         response = client.get("/test-prep")
 
-        assert response.status_code == 404
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
+
+    def test_contains_test_prep_title(self, client: TestClient) -> None:
+        response = client.get("/test-prep")
+
+        assert "Test Prep" in response.text
 
 
 class TestClassDetailPage:

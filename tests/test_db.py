@@ -88,6 +88,7 @@ class TestAssignmentsTable:
         assert isinstance(t.c.due_at.type, sa.DateTime)
         assert isinstance(t.c.points_possible.type, sa.Float)
         assert isinstance(t.c.html_url.type, sa.String)
+        assert isinstance(t.c.chapter.type, sa.Text)
         assert isinstance(t.c.updated_at.type, sa.DateTime)
 
     def test_nullable_flags(self) -> None:
@@ -98,6 +99,7 @@ class TestAssignmentsTable:
         assert t.c.due_at.nullable is True
         assert t.c.points_possible.nullable is True
         assert t.c.html_url.nullable is True
+        assert t.c.chapter.nullable is True
         assert t.c.updated_at.nullable is False
 
     def test_foreign_key_to_courses(self) -> None:
@@ -1025,6 +1027,7 @@ class TestTestPrepSessionsTable:
         assert isinstance(t.c.total_correct.type, sa.Integer)
         assert isinstance(t.c.duration_seconds.type, sa.Integer)
         assert isinstance(t.c.phase_reached.type, sa.String)
+        assert isinstance(t.c.session_type.type, sa.Text)
 
     def test_nullable_flags(self) -> None:
         t = _table("test_prep_sessions")
@@ -1039,6 +1042,7 @@ class TestTestPrepSessionsTable:
         assert t.c.total_correct.nullable is False
         assert t.c.duration_seconds.nullable is True
         assert t.c.phase_reached.nullable is True
+        assert t.c.session_type.nullable is False
 
     def test_foreign_key_to_courses(self) -> None:
         fks = _table("test_prep_sessions").foreign_keys

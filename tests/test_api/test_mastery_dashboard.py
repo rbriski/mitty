@@ -142,8 +142,11 @@ def _chain_mock(
         "gte",
         "lt",
         "lte",
+        "is_",
     ):
         getattr(chain, attr).return_value = chain
+    # .not_ is a property that returns an object supporting .is_(), .eq(), etc.
+    chain.not_ = chain
     return chain
 
 
@@ -773,30 +776,32 @@ _ASSESSMENT_ESSAY = {
     "updated_at": "2026-03-01T10:00:00",
 }
 
-# Homework analysis with per_problem_json containing concepts
+# Homework analysis with per_problem data inside analysis_json
 _HOMEWORK_ANALYSIS_1 = {
     "id": 1,
     "user_id": USER_ID,
     "assignment_id": 500,
     "course_id": 10,
     "page_number": 1,
-    "analysis_json": {"overall_score": 0.8},
+    "analysis_json": {
+        "overall_score": 0.8,
+        "per_problem": [
+            {
+                "problem_number": 1,
+                "correctness": 1.0,
+                "error_type": None,
+                "concept": "Quadratic equations",
+            },
+            {
+                "problem_number": 2,
+                "correctness": 0.5,
+                "error_type": "procedural",
+                "concept": "Factoring",
+            },
+        ],
+    },
     "image_tokens": 1000,
     "analyzed_at": "2026-03-10T10:00:00",
-    "per_problem_json": [
-        {
-            "problem_number": 1,
-            "correctness": 1.0,
-            "error_type": None,
-            "concept": "Quadratic equations",
-        },
-        {
-            "problem_number": 2,
-            "correctness": 0.5,
-            "error_type": "procedural",
-            "concept": "Factoring",
-        },
-    ],
 }
 
 _HOMEWORK_ANALYSIS_2 = {
@@ -805,23 +810,25 @@ _HOMEWORK_ANALYSIS_2 = {
     "assignment_id": 500,
     "course_id": 10,
     "page_number": 2,
-    "analysis_json": {"overall_score": 0.9},
+    "analysis_json": {
+        "overall_score": 0.9,
+        "per_problem": [
+            {
+                "problem_number": 3,
+                "correctness": 1.0,
+                "error_type": None,
+                "concept": "Quadratic equations",
+            },
+            {
+                "problem_number": 4,
+                "correctness": 0.0,
+                "error_type": "conceptual",
+                "concept": "Completing the square",
+            },
+        ],
+    },
     "image_tokens": 800,
     "analyzed_at": "2026-03-10T10:00:00",
-    "per_problem_json": [
-        {
-            "problem_number": 3,
-            "correctness": 1.0,
-            "error_type": None,
-            "concept": "Quadratic equations",
-        },
-        {
-            "problem_number": 4,
-            "correctness": 0.0,
-            "error_type": "conceptual",
-            "concept": "Completing the square",
-        },
-    ],
 }
 
 
