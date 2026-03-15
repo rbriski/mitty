@@ -15,9 +15,12 @@ import pytest
 
 from mitty.prep.session import (
     DIFFICULTY_STEP,
+    FULL_PHASE_DURATIONS,
     MAX_DIFFICULTY,
     MIN_DIFFICULTY,
     PHASE_ORDER,
+    QUICK_PHASE_DURATIONS,
+    QUICK_PHASE_ORDER,
     SessionEngine,
     SessionPhase,
 )
@@ -34,9 +37,10 @@ _CONCEPTS = ["polynomial long division", "synthetic division"]
 
 def _make_engine(
     *,
-    phase: SessionPhase = SessionPhase.diagnostic,
+    phase: SessionPhase | None = None,
     difficulty: float = 0.5,
     concepts: list[str] | None = None,
+    session_type: str = "full",
 ) -> SessionEngine:
     """Build a SessionEngine with a pre-set state for testing."""
     return SessionEngine(
@@ -46,6 +50,7 @@ def _make_engine(
         concepts=concepts or list(_CONCEPTS),
         initial_difficulty=difficulty,
         initial_phase=phase,
+        session_type=session_type,
     )
 
 
@@ -310,3 +315,115 @@ class TestStreakReset:
         # Streak is reset; next wrong should not trigger decrease
         engine.record_answer(correct=False)
         assert engine.state.difficulty == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# Session type: phase durations & quick mode (US-007 / DEC-004, R3, R6)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionTypeDurations:
+    """Phase timing for full (45min) and quick (15min) session modes."""
+
+    def test_full_durations(self) -> None:
+        """Full session has 5 phases totalling 45 minutes."""
+        engine = _make_engine(session_type="full")
+        assert engine.session_type == "full"
+        assert engine.phase_durations == FULL_PHASE_DURATIONS
+        # Total should be 45 minutes
+        assert sum(FULL_PHASE_DURATIONS.values()) == 45
+        # Individual durations
+        assert FULL_PHASE_DURATIONS[SessionPhase.diagnostic] == 5
+        assert FULL_PHASE_DURATIONS[SessionPhase.focused_practice] == 8
+        assert FULL_PHASE_DURATIONS[SessionPhase.error_analysis] == 12
+        assert FULL_PHASE_DURATIONS[SessionPhase.mixed_test] == 15
+        assert FULL_PHASE_DURATIONS[SessionPhase.calibration] == 5
+
+    def test_quick_skips_phases_1_3(self) -> None:
+        """Quick session only has mixed_test and calibration phases."""
+        engine = _make_engine(session_type="quick")
+        assert engine.session_type == "quick"
+        assert engine.phase_durations == QUICK_PHASE_DURATIONS
+        # Only 2 phases
+        assert len(QUICK_PHASE_DURATIONS) == 2
+        assert SessionPhase.diagnostic not in QUICK_PHASE_DURATIONS
+        assert SessionPhase.focused_practice not in QUICK_PHASE_DURATIONS
+        assert SessionPhase.error_analysis not in QUICK_PHASE_DURATIONS
+        # Total should be 15 minutes
+        assert sum(QUICK_PHASE_DURATIONS.values()) == 15
+        assert QUICK_PHASE_DURATIONS[SessionPhase.mixed_test] == 10
+        assert QUICK_PHASE_DURATIONS[SessionPhase.calibration] == 5
+
+    def test_quick_starts_at_mixed(self) -> None:
+        """Quick session starts at mixed_test, not diagnostic."""
+        engine = _make_engine(session_type="quick")
+        assert engine.current_phase == SessionPhase.mixed_test
+        assert engine.phase_order == QUICK_PHASE_ORDER
+        # Can advance to calibration
+        engine.advance_phase()
+        assert engine.current_phase == SessionPhase.calibration
+        # Cannot advance past calibration
+        with pytest.raises(ValueError, match="[Cc]annot advance"):
+            engine.advance_phase()
+
+    def test_advance_uses_new_durations(self) -> None:
+        """advance_phase() returns durations from the correct session type."""
+        full_engine = _make_engine(session_type="full")
+        assert full_engine.current_phase_duration == 5  # diagnostic
+        full_engine.advance_phase()
+        assert full_engine.current_phase_duration == 8  # focused_practice
+        full_engine.advance_phase()
+        assert full_engine.current_phase_duration == 12  # error_analysis
+        full_engine.advance_phase()
+        assert full_engine.current_phase_duration == 15  # mixed_test
+        full_engine.advance_phase()
+        assert full_engine.current_phase_duration == 5  # calibration
+
+        quick_engine = _make_engine(session_type="quick")
+        assert quick_engine.current_phase_duration == 10  # mixed_test
+        quick_engine.advance_phase()
+        assert quick_engine.current_phase_duration == 5  # calibration
+
+
+class TestSessionTypeSerializationRoundtrip:
+    """session_type is preserved through serialization/deserialization."""
+
+    def test_full_roundtrip(self) -> None:
+        engine = _make_engine(session_type="full")
+        state_dict = engine.to_state_dict()
+        assert state_dict["session_type"] == "full"
+
+        restored = SessionEngine.from_state_dict(
+            session_id=_SESSION_ID,
+            user_id=_USER_ID,
+            state_dict=state_dict,
+        )
+        assert restored.session_type == "full"
+        assert restored.phase_order == PHASE_ORDER
+
+    def test_quick_roundtrip(self) -> None:
+        engine = _make_engine(session_type="quick")
+        state_dict = engine.to_state_dict()
+        assert state_dict["session_type"] == "quick"
+
+        restored = SessionEngine.from_state_dict(
+            session_id=_SESSION_ID,
+            user_id=_USER_ID,
+            state_dict=state_dict,
+        )
+        assert restored.session_type == "quick"
+        assert restored.current_phase == SessionPhase.mixed_test
+        assert restored.phase_order == QUICK_PHASE_ORDER
+
+    def test_from_state_dict_defaults_to_full(self) -> None:
+        """Legacy state dicts without session_type default to full."""
+        engine = _make_engine(session_type="full")
+        state_dict = engine.to_state_dict()
+        del state_dict["session_type"]
+
+        restored = SessionEngine.from_state_dict(
+            session_id=_SESSION_ID,
+            user_id=_USER_ID,
+            state_dict=state_dict,
+        )
+        assert restored.session_type == "full"
