@@ -881,8 +881,8 @@
           this.answerResults = [];
           this.view = 'session';
 
-          // Load first problem from session state
-          this.loadProblemFromState(sessionData.state_json);
+          // Load first problem from server
+          await this.fetchNextProblem(token);
         } catch (err) {
           this.setupError = 'Failed to create session: ' + err.message;
         } finally {
@@ -890,40 +890,43 @@
         }
       },
 
-      loadProblemFromState(stateJson) {
-        // The session engine may have queued a problem in state_json
-        const queue = stateJson?.problem_queue || [];
-        if (queue.length > 0) {
-          const p = queue[0];
+      async fetchNextProblem(token) {
+        if (!this.sessionId) return;
+        if (!token) token = this.session?.access_token;
+        if (!token) return;
+
+        this.problemLoading = true;
+        this.currentProblem = null;
+        this.studentAnswer = '';
+        this.answered = false;
+        this.lastResult = null;
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/next-problem`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to generate problem.';
+            return;
+          }
+
+          const problem = await resp.json();
           this.currentProblem = {
-            id: p.id || p.problem_id || '',
-            problem_type: p.problem_type || 'free_response',
-            concept: p.concept || '',
-            difficulty: p.difficulty || this.currentDifficulty,
-            prompt: p.prompt || p.question || '',
-            choices: p.choices || null,
-            correct_answer: p.correct_answer || null,
-          };
-          this.studentAnswer = '';
-          this.answered = false;
-          this.lastResult = null;
-        } else {
-          // No problems queued server-side; generate a placeholder problem
-          // using the session's concepts and current difficulty
-          const concepts = stateJson?.concepts || this.selectedConcepts || [];
-          const concept = concepts.length > 0 ? concepts[this.phaseTotal % concepts.length] : 'General';
-          this.currentProblem = {
-            id: 'local-' + Date.now(),
-            problem_type: 'free_response',
-            concept: concept,
-            difficulty: stateJson?.difficulty || this.currentDifficulty,
-            prompt: 'Solve the following problem related to ' + concept + '. Show your work.',
-            choices: null,
+            id: problem.id,
+            problem_type: problem.problem_type || 'free_response',
+            concept: problem.concept || '',
+            difficulty: problem.difficulty || this.currentDifficulty,
+            prompt: problem.prompt || '',
+            choices: problem.choices || null,
             correct_answer: null,
           };
-          this.studentAnswer = '';
-          this.answered = false;
-          this.lastResult = null;
+        } catch (err) {
+          this.sessionError = 'Failed to load problem: ' + err.message;
+        } finally {
+          this.problemLoading = false;
         }
       },
 
@@ -932,7 +935,6 @@
         const token = this.session?.access_token;
         if (!token) return;
 
-        this.problemLoading = true;
         try {
           const resp = await fetch(`/test-prep/sessions/${this.sessionId}`, {
             headers: { 'Authorization': 'Bearer ' + token },
@@ -946,11 +948,8 @@
           const sessionData = await resp.json();
           this.currentPhase = sessionData.phase_reached || this.currentPhase;
           this.currentDifficulty = sessionData.state_json?.difficulty || this.currentDifficulty;
-          this.loadProblemFromState(sessionData.state_json);
         } catch (err) {
           this.sessionError = 'Failed to refresh session: ' + err.message;
-        } finally {
-          this.problemLoading = false;
         }
       },
 
@@ -1000,12 +999,8 @@
         }
       },
 
-      nextProblem() {
-        this.currentProblem = null;
-        this.studentAnswer = '';
-        this.answered = false;
-        this.lastResult = null;
-        this.refreshSession();
+      async nextProblem() {
+        await this.fetchNextProblem();
       },
 
       // ── Phase Skip ──
@@ -1040,11 +1035,7 @@
           this.currentDifficulty = sessionData.state_json?.difficulty || this.currentDifficulty;
           this.phaseTotal = 0;
           this.phaseCorrect = 0;
-          this.currentProblem = null;
-          this.studentAnswer = '';
-          this.answered = false;
-          this.lastResult = null;
-          this.loadProblemFromState(sessionData.state_json);
+          await this.fetchNextProblem(token);
         } catch (err) {
           this.sessionError = 'Failed to skip phase: ' + err.message;
         } finally {

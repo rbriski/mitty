@@ -4,8 +4,9 @@
 - GET  /test-prep/mastery-profile        — per-concept mastery profile
 - POST /test-prep/sessions               — create test prep session (DEC-006)
 - GET  /test-prep/sessions/{session_id}  — get session state (DEC-008)
-- POST /test-prep/sessions/{session_id}/answer      — submit answer
-- POST /test-prep/sessions/{session_id}/skip-phase  — advance to next phase
+- POST /test-prep/sessions/{session_id}/answer        — submit answer
+- POST /test-prep/sessions/{session_id}/next-problem  — generate next problem
+- POST /test-prep/sessions/{session_id}/skip-phase    — advance to next phase
 - POST /test-prep/sessions/{session_id}/complete     — end session + summary
 
 Traces: DEC-002 (parallel vision), DEC-006 (UUID PKs), DEC-008 (server-
@@ -31,13 +32,15 @@ from mitty.api.schemas import (
     TestPrepAnswerResult,
     TestPrepAnswerSubmit,
     TestPrepMasteryProfile,
+    TestPrepProblem,
     TestPrepSessionCreate,
     TestPrepSessionResponse,
     TestPrepSessionSummary,
 )
 from mitty.prep.analyzer import analyze_homework_set
+from mitty.prep.generator import generate_problem
 from mitty.prep.profiler import build_mastery_profile
-from mitty.prep.session import PHASE_ORDER, SessionEngine
+from mitty.prep.session import PHASE_ORDER, SessionEngine, SessionPhase
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -479,6 +482,118 @@ async def submit_answer(
         score=evaluation["score"],
         explanation=evaluation["explanation"],
         next_problem=None,  # Next problem generated on demand by the client
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /test-prep/sessions/{session_id}/next-problem
+# ---------------------------------------------------------------------------
+
+# Map session phase to the problem type the generator should produce.
+_PHASE_PROBLEM_TYPE: dict[SessionPhase, str] = {
+    SessionPhase.diagnostic: "free_response",
+    SessionPhase.focused_practice: "multiple_choice",
+    SessionPhase.error_analysis: "error_analysis",
+    SessionPhase.mixed_test: "mixed",
+    SessionPhase.calibration: "calibration",
+}
+
+
+@router.post(
+    "/sessions/{session_id}/next-problem",
+    response_model=TestPrepProblem,
+)
+async def next_problem(
+    session_id: UUID,
+    current_user: CurrentUser,
+    client: UserClient,
+    ai_client: OptionalAI,
+) -> TestPrepProblem:
+    """Generate the next problem for a session.
+
+    Reads the session state (phase, difficulty, concepts), calls the AI
+    problem generator, inserts the problem into ``test_prep_results``,
+    and returns it so the frontend can display it.
+    """
+    user_id = current_user["user_id"]
+    session_data = await _verify_session_ownership(client, session_id, user_id)
+
+    state_json = session_data.get("state_json", {})
+    phase_str = state_json.get("phase", "diagnostic")
+    phase = SessionPhase(phase_str)
+    difficulty = state_json.get("difficulty", 0.5)
+    concepts: list[str] = state_json.get("concepts", [])
+
+    if not concepts:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "NO_CONCEPTS",
+                "message": "Session has no concepts to generate problems for.",
+            },
+        )
+
+    # Pick concept round-robin based on total problems answered so far
+    total = state_json.get("total_problems", 0)
+    concept = concepts[total % len(concepts)]
+    problem_type = _PHASE_PROBLEM_TYPE.get(phase, "free_response")
+
+    if ai_client is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "AI_UNAVAILABLE",
+                "message": "AI client is not configured.",
+            },
+        )
+
+    problem_dict = await generate_problem(
+        concept=concept,
+        difficulty=difficulty,
+        problem_type=problem_type,
+        ai_client=ai_client,
+        user_id=user_id,
+        supabase_client=client,
+    )
+
+    # Insert into test_prep_results so submit_answer can find it
+    now = datetime.now(UTC)
+    row = {
+        "user_id": user_id,
+        "session_id": str(session_id),
+        "concept": concept,
+        "difficulty": difficulty,
+        "created_at": now.isoformat(),
+        "problem_json": {
+            "type": problem_dict.get("type", problem_type),
+            "concept": concept,
+            "difficulty": difficulty,
+            "prompt": problem_dict["prompt"],
+            "choices": problem_dict.get("choices"),
+            "correct_answer": problem_dict.get("correct_answer", ""),
+            "explanation": problem_dict.get("explanation", ""),
+            "hint": problem_dict.get("hint", ""),
+        },
+    }
+    result = await client.table("test_prep_results").insert(row).execute()
+    if not result.data:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "INSERT_FAILED",
+                "message": "Failed to persist generated problem.",
+            },
+        )
+
+    inserted = result.data[0]
+    return TestPrepProblem(
+        id=inserted["id"],
+        problem_type=problem_type,
+        concept=concept,
+        difficulty=difficulty,
+        prompt=problem_dict["prompt"],
+        choices=problem_dict.get("choices"),
+        correct_answer=None,  # Don't leak correct answer to frontend
     )
 
 
