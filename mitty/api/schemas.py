@@ -1033,6 +1033,27 @@ class PhaseScore(BaseModel):
     accuracy: float = Field(ge=0.0, le=1.0)
 
 
+class TestPrepConfidenceSubmit(BaseModel):
+    """POST request to submit confidence ratings at a phase transition."""
+
+    ratings: dict[str, int] = Field(
+        description="Mapping of concept -> confidence rating (1-5)"
+    )
+
+
+class TestPrepConfidenceComparison(BaseModel):
+    """Per-concept confidence vs performance comparison row."""
+
+    concept: str
+    checkpoints: list[dict] = Field(default_factory=list)
+    attempted: int = 0
+    correct: int = 0
+    accuracy: float = 0.0
+    avg_confidence: float | None = None
+    gap: float | None = None
+    gap_label: str | None = None
+
+
 class TestPrepSessionSummary(BaseModel):
     """End-of-session summary for a test prep session."""
 
@@ -1043,3 +1064,6 @@ class TestPrepSessionSummary(BaseModel):
     duration_seconds: int | None = None
     mastery_profile: list[TestPrepMasteryProfile] = Field(default_factory=list)
     recommendations: list[str] = Field(default_factory=list)
+    confidence_comparison: list[TestPrepConfidenceComparison] = Field(
+        default_factory=list
+    )

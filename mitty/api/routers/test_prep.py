@@ -31,6 +31,8 @@ from mitty.api.schemas import (
     HomeworkAnalysisTrigger,
     TestPrepAnswerResult,
     TestPrepAnswerSubmit,
+    TestPrepConfidenceComparison,
+    TestPrepConfidenceSubmit,
     TestPrepMasteryProfile,
     TestPrepProblem,
     TestPrepSessionCreate,
@@ -700,6 +702,60 @@ async def next_problem(
 
 
 # ---------------------------------------------------------------------------
+# POST /test-prep/sessions/{session_id}/confidence  (US-009 / DEC-008, R5)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/sessions/{session_id}/confidence",
+    response_model=TestPrepSessionResponse,
+)
+async def submit_confidence(
+    session_id: UUID,
+    data: TestPrepConfidenceSubmit,
+    current_user: CurrentUser,
+    client: UserClient,
+) -> TestPrepSessionResponse:
+    """Submit per-concept confidence ratings at a phase transition.
+
+    Stores ratings in state_json.per_concept_confidence keyed by
+    concept, with phase and rating per checkpoint.  Returns the
+    updated session.
+    """
+    user_id = current_user["user_id"]
+    session_data = await _verify_session_ownership(client, session_id, user_id)
+
+    state_dict = session_data.get("state_json", {})
+    engine = SessionEngine.from_state_dict(
+        session_id=session_id,
+        user_id=UUID(user_id),
+        state_dict=state_dict,
+    )
+
+    for concept, rating in data.ratings.items():
+        engine.record_confidence(concept=concept, rating=rating)
+
+    # Persist updated state
+    result = await (
+        client.table("test_prep_sessions")
+        .update({"state_json": engine.to_state_dict()})
+        .eq("id", str(session_id))
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "Failed to update session state.",
+            },
+        )
+
+    return TestPrepSessionResponse.model_validate(result.data[0])
+
+
+# ---------------------------------------------------------------------------
 # POST /test-prep/sessions/{session_id}/skip-phase
 # ---------------------------------------------------------------------------
 
@@ -865,6 +921,12 @@ async def complete_session(
             )
         )
 
+    # Build confidence comparison from running checkpoints (US-009)
+    confidence_rows = engine.get_confidence_vs_performance()
+    confidence_comparison = [
+        TestPrepConfidenceComparison(**row) for row in confidence_rows
+    ]
+
     return TestPrepSessionSummary(
         session_id=session_id,
         phase_scores=phase_scores,
@@ -872,4 +934,5 @@ async def complete_session(
         total_problems=engine.state.total_problems,
         duration_seconds=duration,
         mastery_profile=mastery_profile,
+        confidence_comparison=confidence_comparison,
     )

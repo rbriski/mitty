@@ -427,3 +427,136 @@ class TestSessionTypeSerializationRoundtrip:
             state_dict=state_dict,
         )
         assert restored.session_type == "full"
+
+
+# ---------------------------------------------------------------------------
+# Confidence tracking (US-009)
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceRecording:
+    """US-009: Record per-concept confidence at phase transitions."""
+
+    def test_record_single_confidence(self) -> None:
+        engine = _make_engine()
+        concept = _CONCEPTS[0]
+        engine.record_confidence(concept=concept, rating=4)
+        assert concept in engine.state.per_concept_confidence
+        entries = engine.state.per_concept_confidence[concept]
+        assert len(entries) == 1
+        assert entries[0]["rating"] == 4
+        assert entries[0]["phase"] == "diagnostic"
+
+    def test_record_confidence_at_different_phases(self) -> None:
+        engine = _make_engine()
+        concept = _CONCEPTS[0]
+        engine.record_confidence(concept=concept, rating=2)
+        engine.advance_phase()  # -> focused_practice
+        engine.record_confidence(concept=concept, rating=4)
+        entries = engine.state.per_concept_confidence[concept]
+        assert len(entries) == 2
+        assert entries[0]["phase"] == "diagnostic"
+        assert entries[1]["phase"] == "focused_practice"
+
+    def test_record_confidence_multiple_concepts(self) -> None:
+        engine = _make_engine()
+        engine.record_confidence(concept=_CONCEPTS[0], rating=3)
+        engine.record_confidence(concept=_CONCEPTS[1], rating=5)
+        assert len(engine.state.per_concept_confidence) == 2
+        assert engine.state.per_concept_confidence[_CONCEPTS[0]][0]["rating"] == 3
+        assert engine.state.per_concept_confidence[_CONCEPTS[1]][0]["rating"] == 5
+
+    def test_record_confidence_rejects_invalid_rating(self) -> None:
+        engine = _make_engine()
+        with pytest.raises(ValueError, match="1-5"):
+            engine.record_confidence(concept=_CONCEPTS[0], rating=0)
+        with pytest.raises(ValueError, match="1-5"):
+            engine.record_confidence(concept=_CONCEPTS[0], rating=6)
+
+    def test_confidence_custom_phase(self) -> None:
+        engine = _make_engine()
+        engine.record_confidence(concept=_CONCEPTS[0], rating=3, phase="pre_mixed")
+        entries = engine.state.per_concept_confidence[_CONCEPTS[0]]
+        assert entries[0]["phase"] == "pre_mixed"
+
+
+class TestConfidenceVsPerformance:
+    """US-009: Confidence vs performance comparison."""
+
+    def test_comparison_with_data(self) -> None:
+        engine = _make_engine()
+        concept = _CONCEPTS[0]
+        engine.record_confidence(concept=concept, rating=5)
+        engine.record_answer(correct=True, concept=concept)
+        engine.record_answer(correct=False, concept=concept)
+        rows = engine.get_confidence_vs_performance()
+        row = next(r for r in rows if r["concept"] == concept)
+        assert row["avg_confidence"] == pytest.approx(1.0)
+        assert row["accuracy"] == pytest.approx(0.5)
+        assert row["gap_label"] == "overconfident"
+
+    def test_comparison_calibrated(self) -> None:
+        engine = _make_engine()
+        concept = _CONCEPTS[0]
+        engine.record_confidence(concept=concept, rating=3)
+        for _ in range(3):
+            engine.record_answer(correct=True, concept=concept)
+        for _ in range(2):
+            engine.record_answer(correct=False, concept=concept)
+        rows = engine.get_confidence_vs_performance()
+        row = next(r for r in rows if r["concept"] == concept)
+        assert row["gap_label"] == "calibrated"
+
+    def test_comparison_underconfident(self) -> None:
+        engine = _make_engine()
+        concept = _CONCEPTS[0]
+        engine.record_confidence(concept=concept, rating=1)
+        for _ in range(4):
+            engine.record_answer(correct=True, concept=concept)
+        engine.record_answer(correct=False, concept=concept)
+        rows = engine.get_confidence_vs_performance()
+        row = next(r for r in rows if r["concept"] == concept)
+        assert row["gap_label"] == "underconfident"
+
+    def test_comparison_no_confidence(self) -> None:
+        engine = _make_engine()
+        concept = _CONCEPTS[0]
+        engine.record_answer(correct=True, concept=concept)
+        rows = engine.get_confidence_vs_performance()
+        row = next(r for r in rows if r["concept"] == concept)
+        assert row["avg_confidence"] is None
+        assert row["gap_label"] is None
+
+
+class TestConfidenceSerialization:
+    """US-009: Confidence data survives serialization roundtrip."""
+
+    def test_roundtrip_preserves_confidence(self) -> None:
+        engine = _make_engine()
+        engine.record_confidence(concept=_CONCEPTS[0], rating=4)
+        engine.record_confidence(concept=_CONCEPTS[1], rating=2)
+        state_json = engine.to_json()
+        restored = SessionEngine.from_json(state_json)
+        assert _CONCEPTS[0] in restored.state.per_concept_confidence
+        assert _CONCEPTS[1] in restored.state.per_concept_confidence
+        assert restored.state.per_concept_confidence[_CONCEPTS[0]][0]["rating"] == 4
+        assert restored.state.per_concept_confidence[_CONCEPTS[1]][0]["rating"] == 2
+
+    def test_state_dict_includes_confidence(self) -> None:
+        engine = _make_engine()
+        engine.record_confidence(concept=_CONCEPTS[0], rating=3)
+        state_dict = engine.to_state_dict()
+        assert "per_concept_confidence" in state_dict
+        assert _CONCEPTS[0] in state_dict["per_concept_confidence"]
+
+    def test_from_state_dict_without_confidence(self) -> None:
+        """Backward compatible: old state dicts without confidence field."""
+        engine = _make_engine()
+        state_dict = engine.to_state_dict()
+        del state_dict["per_concept_confidence"]
+        restored = SessionEngine.from_state_dict(
+            session_id=_SESSION_ID,
+            user_id=_USER_ID,
+            state_dict=state_dict,
+        )
+        assert restored.state.per_concept_confidence == {}
