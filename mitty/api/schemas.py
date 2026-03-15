@@ -939,6 +939,7 @@ class TestPrepSessionCreate(BaseModel):
     course_id: int
     assessment_id: int | None = None
     concepts: list[str] = Field(min_length=1, max_length=50)
+    session_type: Literal["full", "quick"] = "full"
 
 
 class TestPrepSessionResponse(BaseModel):
