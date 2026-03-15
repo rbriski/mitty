@@ -445,7 +445,7 @@ class TestMasteryPage:
 
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
-        assert "Mastery Dashboard" in response.text
+        assert "Mastery Hub" in response.text
 
     def test_contains_auth_gate(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
@@ -461,7 +461,7 @@ class TestMasteryPage:
     def test_contains_mastery_app_script(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
 
-        assert "masteryDashboardApp()" in response.text
+        assert "masteryHubApp()" in response.text
 
     def test_contains_mastery_bar(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
@@ -473,12 +473,12 @@ class TestMasteryPage:
 
         assert "calibration_status" in response.text
 
-    def test_contains_no_study_materials_indicator(
+    def test_contains_start_practice_cta(
         self, page_client: TestClient
     ) -> None:
         response = page_client.get("/mastery")
 
-        assert "No study materials" in response.text
+        assert "startPractice" in response.text
 
     def test_contains_course_selector(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
