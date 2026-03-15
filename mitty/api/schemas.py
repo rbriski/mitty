@@ -984,6 +984,10 @@ class TestPrepProblem(BaseModel):
         default=False,
         description="True for review_own_errors (ungraded reflection).",
     )
+    phase: str | None = Field(
+        default=None,
+        description="Current session phase (sent when phase auto-advances).",
+    )
 
 
 # ---------------------------------------------------------------------------

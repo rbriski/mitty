@@ -681,17 +681,45 @@ async def next_problem(
             },
         )
 
-    # Pick concept round-robin based on total problems answered so far
-    total = state_json.get("total_problems", 0)
-    concept = concepts[total % len(concepts)]
-    problem_type = _PHASE_PROBLEM_TYPE.get(phase, "free_response")
-
     # US-010: Restore session engine to determine error_analysis subtype
     engine = SessionEngine.from_state_dict(
         session_id=session_id,
         user_id=UUID(user_id),
         state_dict=state_json,
     )
+
+    # Auto-advance: diagnostic ends after 1 question per concept
+    if phase == SessionPhase.diagnostic:
+        mastery = engine.state.concept_mastery
+        all_tested = all(mastery.get(c, {}).get("attempted", 0) >= 1 for c in concepts)
+        if all_tested:
+            try:
+                phase = engine.advance_phase()
+                # Persist the phase change
+                await (
+                    client.table("test_prep_sessions")
+                    .update(
+                        {
+                            "state_json": engine.to_state_dict(),
+                            "phase_reached": phase.value,
+                        }
+                    )
+                    .eq("id", str(session_id))
+                    .execute()
+                )
+                logger.info(
+                    "Session %s: auto-advanced from diagnostic (%d concepts tested)",
+                    session_id,
+                    len(concepts),
+                )
+            except ValueError:
+                pass  # already at final phase
+
+    # Pick concept round-robin based on phase-level problem count
+    phase_key = phase.value
+    phase_problems = engine.state.phase_problems.get(phase_key, 0)
+    concept = concepts[phase_problems % len(concepts)]
+    problem_type = _PHASE_PROBLEM_TYPE.get(phase, "free_response")
 
     # US-010: Phase 3 alternates between find_the_mistake and review_own_errors
     is_reflection = False
@@ -754,6 +782,7 @@ async def next_problem(
                     choices=None,
                     correct_answer=None,
                     is_reflection=True,
+                    phase=phase.value,
                 )
 
             # No wrong answers left — fall through to find_the_mistake
@@ -862,6 +891,7 @@ async def next_problem(
         choices=problem_dict.get("choices"),
         correct_answer=None,  # Don't leak correct answer to frontend
         is_reflection=is_reflection,
+        phase=phase.value,
     )
 
 

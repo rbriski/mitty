@@ -1239,6 +1239,12 @@
       },
 
       _parseProblem(problem) {
+        // Detect phase auto-advance from server
+        if (problem.phase && problem.phase !== this.currentPhase) {
+          this.currentPhase = problem.phase;
+          this.phaseTotal = 0;
+          this.phaseCorrect = 0;
+        }
         return {
           id: problem.id,
           problem_type: problem.problem_type || 'free_response',
