@@ -1,7 +1,8 @@
 """Pydantic v2 request/response schemas for the Mitty API.
 
 Provides Create/Update/Response triplets for all data tables,
-generic ListResponse wrapper, and ErrorDetail schema.
+generic ListResponse wrapper, ErrorDetail schema, and test-prep
+request/response models (US-002).
 """
 
 from datetime import date, datetime
@@ -802,3 +803,210 @@ class BlockArtifactResponse(BaseModel):
     artifact_type: str
     content_json: dict | None = None
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Test-Prep types  (US-002 / DEC-006 / DEC-008)
+# ---------------------------------------------------------------------------
+
+SessionPhase = Literal[
+    "diagnostic",
+    "focused_practice",
+    "error_analysis",
+    "mixed_test",
+    "calibration",
+]
+
+TestPrepProblemType = Literal[
+    "multiple_choice",
+    "free_response",
+    "worked_example",
+    "error_analysis",
+    "mixed",
+    "calibration",
+]
+
+ErrorType = Literal[
+    "conceptual",
+    "procedural",
+    "careless",
+    "incomplete",
+    "unknown",
+    "arithmetic",
+    "sign",
+    "transcription",
+]
+
+AnalysisStatus = Literal[
+    "started",
+    "page_complete",
+    "analyzing",
+    "complete",
+    "error",
+]
+
+
+# ---------------------------------------------------------------------------
+# Homework Analysis
+# ---------------------------------------------------------------------------
+
+
+class HomeworkProblemDetail(BaseModel):
+    """Single problem extracted from homework analysis."""
+
+    problem_number: int = Field(ge=1)
+    correctness: float = Field(ge=0.0, le=1.0)
+    error_type: ErrorType | None = None
+    concept: str | None = None
+
+
+class HomeworkAnalysisTrigger(BaseModel):
+    """POST request to trigger homework analysis."""
+
+    assignment_id: int
+    course_id: int
+
+
+class HomeworkAnalysisResponse(BaseModel):
+    """GET response for a completed homework analysis."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: UUID
+    assignment_id: int
+    course_id: int
+    page_number: int
+    analysis_json: dict
+    image_tokens: int | None = None
+    analyzed_at: datetime
+    per_problem_json: list[HomeworkProblemDetail] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Homework Analysis SSE Progress
+# ---------------------------------------------------------------------------
+
+
+class AnalysisProgressEvent(BaseModel):
+    """SSE event for homework analysis progress."""
+
+    status: AnalysisStatus
+    page_number: int | None = None
+    total_pages: int | None = None
+    message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Test Prep Session (DEC-006: UUID PK, DEC-008: server-authoritative state)
+# ---------------------------------------------------------------------------
+
+
+class TestPrepSessionCreate(BaseModel):
+    """POST request to create a new test prep session."""
+
+    course_id: int
+    assessment_id: int | None = None
+    concepts: list[str] = Field(min_length=1, max_length=50)
+
+
+class TestPrepSessionResponse(BaseModel):
+    """GET response for a test prep session."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: UUID
+    course_id: int
+    assessment_id: int | None = None
+    state_json: dict
+    started_at: datetime
+    completed_at: datetime | None = None
+    total_problems: int = 0
+    total_correct: int = 0
+    duration_seconds: int | None = None
+    phase_reached: SessionPhase | None = None
+
+
+# ---------------------------------------------------------------------------
+# Test Prep Problem
+# ---------------------------------------------------------------------------
+
+
+class TestPrepProblem(BaseModel):
+    """A single problem presented to the student during a test prep session."""
+
+    id: int = Field(
+        description="Problem identifier (sequence key from test_prep_results)"
+    )
+    problem_type: TestPrepProblemType
+    concept: str
+    difficulty: float = Field(ge=0.0, le=1.0)
+    prompt: str = Field(max_length=10000)
+    choices: list[str] | None = None
+    correct_answer: str | None = Field(default=None, max_length=10000)
+
+
+# ---------------------------------------------------------------------------
+# Test Prep Answer Submit / Result
+# ---------------------------------------------------------------------------
+
+
+class TestPrepAnswerSubmit(BaseModel):
+    """POST request to submit an answer for a test prep problem."""
+
+    session_id: UUID
+    problem_id: int
+    student_answer: str = Field(max_length=5000)
+    time_spent_seconds: int | None = Field(default=None, ge=0)
+
+
+class TestPrepAnswerResult(BaseModel):
+    """Response after evaluating a submitted answer."""
+
+    is_correct: bool
+    score: float = Field(ge=0.0, le=1.0)
+    explanation: str
+    next_problem: TestPrepProblem | None = None
+
+
+# ---------------------------------------------------------------------------
+# Test Prep Mastery Profile
+# ---------------------------------------------------------------------------
+
+
+class TestPrepMasteryProfile(BaseModel):
+    """Per-concept mastery summary for a test prep session."""
+
+    concept: str
+    mastery_level: float = Field(ge=0.0, le=1.0)
+    problems_attempted: int = Field(ge=0)
+    problems_correct: int = Field(ge=0)
+    avg_time_seconds: float | None = None
+    error_types: list[ErrorType] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Test Prep Session Summary
+# ---------------------------------------------------------------------------
+
+
+class PhaseScore(BaseModel):
+    """Score breakdown for a single session phase."""
+
+    phase: SessionPhase
+    total: int = Field(ge=0)
+    correct: int = Field(ge=0)
+    accuracy: float = Field(ge=0.0, le=1.0)
+
+
+class TestPrepSessionSummary(BaseModel):
+    """End-of-session summary for a test prep session."""
+
+    session_id: UUID
+    phase_scores: list[PhaseScore]
+    total_correct: int = Field(ge=0)
+    total_problems: int = Field(ge=0)
+    duration_seconds: int | None = None
+    mastery_profile: list[TestPrepMasteryProfile] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)

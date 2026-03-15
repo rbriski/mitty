@@ -7,21 +7,26 @@ field validators (enums, ranges, string lengths), and generic wrappers.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from mitty.api.schemas import (
+    AnalysisProgressEvent,
     AppConfigResponse,
     AppConfigUpdate,
     AssessmentCreate,
     AssessmentResponse,
     AssessmentUpdate,
     ErrorDetail,
+    HomeworkAnalysisResponse,
+    HomeworkAnalysisTrigger,
+    HomeworkProblemDetail,
     ListResponse,
     MasteryStateCreate,
     MasteryStateResponse,
     MasteryStateUpdate,
+    PhaseScore,
     PracticeItemCreate,
     PracticeItemResponse,
     PracticeItemUpdate,
@@ -43,6 +48,13 @@ from mitty.api.schemas import (
     StudyPlanCreate,
     StudyPlanResponse,
     StudyPlanUpdate,
+    TestPrepAnswerResult,
+    TestPrepAnswerSubmit,
+    TestPrepMasteryProfile,
+    TestPrepProblem,
+    TestPrepSessionCreate,
+    TestPrepSessionResponse,
+    TestPrepSessionSummary,
 )
 
 # ---------------------------------------------------------------------------
@@ -1124,3 +1136,725 @@ class TestErrorDetail:
             }
         )
         assert err.detail == "Field X is required"
+
+
+# ---------------------------------------------------------------------------
+# HomeworkProblemDetail
+# ---------------------------------------------------------------------------
+
+
+class TestHomeworkProblemDetail:
+    def test_valid(self) -> None:
+        obj = HomeworkProblemDetail.model_validate(
+            {
+                "problem_number": 1,
+                "correctness": 0.8,
+                "error_type": "conceptual",
+                "concept": "Quadratic equations",
+            }
+        )
+        assert obj.problem_number == 1
+        assert obj.correctness == 0.8
+        assert obj.error_type == "conceptual"
+
+    def test_minimal(self) -> None:
+        obj = HomeworkProblemDetail.model_validate(
+            {"problem_number": 1, "correctness": 1.0}
+        )
+        assert obj.error_type is None
+        assert obj.concept is None
+
+    def test_all_error_types(self) -> None:
+        for et in ("conceptual", "procedural", "careless", "incomplete", "unknown"):
+            obj = HomeworkProblemDetail.model_validate(
+                {"problem_number": 1, "correctness": 0.5, "error_type": et}
+            )
+            assert obj.error_type == et
+
+    def test_invalid_error_type(self) -> None:
+        with pytest.raises(ValueError):
+            HomeworkProblemDetail.model_validate(
+                {"problem_number": 1, "correctness": 0.5, "error_type": "magic"}
+            )
+
+    def test_problem_number_zero(self) -> None:
+        with pytest.raises(ValueError):
+            HomeworkProblemDetail.model_validate(
+                {"problem_number": 0, "correctness": 0.5}
+            )
+
+    def test_correctness_out_of_range_high(self) -> None:
+        with pytest.raises(ValueError):
+            HomeworkProblemDetail.model_validate(
+                {"problem_number": 1, "correctness": 1.1}
+            )
+
+    def test_correctness_out_of_range_low(self) -> None:
+        with pytest.raises(ValueError):
+            HomeworkProblemDetail.model_validate(
+                {"problem_number": 1, "correctness": -0.1}
+            )
+
+
+# ---------------------------------------------------------------------------
+# HomeworkAnalysisTrigger
+# ---------------------------------------------------------------------------
+
+
+class TestHomeworkAnalysisTrigger:
+    def test_valid(self) -> None:
+        obj = HomeworkAnalysisTrigger.model_validate(
+            {"assignment_id": 42, "course_id": 7}
+        )
+        assert obj.assignment_id == 42
+        assert obj.course_id == 7
+
+    def test_missing_assignment_id(self) -> None:
+        with pytest.raises(ValueError):
+            HomeworkAnalysisTrigger.model_validate({"course_id": 7})
+
+    def test_missing_course_id(self) -> None:
+        with pytest.raises(ValueError):
+            HomeworkAnalysisTrigger.model_validate({"assignment_id": 42})
+
+
+# ---------------------------------------------------------------------------
+# HomeworkAnalysisResponse
+# ---------------------------------------------------------------------------
+
+
+class TestHomeworkAnalysisResponse:
+    def test_valid(self) -> None:
+        uid = uuid4()
+        now = datetime(2026, 3, 14, tzinfo=UTC)
+        obj = HomeworkAnalysisResponse.model_validate(
+            {
+                "id": 1,
+                "user_id": str(uid),
+                "assignment_id": 42,
+                "course_id": 7,
+                "page_number": 1,
+                "analysis_json": {"problems": []},
+                "image_tokens": 500,
+                "analyzed_at": now,
+                "per_problem_json": [
+                    {"problem_number": 1, "correctness": 1.0},
+                    {
+                        "problem_number": 2,
+                        "correctness": 0.5,
+                        "error_type": "careless",
+                        "concept": "fractions",
+                    },
+                ],
+            }
+        )
+        assert obj.id == 1
+        assert obj.page_number == 1
+        assert len(obj.per_problem_json) == 2
+        assert obj.per_problem_json[1].error_type == "careless"
+
+    def test_nullable_fields(self) -> None:
+        uid = uuid4()
+        now = datetime(2026, 3, 14, tzinfo=UTC)
+        obj = HomeworkAnalysisResponse.model_validate(
+            {
+                "id": 1,
+                "user_id": str(uid),
+                "assignment_id": 42,
+                "course_id": 7,
+                "page_number": 1,
+                "analysis_json": {},
+                "analyzed_at": now,
+            }
+        )
+        assert obj.image_tokens is None
+        assert obj.per_problem_json is None
+
+
+# ---------------------------------------------------------------------------
+# AnalysisProgressEvent (SSE)
+# ---------------------------------------------------------------------------
+
+
+class TestAnalysisProgressEvent:
+    def test_valid_started(self) -> None:
+        obj = AnalysisProgressEvent.model_validate(
+            {"status": "started", "message": "Beginning analysis"}
+        )
+        assert obj.status == "started"
+        assert obj.page_number is None
+
+    def test_valid_page_complete(self) -> None:
+        obj = AnalysisProgressEvent.model_validate(
+            {
+                "status": "page_complete",
+                "page_number": 2,
+                "total_pages": 5,
+                "message": "Page 2 of 5 done",
+            }
+        )
+        assert obj.page_number == 2
+        assert obj.total_pages == 5
+
+    def test_all_statuses(self) -> None:
+        for s in ("started", "page_complete", "analyzing", "complete", "error"):
+            obj = AnalysisProgressEvent.model_validate({"status": s})
+            assert obj.status == s
+
+    def test_invalid_status(self) -> None:
+        with pytest.raises(ValueError):
+            AnalysisProgressEvent.model_validate({"status": "paused"})
+
+    def test_minimal(self) -> None:
+        obj = AnalysisProgressEvent.model_validate({"status": "complete"})
+        assert obj.page_number is None
+        assert obj.total_pages is None
+        assert obj.message is None
+
+
+# ---------------------------------------------------------------------------
+# TestPrepSessionCreate
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepSessionCreate:
+    def test_valid(self) -> None:
+        obj = TestPrepSessionCreate.model_validate(
+            {
+                "course_id": 7,
+                "concepts": ["Quadratic equations", "Factoring"],
+            }
+        )
+        assert obj.course_id == 7
+        assert len(obj.concepts) == 2
+        assert obj.assessment_id is None
+
+    def test_with_assessment_id(self) -> None:
+        obj = TestPrepSessionCreate.model_validate(
+            {
+                "course_id": 7,
+                "assessment_id": 99,
+                "concepts": ["Derivatives"],
+            }
+        )
+        assert obj.assessment_id == 99
+
+    def test_empty_concepts_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepSessionCreate.model_validate({"course_id": 7, "concepts": []})
+
+    def test_too_many_concepts_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepSessionCreate.model_validate(
+                {"course_id": 7, "concepts": [f"concept_{i}" for i in range(51)]}
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestPrepSessionResponse
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepSessionResponse:
+    def test_valid(self) -> None:
+        sid = uuid4()
+        uid = uuid4()
+        now = datetime(2026, 3, 14, tzinfo=UTC)
+        obj = TestPrepSessionResponse.model_validate(
+            {
+                "id": str(sid),
+                "user_id": str(uid),
+                "course_id": 7,
+                "state_json": {"phase": "diagnostic", "problem_index": 0},
+                "started_at": now,
+                "total_problems": 10,
+                "total_correct": 7,
+                "phase_reached": "focused_practice",
+            }
+        )
+        assert obj.id == sid
+        assert obj.total_problems == 10
+        assert obj.phase_reached == "focused_practice"
+
+    def test_uuid_primary_key(self) -> None:
+        """DEC-006: session IDs are UUIDs, not integers."""
+        sid = uuid4()
+        uid = uuid4()
+        now = datetime(2026, 3, 14, tzinfo=UTC)
+        obj = TestPrepSessionResponse.model_validate(
+            {
+                "id": str(sid),
+                "user_id": str(uid),
+                "course_id": 1,
+                "state_json": {},
+                "started_at": now,
+            }
+        )
+        assert isinstance(obj.id, UUID)
+
+    def test_all_session_phases(self) -> None:
+        uid = uuid4()
+        now = datetime(2026, 3, 14, tzinfo=UTC)
+        for phase in (
+            "diagnostic",
+            "focused_practice",
+            "error_analysis",
+            "mixed_test",
+            "calibration",
+        ):
+            obj = TestPrepSessionResponse.model_validate(
+                {
+                    "id": str(uuid4()),
+                    "user_id": str(uid),
+                    "course_id": 1,
+                    "state_json": {},
+                    "started_at": now,
+                    "phase_reached": phase,
+                }
+            )
+            assert obj.phase_reached == phase
+
+    def test_invalid_phase(self) -> None:
+        uid = uuid4()
+        now = datetime(2026, 3, 14, tzinfo=UTC)
+        with pytest.raises(ValueError):
+            TestPrepSessionResponse.model_validate(
+                {
+                    "id": str(uuid4()),
+                    "user_id": str(uid),
+                    "course_id": 1,
+                    "state_json": {},
+                    "started_at": now,
+                    "phase_reached": "warmup",
+                }
+            )
+
+    def test_defaults(self) -> None:
+        uid = uuid4()
+        now = datetime(2026, 3, 14, tzinfo=UTC)
+        obj = TestPrepSessionResponse.model_validate(
+            {
+                "id": str(uuid4()),
+                "user_id": str(uid),
+                "course_id": 1,
+                "state_json": {},
+                "started_at": now,
+            }
+        )
+        assert obj.total_problems == 0
+        assert obj.total_correct == 0
+        assert obj.completed_at is None
+        assert obj.duration_seconds is None
+        assert obj.phase_reached is None
+        assert obj.assessment_id is None
+
+
+# ---------------------------------------------------------------------------
+# TestPrepProblem
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepProblem:
+    def test_valid_multiple_choice(self) -> None:
+        obj = TestPrepProblem.model_validate(
+            {
+                "id": 1,
+                "problem_type": "multiple_choice",
+                "concept": "Quadratics",
+                "difficulty": 0.5,
+                "prompt": "Solve x^2 - 4 = 0",
+                "choices": ["x = 2", "x = -2", "x = +/-2", "x = 4"],
+                "correct_answer": "x = +/-2",
+            }
+        )
+        assert obj.problem_type == "multiple_choice"
+        assert len(obj.choices) == 4
+
+    def test_valid_free_response(self) -> None:
+        obj = TestPrepProblem.model_validate(
+            {
+                "id": 2,
+                "problem_type": "free_response",
+                "concept": "Integration",
+                "difficulty": 0.7,
+                "prompt": "Find the integral of x^2 dx",
+            }
+        )
+        assert obj.choices is None
+        assert obj.correct_answer is None
+
+    def test_all_problem_types(self) -> None:
+        for pt in (
+            "multiple_choice",
+            "free_response",
+            "worked_example",
+            "error_analysis",
+            "mixed",
+            "calibration",
+        ):
+            obj = TestPrepProblem.model_validate(
+                {
+                    "id": 3,
+                    "problem_type": pt,
+                    "concept": "X",
+                    "difficulty": 0.5,
+                    "prompt": "Q?",
+                }
+            )
+            assert obj.problem_type == pt
+
+    def test_invalid_problem_type(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepProblem.model_validate(
+                {
+                    "id": 3,
+                    "problem_type": "essay",
+                    "concept": "X",
+                    "difficulty": 0.5,
+                    "prompt": "Q?",
+                }
+            )
+
+    def test_difficulty_boundaries(self) -> None:
+        for d in (0.0, 0.5, 1.0):
+            obj = TestPrepProblem.model_validate(
+                {
+                    "id": 3,
+                    "problem_type": "free_response",
+                    "concept": "X",
+                    "difficulty": d,
+                    "prompt": "Q?",
+                }
+            )
+            assert obj.difficulty == d
+
+    def test_difficulty_too_high(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepProblem.model_validate(
+                {
+                    "id": 3,
+                    "problem_type": "free_response",
+                    "concept": "X",
+                    "difficulty": 1.1,
+                    "prompt": "Q?",
+                }
+            )
+
+    def test_difficulty_too_low(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepProblem.model_validate(
+                {
+                    "id": 3,
+                    "problem_type": "free_response",
+                    "concept": "X",
+                    "difficulty": -0.1,
+                    "prompt": "Q?",
+                }
+            )
+
+    def test_prompt_too_long(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepProblem.model_validate(
+                {
+                    "id": 3,
+                    "problem_type": "free_response",
+                    "concept": "X",
+                    "difficulty": 0.5,
+                    "prompt": "x" * 10001,
+                }
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestPrepAnswerSubmit
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepAnswerSubmit:
+    def test_valid(self) -> None:
+        sid = uuid4()
+        obj = TestPrepAnswerSubmit.model_validate(
+            {
+                "session_id": str(sid),
+                "problem_id": 1,
+                "student_answer": "x = +/-2",
+                "time_spent_seconds": 45,
+            }
+        )
+        assert obj.session_id == sid
+        assert obj.time_spent_seconds == 45
+
+    def test_minimal(self) -> None:
+        sid = uuid4()
+        obj = TestPrepAnswerSubmit.model_validate(
+            {
+                "session_id": str(sid),
+                "problem_id": 2,
+                "student_answer": "42",
+            }
+        )
+        assert obj.time_spent_seconds is None
+
+    def test_student_answer_too_long(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepAnswerSubmit.model_validate(
+                {
+                    "session_id": str(uuid4()),
+                    "problem_id": 2,
+                    "student_answer": "x" * 5001,
+                }
+            )
+
+    def test_negative_time_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepAnswerSubmit.model_validate(
+                {
+                    "session_id": str(uuid4()),
+                    "problem_id": 2,
+                    "student_answer": "42",
+                    "time_spent_seconds": -1,
+                }
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestPrepAnswerResult
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepAnswerResult:
+    def test_valid_with_next_problem(self) -> None:
+        obj = TestPrepAnswerResult.model_validate(
+            {
+                "is_correct": True,
+                "score": 1.0,
+                "explanation": "Well done!",
+                "next_problem": {
+                    "id": 2,
+                    "problem_type": "free_response",
+                    "concept": "Derivatives",
+                    "difficulty": 0.6,
+                    "prompt": "Find dy/dx of y = x^3",
+                },
+            }
+        )
+        assert obj.is_correct is True
+        assert obj.next_problem is not None
+        assert obj.next_problem.concept == "Derivatives"
+
+    def test_valid_no_next_problem(self) -> None:
+        obj = TestPrepAnswerResult.model_validate(
+            {
+                "is_correct": False,
+                "score": 0.0,
+                "explanation": "Session complete.",
+            }
+        )
+        assert obj.next_problem is None
+
+    def test_score_boundaries(self) -> None:
+        for s in (0.0, 0.5, 1.0):
+            obj = TestPrepAnswerResult.model_validate(
+                {"is_correct": True, "score": s, "explanation": "ok"}
+            )
+            assert obj.score == s
+
+    def test_score_too_high(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepAnswerResult.model_validate(
+                {"is_correct": True, "score": 1.1, "explanation": "ok"}
+            )
+
+    def test_score_too_low(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepAnswerResult.model_validate(
+                {"is_correct": True, "score": -0.1, "explanation": "ok"}
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestPrepMasteryProfile
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepMasteryProfile:
+    def test_valid(self) -> None:
+        obj = TestPrepMasteryProfile.model_validate(
+            {
+                "concept": "Quadratics",
+                "mastery_level": 0.85,
+                "problems_attempted": 10,
+                "problems_correct": 8,
+                "avg_time_seconds": 32.5,
+                "error_types": ["careless", "procedural"],
+            }
+        )
+        assert obj.concept == "Quadratics"
+        assert obj.problems_correct == 8
+        assert len(obj.error_types) == 2
+
+    def test_defaults(self) -> None:
+        obj = TestPrepMasteryProfile.model_validate(
+            {
+                "concept": "X",
+                "mastery_level": 0.5,
+                "problems_attempted": 5,
+                "problems_correct": 3,
+            }
+        )
+        assert obj.avg_time_seconds is None
+        assert obj.error_types == []
+
+    def test_mastery_level_boundaries(self) -> None:
+        for val in (0.0, 0.5, 1.0):
+            obj = TestPrepMasteryProfile.model_validate(
+                {
+                    "concept": "X",
+                    "mastery_level": val,
+                    "problems_attempted": 1,
+                    "problems_correct": 1,
+                }
+            )
+            assert obj.mastery_level == val
+
+    def test_mastery_level_too_high(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepMasteryProfile.model_validate(
+                {
+                    "concept": "X",
+                    "mastery_level": 1.1,
+                    "problems_attempted": 1,
+                    "problems_correct": 1,
+                }
+            )
+
+    def test_negative_problems_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepMasteryProfile.model_validate(
+                {
+                    "concept": "X",
+                    "mastery_level": 0.5,
+                    "problems_attempted": -1,
+                    "problems_correct": 0,
+                }
+            )
+
+
+# ---------------------------------------------------------------------------
+# PhaseScore
+# ---------------------------------------------------------------------------
+
+
+class TestPhaseScore:
+    def test_valid(self) -> None:
+        obj = PhaseScore.model_validate(
+            {"phase": "diagnostic", "total": 10, "correct": 7, "accuracy": 0.7}
+        )
+        assert obj.phase == "diagnostic"
+        assert obj.accuracy == 0.7
+
+    def test_all_phases(self) -> None:
+        for p in (
+            "diagnostic",
+            "focused_practice",
+            "error_analysis",
+            "mixed_test",
+            "calibration",
+        ):
+            obj = PhaseScore.model_validate(
+                {"phase": p, "total": 5, "correct": 3, "accuracy": 0.6}
+            )
+            assert obj.phase == p
+
+    def test_invalid_phase(self) -> None:
+        with pytest.raises(ValueError):
+            PhaseScore.model_validate(
+                {"phase": "warmup", "total": 5, "correct": 3, "accuracy": 0.6}
+            )
+
+    def test_accuracy_boundaries(self) -> None:
+        for a in (0.0, 0.5, 1.0):
+            obj = PhaseScore.model_validate(
+                {"phase": "diagnostic", "total": 10, "correct": 5, "accuracy": a}
+            )
+            assert obj.accuracy == a
+
+    def test_accuracy_too_high(self) -> None:
+        with pytest.raises(ValueError):
+            PhaseScore.model_validate(
+                {"phase": "diagnostic", "total": 10, "correct": 5, "accuracy": 1.1}
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestPrepSessionSummary
+# ---------------------------------------------------------------------------
+
+
+class TestTestPrepSessionSummary:
+    def test_valid(self) -> None:
+        sid = uuid4()
+        obj = TestPrepSessionSummary.model_validate(
+            {
+                "session_id": str(sid),
+                "phase_scores": [
+                    {
+                        "phase": "diagnostic",
+                        "total": 5,
+                        "correct": 4,
+                        "accuracy": 0.8,
+                    },
+                    {
+                        "phase": "focused_practice",
+                        "total": 10,
+                        "correct": 7,
+                        "accuracy": 0.7,
+                    },
+                ],
+                "total_correct": 11,
+                "total_problems": 15,
+                "duration_seconds": 1200,
+                "mastery_profile": [
+                    {
+                        "concept": "Quadratics",
+                        "mastery_level": 0.8,
+                        "problems_attempted": 8,
+                        "problems_correct": 6,
+                    },
+                ],
+                "recommendations": [
+                    "Review factoring techniques",
+                    "Practice word problems",
+                ],
+            }
+        )
+        assert obj.session_id == sid
+        assert obj.total_correct == 11
+        assert len(obj.phase_scores) == 2
+        assert len(obj.mastery_profile) == 1
+        assert len(obj.recommendations) == 2
+
+    def test_defaults(self) -> None:
+        sid = uuid4()
+        obj = TestPrepSessionSummary.model_validate(
+            {
+                "session_id": str(sid),
+                "phase_scores": [],
+                "total_correct": 0,
+                "total_problems": 0,
+            }
+        )
+        assert obj.duration_seconds is None
+        assert obj.mastery_profile == []
+        assert obj.recommendations == []
+
+    def test_negative_total_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            TestPrepSessionSummary.model_validate(
+                {
+                    "session_id": str(uuid4()),
+                    "phase_scores": [],
+                    "total_correct": -1,
+                    "total_problems": 0,
+                }
+            )

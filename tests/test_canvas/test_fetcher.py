@@ -18,6 +18,7 @@ from mitty.canvas.fetcher import (
     fetch_modules,
     fetch_pages,
     fetch_quizzes,
+    fetch_submission_attachments,
     resolve_module_item_pages,
     strip_html,
 )
@@ -1345,3 +1346,202 @@ class TestFetchFileContents:
             result = await fetch_file_contents(client, [file])
 
         assert result == {}
+
+
+class TestFetchSubmissionAttachments:
+    """fetch_submission_attachments fetches attachment metadata per assignment."""
+
+    async def test_fetch_submission_attachments_success(self) -> None:
+        """Returns attachment dicts when submission has attachments."""
+        attachment_data = [
+            {
+                "id": 1001,
+                "uuid": "abc123",
+                "display_name": "essay.pdf",
+                "filename": "essay.pdf",
+                "url": "https://mitty.instructure.com/files/1001/download",
+                "content-type": "application/pdf",
+                "size": 204800,
+            },
+            {
+                "id": 1002,
+                "uuid": "def456",
+                "display_name": "notes.docx",
+                "filename": "notes.docx",
+                "url": "https://mitty.instructure.com/files/1002/download",
+                "content-type": (
+                    "application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document"
+                ),
+                "size": 51200,
+            },
+        ]
+        response = MagicMock()
+        response.json.return_value = {"attachments": attachment_data}
+
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=response)
+
+        result = await fetch_submission_attachments(
+            client, course_id=12345, assignment_ids=[67890]
+        )
+
+        client.get.assert_called_once_with(
+            "/api/v1/courses/12345/assignments/67890/submissions/self",
+            params={"include[]": "attachments"},
+        )
+        assert len(result) == 2
+        assert result[0]["url"] == ("https://mitty.instructure.com/files/1001/download")
+        assert result[0]["filename"] == "essay.pdf"
+        assert result[0]["content_type"] == "application/pdf"
+        assert result[0]["size"] == 204800
+        assert result[1]["filename"] == "notes.docx"
+        assert result[1]["size"] == 51200
+
+    async def test_no_submission(self) -> None:
+        """Returns empty list when submission does not exist (404)."""
+        from mitty.canvas.client import CanvasAPIError
+
+        client = AsyncMock()
+        client.get = AsyncMock(
+            side_effect=CanvasAPIError(
+                "Canvas API error: 404 Not Found for "
+                "/api/v1/courses/12345/assignments/99999/submissions/self"
+            )
+        )
+
+        result = await fetch_submission_attachments(
+            client, course_id=12345, assignment_ids=[99999]
+        )
+
+        assert result == []
+
+    async def test_no_attachments(self) -> None:
+        """Returns empty list when submission exists but has no attachments."""
+        response = MagicMock()
+        response.json.return_value = {
+            "id": 5001,
+            "assignment_id": 67890,
+            "workflow_state": "submitted",
+        }
+
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=response)
+
+        result = await fetch_submission_attachments(
+            client, course_id=12345, assignment_ids=[67890]
+        )
+
+        assert result == []
+
+    async def test_multiple_assignments(self) -> None:
+        """Fetches attachments across multiple assignments."""
+        response_1 = MagicMock()
+        response_1.json.return_value = {
+            "attachments": [
+                {
+                    "id": 2001,
+                    "display_name": "hw1.pdf",
+                    "filename": "hw1.pdf",
+                    "url": "https://mitty.instructure.com/files/2001/download",
+                    "content-type": "application/pdf",
+                    "size": 10240,
+                },
+            ]
+        }
+        response_2 = MagicMock()
+        response_2.json.return_value = {
+            "attachments": [
+                {
+                    "id": 2002,
+                    "display_name": "hw2.pdf",
+                    "filename": "hw2.pdf",
+                    "url": "https://mitty.instructure.com/files/2002/download",
+                    "content-type": "application/pdf",
+                    "size": 20480,
+                },
+            ]
+        }
+
+        client = AsyncMock()
+        client.get = AsyncMock(side_effect=[response_1, response_2])
+
+        result = await fetch_submission_attachments(
+            client, course_id=12345, assignment_ids=[100, 200]
+        )
+
+        assert len(result) == 2
+        assert result[0]["filename"] == "hw1.pdf"
+        assert result[0]["assignment_id"] == 100
+        assert result[1]["filename"] == "hw2.pdf"
+        assert result[1]["assignment_id"] == 200
+
+        client.get.assert_any_call(
+            "/api/v1/courses/12345/assignments/100/submissions/self",
+            params={"include[]": "attachments"},
+        )
+        client.get.assert_any_call(
+            "/api/v1/courses/12345/assignments/200/submissions/self",
+            params={"include[]": "attachments"},
+        )
+
+    async def test_empty_assignment_ids(self) -> None:
+        """Returns empty list when no assignment IDs are provided."""
+        client = AsyncMock()
+
+        result = await fetch_submission_attachments(
+            client, course_id=12345, assignment_ids=[]
+        )
+
+        assert result == []
+        client.get.assert_not_called()
+
+    async def test_mixed_success_and_404(self) -> None:
+        """Successful submissions are collected even when others 404."""
+        from mitty.canvas.client import CanvasAPIError
+
+        good_response = MagicMock()
+        good_response.json.return_value = {
+            "attachments": [
+                {
+                    "id": 3001,
+                    "display_name": "report.pdf",
+                    "filename": "report.pdf",
+                    "url": "https://mitty.instructure.com/files/3001/download",
+                    "content-type": "application/pdf",
+                    "size": 30720,
+                },
+            ]
+        }
+
+        client = AsyncMock()
+        client.get = AsyncMock(
+            side_effect=[
+                good_response,
+                CanvasAPIError("Canvas API error: 404 Not Found"),
+            ]
+        )
+
+        result = await fetch_submission_attachments(
+            client, course_id=12345, assignment_ids=[100, 200]
+        )
+
+        assert len(result) == 1
+        assert result[0]["filename"] == "report.pdf"
+
+    async def test_empty_attachments_list(self) -> None:
+        """Returns empty list when attachments key exists but is empty."""
+        response = MagicMock()
+        response.json.return_value = {
+            "id": 6001,
+            "attachments": [],
+        }
+
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=response)
+
+        result = await fetch_submission_attachments(
+            client, course_id=12345, assignment_ids=[67890]
+        )
+
+        assert result == []

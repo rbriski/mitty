@@ -521,3 +521,313 @@ class TestBudgetExceeded:
                 user_id="user-budget",
                 supabase_client=mock_sb,
             )
+
+
+# ---------------------------------------------------------------------------
+# New Tests: call_vision
+# ---------------------------------------------------------------------------
+
+
+class TestCallVisionConstructsImageBlocks:
+    """call_vision constructs proper image content blocks for the API."""
+
+    async def test_constructs_image_blocks(self) -> None:
+        client = AIClient(api_key="sk-test", model="claude-sonnet-4-20250514")
+
+        # Two small fake PNG images (just raw bytes for testing)
+        img1 = b"\x89PNG\r\n\x1a\nfake-image-1"
+        img2 = b"\x89PNG\r\n\x1a\nfake-image-2"
+
+        mock_msg = _make_message({"name": "Apple", "color": "red", "is_citrus": False})
+
+        with patch.object(
+            client._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_msg
+
+            result = await client.call_vision(
+                images=[img1, img2],
+                system="You analyze images.",
+                user_prompt="What fruit is this?",
+                response_model=FruitClassification,
+            )
+
+        assert isinstance(result, FruitClassification)
+        assert result.name == "Apple"
+
+        # Verify the API was called with image content blocks
+        call_kwargs = mock_create.call_args[1]
+        messages = call_kwargs["messages"]
+        assert len(messages) == 1
+        content = messages[0]["content"]
+
+        # Should have 2 image blocks + 1 text block
+        assert len(content) == 3
+
+        # First two blocks are images
+        import base64
+
+        for i, img_bytes in enumerate([img1, img2]):
+            assert content[i]["type"] == "image"
+            assert content[i]["source"]["type"] == "base64"
+            assert content[i]["source"]["media_type"] == "image/png"
+            assert content[i]["source"]["data"] == base64.b64encode(img_bytes).decode()
+
+        # Last block is text
+        assert content[2]["type"] == "text"
+        assert content[2]["text"] == "What fruit is this?"
+
+
+class TestCallVisionAuditLogging:
+    """call_vision writes audit rows with call_type='vision'."""
+
+    async def test_audit_logging(self) -> None:
+        mock_sb = _mock_supabase()
+        client = AIClient(api_key="sk-test", budget_per_session=0, budget_per_day=0)
+
+        mock_msg = _make_message(
+            {"name": "Lemon", "color": "yellow", "is_citrus": True},
+            input_tokens=500,
+            output_tokens=100,
+        )
+
+        with patch.object(
+            client._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_msg
+
+            await client.call_vision(
+                images=[b"\x89PNG\r\n\x1a\nfake"],
+                system="Analyze.",
+                user_prompt="Identify this.",
+                response_model=FruitClassification,
+                user_id="user-vision",
+                supabase_client=mock_sb,
+            )
+
+        # Let fire-and-forget task run
+        await asyncio.sleep(0.05)
+
+        mock_sb.table.assert_called_with("ai_audit_log")
+        insert_call = mock_sb.table.return_value.insert
+        assert insert_call.call_count == 1
+        row = insert_call.call_args[0][0]
+        assert row["user_id"] == "user-vision"
+        assert row["call_type"] == "vision"
+        assert row["status"] == "success"
+        assert row["input_tokens"] == 500
+        assert row["output_tokens"] == 100
+        assert row["cost_usd"] > 0
+        assert row["error_msg"] is None
+
+    async def test_audit_logging_custom_call_type(self) -> None:
+        mock_sb = _mock_supabase()
+        client = AIClient(api_key="sk-test", budget_per_session=0, budget_per_day=0)
+
+        mock_msg = _make_message(
+            {"name": "Lemon", "color": "yellow", "is_citrus": True},
+        )
+
+        with patch.object(
+            client._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_msg
+
+            await client.call_vision(
+                images=[b"\x89PNG\r\n\x1a\nfake"],
+                system="Analyze.",
+                user_prompt="Identify this.",
+                response_model=FruitClassification,
+                call_type="homework_vision",
+                user_id="user-custom",
+                supabase_client=mock_sb,
+            )
+
+        await asyncio.sleep(0.05)
+
+        insert_call = mock_sb.table.return_value.insert
+        row = insert_call.call_args[0][0]
+        assert row["call_type"] == "homework_vision"
+
+
+class TestCallVisionCostCalculation:
+    """call_vision correctly calculates and tracks cost."""
+
+    async def test_cost_calculation(self) -> None:
+        mock_sb = _mock_supabase()
+        client = AIClient(api_key="sk-test", budget_per_session=0, budget_per_day=0)
+
+        mock_msg = _make_message(
+            {"name": "Apple", "color": "red", "is_citrus": False},
+            input_tokens=1000,
+            output_tokens=200,
+            model="claude-sonnet-4-20250514",
+        )
+
+        with patch.object(
+            client._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_msg
+
+            await client.call_vision(
+                images=[b"\x89PNG\r\n\x1a\nfake"],
+                system="Analyze.",
+                user_prompt="Identify.",
+                response_model=FruitClassification,
+                user_id="user-cost",
+                supabase_client=mock_sb,
+            )
+
+        await asyncio.sleep(0.05)
+
+        insert_call = mock_sb.table.return_value.insert
+        row = insert_call.call_args[0][0]
+        # sonnet: input 3.0/M, output 15.0/M
+        expected_cost = 1000 * 3.0 / 1_000_000 + 200 * 15.0 / 1_000_000
+        assert row["cost_usd"] == pytest.approx(expected_cost)
+
+        # Session cost should also be tracked
+        assert client._session_cost == pytest.approx(expected_cost)
+
+
+class TestCallVisionRateLimited:
+    """call_vision respects rate limiter."""
+
+    async def test_rate_limited(self) -> None:
+        from mitty.ai.rate_limiter import RateLimiter
+
+        limiter = RateLimiter(requests_per_minute=1, tokens_per_minute=100_000)
+        client = AIClient(
+            api_key="sk-test",
+            rate_limiter=limiter,
+            budget_per_session=0,
+            budget_per_day=0,
+        )
+
+        mock_msg = _make_message({"name": "Apple", "color": "red", "is_citrus": False})
+
+        with patch.object(
+            client._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_msg
+
+            # First call should succeed
+            await client.call_vision(
+                images=[b"\x89PNG\r\n\x1a\nfake"],
+                system="Analyze.",
+                user_prompt="Identify.",
+                response_model=FruitClassification,
+                user_id="user-rl",
+            )
+
+            # Second call should be rate limited (1 RPM)
+            with pytest.raises(RateLimitError):
+                await client.call_vision(
+                    images=[b"\x89PNG\r\n\x1a\nfake"],
+                    system="Analyze.",
+                    user_prompt="Identify.",
+                    response_model=FruitClassification,
+                    user_id="user-rl",
+                )
+
+    async def test_rate_limiter_records_token_usage(self) -> None:
+        from mitty.ai.rate_limiter import RateLimiter
+
+        limiter = RateLimiter(requests_per_minute=30, tokens_per_minute=100_000)
+        client = AIClient(
+            api_key="sk-test",
+            rate_limiter=limiter,
+            budget_per_session=0,
+            budget_per_day=0,
+        )
+
+        mock_msg = _make_message(
+            {"name": "Apple", "color": "red", "is_citrus": False},
+            input_tokens=200,
+            output_tokens=80,
+        )
+
+        with patch.object(
+            client._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_msg
+
+            await client.call_vision(
+                images=[b"\x89PNG\r\n\x1a\nfake"],
+                system="Analyze.",
+                user_prompt="Identify.",
+                response_model=FruitClassification,
+                user_id="user-tokens",
+            )
+
+        # Verify rate limiter recorded the usage
+        token_entries = limiter._token_log.get("user-tokens", [])
+        assert len(token_entries) >= 1
+        total_tokens = sum(count for _, count in token_entries)
+        assert total_tokens == 280  # 200 + 80
+
+
+class TestCallVisionRetries:
+    """call_vision retries on transient errors via _call_with_retry."""
+
+    async def test_retries_on_429_then_succeeds(self) -> None:
+        client = AIClient(
+            api_key="sk-test",
+            model="claude-sonnet-4-20250514",
+            max_retries=3,
+        )
+
+        rate_err = _make_api_status_error(429, "rate limited")
+        mock_msg = _make_message(
+            {"name": "Orange", "color": "orange", "is_citrus": True}
+        )
+
+        with patch.object(
+            client._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.side_effect = [rate_err, mock_msg]
+
+            result = await client.call_vision(
+                images=[b"\x89PNG\r\n\x1a\nfake"],
+                system="Analyze.",
+                user_prompt="Identify.",
+                response_model=FruitClassification,
+            )
+
+        assert result.name == "Orange"
+        assert mock_create.call_count == 2
+
+
+class TestCallVisionErrorAuditLogging:
+    """call_vision writes audit rows on error paths."""
+
+    async def test_audit_row_written_on_error(self) -> None:
+        mock_sb = _mock_supabase()
+        client = AIClient(api_key="sk-test", budget_per_session=0, budget_per_day=0)
+
+        auth_err = _make_api_status_error(401, "invalid api key")
+
+        with patch.object(
+            client._client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.side_effect = auth_err
+
+            with pytest.raises(AIClientError):
+                await client.call_vision(
+                    images=[b"\x89PNG\r\n\x1a\nfake"],
+                    system="Analyze.",
+                    user_prompt="Identify.",
+                    response_model=FruitClassification,
+                    user_id="user-err",
+                    call_type="vision",
+                    supabase_client=mock_sb,
+                )
+
+        await asyncio.sleep(0.05)
+
+        insert_call = mock_sb.table.return_value.insert
+        assert insert_call.call_count == 1
+        row = insert_call.call_args[0][0]
+        assert row["status"] == "error"
+        assert row["error_msg"] is not None
+        assert "invalid api key" in row["error_msg"]

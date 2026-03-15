@@ -12,6 +12,7 @@ Provides ``AIClient`` — a thin layer over the Anthropic SDK that:
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime
 import logging
 import time
@@ -32,6 +33,7 @@ T = TypeVar("T", bound=pydantic.BaseModel)
 
 # ---------------------------------------------------------------------------
 # Pricing (USD per million tokens) — update when models change
+# Vision calls use the same models; image tokens are billed at input rates.
 # ---------------------------------------------------------------------------
 PRICING: dict[str, dict[str, float]] = {
     "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0},
@@ -44,6 +46,27 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}
 
 # Initial backoff delay in seconds
 _BASE_BACKOFF = 0.5
+
+
+def _detect_media_type(data: bytes) -> str:
+    """Detect image media type from magic bytes.
+
+    Raises ``ValueError`` for empty data or unrecognised formats so
+    callers get a clear error instead of a silent PNG fallback.
+    """
+    if not data:
+        raise ValueError("Cannot detect media type of empty image data")
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:2] == b"\xff\xd8":
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and len(data) > 11 and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:3] == b"GIF":
+        return "image/gif"
+    raise ValueError(
+        "Unsupported image format: unable to detect media type from magic bytes"
+    )
 
 
 def _calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -289,6 +312,180 @@ class AIClient:
 
             raise
 
+    async def call_vision(
+        self,
+        *,
+        images: list[bytes],
+        system: str,
+        user_prompt: str,
+        response_model: type[T],
+        max_tokens: int | None = None,
+        call_type: str = "vision",
+        user_id: str | None = None,
+        supabase_client: AsyncClient | None = None,
+    ) -> T:
+        """Send images + text and parse the response into *response_model*.
+
+        Uses the same tool-use pattern as ``call_structured`` but constructs
+        image content blocks for the Anthropic Vision API.
+
+        Args:
+            images: List of raw PNG image bytes.
+            system: System prompt.
+            user_prompt: User message text (appended after image blocks).
+            response_model: Pydantic model class to validate output.
+            max_tokens: Override default max_tokens for this call.
+            call_type: Type of call for audit logging (default ``"vision"``).
+            user_id: User ID for audit logging and rate limiting.
+            supabase_client: Supabase client for writing audit rows.
+
+        Returns:
+            An instance of *response_model* populated from the API response.
+
+        Raises:
+            AIClientError: On permanent API errors (4xx except 429).
+            RateLimitError: When retries are exhausted on 429 or
+                per-user rate limit exceeded.
+            BudgetExceededError: When session or daily budget exceeded.
+        """
+        effective_max_tokens = max_tokens or self._max_tokens
+
+        # Rate limit check
+        if user_id and self._rate_limiter:
+            await self._rate_limiter.check_rate_limit(user_id)
+
+        # Budget check
+        if user_id and supabase_client:
+            await self._check_budget(user_id, supabase_client)
+        elif (
+            self._budget_per_session > 0
+            and self._session_cost >= self._budget_per_session
+        ):
+            raise BudgetExceededError(
+                budget_type="session",
+                limit_usd=self._budget_per_session,
+                spent_usd=self._session_cost,
+            )
+
+        # Build content blocks: image blocks + trailing text block
+        content_blocks: list[dict[str, Any]] = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": _detect_media_type(img),
+                    "data": base64.b64encode(img).decode(),
+                },
+            }
+            for img in images
+        ]
+        content_blocks.append({"type": "text", "text": user_prompt})
+
+        tool_name = response_model.__name__
+        tool_def = {
+            "name": tool_name,
+            "description": f"Return structured {tool_name} data.",
+            "input_schema": response_model.model_json_schema(),
+        }
+
+        start = time.monotonic()
+        status = "success"
+        error_msg: str | None = None
+        input_tokens = 0
+        output_tokens = 0
+        cost = 0.0
+
+        try:
+            message = await self._call_with_retry(
+                system=system,
+                user_prompt=content_blocks,
+                tools=[tool_def],
+                tool_choice={"type": "tool", "name": tool_name},
+                max_tokens=effective_max_tokens,
+            )
+
+            elapsed = time.monotonic() - start
+            input_tokens = message.usage.input_tokens
+            output_tokens = message.usage.output_tokens
+            cost = _calculate_cost(self._model, input_tokens, output_tokens)
+            self._log_usage(message, elapsed, cost)
+
+            # Track session cost
+            self._session_cost += cost
+
+            # Record rate limit usage
+            if user_id and self._rate_limiter:
+                await self._rate_limiter.record_usage(
+                    user_id, input_tokens + output_tokens
+                )
+
+            # Extract the tool_use block from the response
+            for block in message.content:
+                if block.type == "tool_use" and block.name == tool_name:
+                    result = response_model.model_validate(block.input)
+
+                    # Fire-and-forget audit write
+                    if supabase_client and user_id:
+                        task = asyncio.create_task(
+                            self._write_audit_row(
+                                supabase_client=supabase_client,
+                                user_id=user_id,
+                                call_type=call_type,
+                                model=self._model,
+                                prompt_version=None,
+                                input_tokens=input_tokens,
+                                output_tokens=output_tokens,
+                                cost_usd=cost,
+                                duration_ms=int(elapsed * 1000),
+                                status=status,
+                                error_msg=None,
+                            )
+                        )
+                        self._bg_tasks.add(task)
+                        task.add_done_callback(self._bg_tasks.discard)
+
+                    return result
+
+            msg = f"No tool_use block named '{tool_name}' found in API response."
+            raise AIClientError(msg)
+
+        except (
+            AIClientError,
+            RateLimitError,
+            BudgetExceededError,
+            pydantic.ValidationError,
+        ) as exc:
+            elapsed = time.monotonic() - start
+            if isinstance(exc, RateLimitError):
+                status = "rate_limited"
+            elif isinstance(exc, pydantic.ValidationError):
+                status = "validation_error"
+            else:
+                status = "error"
+            error_msg = str(exc)
+
+            # Fire-and-forget audit write on error
+            if supabase_client and user_id:
+                task = asyncio.create_task(
+                    self._write_audit_row(
+                        supabase_client=supabase_client,
+                        user_id=user_id,
+                        call_type=call_type,
+                        model=self._model,
+                        prompt_version=None,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost_usd=cost,
+                        duration_ms=int(elapsed * 1000),
+                        status=status,
+                        error_msg=error_msg,
+                    )
+                )
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
+
+            raise
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -386,7 +583,7 @@ class AIClient:
         self,
         *,
         system: str,
-        user_prompt: str,
+        user_prompt: str | list[dict[str, Any]],
         tools: list[dict],
         tool_choice: dict,
         max_tokens: int,
@@ -397,6 +594,9 @@ class AIClient:
 
         Retries on 429 and 5xx status codes up to ``max_retries`` times.
         Non-retryable errors (e.g. 401, 400) raise immediately.
+
+        ``user_prompt`` may be a plain string or a list of content blocks
+        (used by ``call_vision`` to include image blocks alongside text).
         """
         effective_model = model or self._model
         last_error: APIStatusError | None = None

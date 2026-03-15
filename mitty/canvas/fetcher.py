@@ -510,6 +510,81 @@ async def fetch_discussion_topics(
     return topics
 
 
+async def fetch_submission_attachments(
+    client: CanvasClient,
+    course_id: int,
+    assignment_ids: list[int],
+) -> list[dict[str, Any]]:
+    """Fetch attachment metadata from the current user's submissions.
+
+    For each assignment ID, calls
+    ``GET /api/v1/courses/:course_id/assignments/:id/submissions/self``
+    with ``include[]=attachments`` and extracts the attachment list from
+    the response.
+
+    Missing submissions (404) are handled gracefully -- they are logged
+    at DEBUG level and skipped.  Submissions without an ``attachments``
+    key or with an empty attachments list contribute nothing to the
+    result.
+
+    Args:
+        client: An authenticated Canvas API client.
+        course_id: The Canvas course ID.
+        assignment_ids: List of assignment IDs to fetch submissions for.
+
+    Returns:
+        A flat list of attachment dicts, each containing ``url``,
+        ``filename``, ``content_type``, and ``size`` keys.
+    """
+    if not assignment_ids:
+        return []
+
+    attachments: list[dict[str, Any]] = []
+    for assignment_id in assignment_ids:
+        try:
+            response = await client.get(
+                f"/api/v1/courses/{course_id}/assignments"
+                f"/{assignment_id}/submissions/self",
+                params={"include[]": "attachments"},
+            )
+            data = response.json()
+            for att in data.get("attachments", []):
+                attachments.append(
+                    {
+                        "url": att.get("url", ""),
+                        "filename": att.get("filename", ""),
+                        "content_type": att.get("content-type", ""),
+                        "size": att.get("size", 0),
+                        "assignment_id": assignment_id,
+                    }
+                )
+        except CanvasAPIError as exc:
+            exc_str = str(exc)
+            if "404" in exc_str or "403" in exc_str:
+                logger.debug(
+                    "No submission for assignment %d in course %d: %s",
+                    assignment_id,
+                    course_id,
+                    exc,
+                )
+            else:
+                logger.warning(
+                    "Failed to fetch submission for assignment %d in course %d: %s",
+                    assignment_id,
+                    course_id,
+                    exc,
+                )
+        except CanvasAuthError as exc:
+            logger.warning(
+                "Auth error fetching submission for assignment %d in course %d: %s",
+                assignment_id,
+                course_id,
+                exc,
+            )
+
+    return attachments
+
+
 async def fetch_all(
     client: CanvasClient,
     settings: Settings,

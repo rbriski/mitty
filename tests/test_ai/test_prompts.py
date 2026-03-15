@@ -211,6 +211,8 @@ class TestAllRoles:
             "concept_extraction",
             "coach",
             "guide_compiler",
+            "problem_generator",
+            "homework_analyzer",
         }
         assert expected == ROLES
         for role in expected:
