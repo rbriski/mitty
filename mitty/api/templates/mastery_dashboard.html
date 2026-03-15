@@ -69,6 +69,21 @@
         <p class="text-sm text-red-700" x-text="fetchError"></p>
       </div>
 
+      {# Post-session suggestion (US-006) #}
+      <div x-show="postSessionSuggestion && !loading" class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl mb-6 flex items-start gap-3">
+        <svg class="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <div class="flex-1">
+          <p class="text-sm font-medium text-emerald-800" x-text="postSessionSuggestion"></p>
+        </div>
+        <button @click="postSessionSuggestion = ''" class="text-emerald-400 hover:text-emerald-600">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
       {# ════════════════════════════════════════════
          View: Upcoming Test (default when test found)
          ════════════════════════════════════════════ #}
@@ -453,6 +468,9 @@
       // Session entry state
       sessionMode: '',
 
+      // Post-session return state (US-006)
+      postSessionSuggestion: '',
+
       async init() {
         const { data: { session } } = await supabase.auth.getSession();
         this.session = session;
@@ -461,6 +479,21 @@
           this.session = session;
           if (session) this.loadHub();
         });
+
+        // Check for post-session return params (US-006)
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('from_session') === '1') {
+          const improved = urlParams.get('improved');
+          const delta = urlParams.get('delta');
+          const nextFocus = urlParams.get('next_focus');
+          if (improved && delta) {
+            this.postSessionSuggestion =
+              `You improved on ${improved} (+${delta}%). ` +
+              (nextFocus ? `Next focus: ${nextFocus}.` : '');
+          }
+          // Clean URL without reloading
+          window.history.replaceState({}, '', '/mastery');
+        }
 
         if (this.session) this.loadHub();
       },
@@ -728,28 +761,64 @@
         return map[phase] || phase;
       },
 
-      // ── Session entry ──
+      // ── Session entry (US-006) ──
 
-      startPractice(mode) {
+      async startPractice(mode) {
         this.sessionMode = mode;
         this.viewState = 'session_entry';
-        // US-006 will connect this to POST /test-prep/sessions
-        // For now, navigate to test prep page with params
+
+        const token = this.session?.access_token;
+        if (!token) {
+          this.fetchError = 'Not authenticated.';
+          this.viewState = this.currentAssessment ? 'upcoming_test' : 'no_test';
+          return;
+        }
+
         const courseId = this.currentAssessment?.course_id || this.selectedCourseId;
-        const assessmentId = this.currentAssessment?.assessment_id || '';
-        const concepts = mode === 'weakest' && this.weakestConcept()
-          ? encodeURIComponent(this.weakestConcept())
-          : '';
+        const assessmentId = this.currentAssessment?.assessment_id || null;
         const sessionType = mode === 'quick' ? 'quick' : 'full';
 
-        // Navigate to test prep with pre-filled params
-        const params = new URLSearchParams();
-        if (courseId) params.set('course_id', courseId);
-        if (assessmentId) params.set('assessment_id', assessmentId);
-        if (concepts) params.set('concepts', concepts);
-        params.set('session_type', sessionType);
+        // Build concept list: weakest-only for 'weakest' mode, all concepts otherwise
+        let conceptList = this.concepts.map(c => c.concept);
+        if (mode === 'weakest' && this.weakestConcept()) {
+          conceptList = [this.weakestConcept()];
+        }
+        // Ensure at least one concept
+        if (conceptList.length === 0) {
+          conceptList = ['general'];
+        }
 
-        window.location.href = '/test-prep?' + params.toString();
+        try {
+          const body = {
+            course_id: parseInt(courseId),
+            concepts: conceptList,
+            session_type: sessionType,
+          };
+          if (assessmentId) body.assessment_id = parseInt(assessmentId);
+
+          const resp = await fetch('/test-prep/sessions', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.fetchError = errData?.detail?.message || 'Failed to create session.';
+            this.viewState = this.currentAssessment ? 'upcoming_test' : 'no_test';
+            return;
+          }
+
+          const sessionData = await resp.json();
+          // Navigate to test prep with session_id and from=mastery for return flow
+          window.location.href = '/test-prep?session_id=' + sessionData.id + '&from=mastery';
+        } catch (err) {
+          this.fetchError = 'Failed to start session: ' + err.message;
+          this.viewState = this.currentAssessment ? 'upcoming_test' : 'no_test';
+        }
       },
     };
   }
