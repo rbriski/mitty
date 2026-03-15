@@ -11,13 +11,16 @@ Traces: DEC-004 (5 session phases), DEC-006 (UUID PKs),
         DEC-008 (server-authoritative state).
 
 Public API:
-    SessionEngine     — main engine class
-    SessionPhase      — phase enum
-    SessionState      — mutable session state dataclass
-    PHASE_ORDER       — ordered list of phases
-    DIFFICULTY_STEP   — per-adjustment difficulty delta (0.15)
-    MIN_DIFFICULTY    — lower clamp (0.1)
-    MAX_DIFFICULTY    — upper clamp (0.95)
+    SessionEngine        — main engine class
+    SessionPhase         — phase enum
+    SessionState         — mutable session state dataclass
+    PHASE_ORDER          — ordered list of phases (full mode)
+    QUICK_PHASE_ORDER    — ordered list of phases (quick mode)
+    FULL_PHASE_DURATIONS — phase durations in minutes (full 45min session)
+    QUICK_PHASE_DURATIONS— phase durations in minutes (quick 15min session)
+    DIFFICULTY_STEP      — per-adjustment difficulty delta (0.15)
+    MIN_DIFFICULTY       — lower clamp (0.1)
+    MAX_DIFFICULTY       — upper clamp (0.95)
 """
 
 from __future__ import annotations
@@ -70,7 +73,32 @@ PHASE_ORDER: list[SessionPhase] = [
     SessionPhase.mixed_test,
     SessionPhase.calibration,
 ]
-"""Canonical phase ordering.  ``advance_phase()`` follows this sequence."""
+"""Canonical phase ordering for full sessions.  ``advance_phase()`` follows this."""
+
+QUICK_PHASE_ORDER: list[SessionPhase] = [
+    SessionPhase.mixed_test,
+    SessionPhase.calibration,
+]
+"""Phase ordering for quick sessions (skip phases 1-3)."""
+
+# ---------------------------------------------------------------------------
+# Phase durations (minutes) — DEC-004, R3, R6
+# ---------------------------------------------------------------------------
+
+FULL_PHASE_DURATIONS: dict[SessionPhase, int] = {
+    SessionPhase.diagnostic: 5,
+    SessionPhase.focused_practice: 8,
+    SessionPhase.error_analysis: 12,
+    SessionPhase.mixed_test: 15,
+    SessionPhase.calibration: 5,
+}
+"""Phase durations for a full 45-minute session."""
+
+QUICK_PHASE_DURATIONS: dict[SessionPhase, int] = {
+    SessionPhase.mixed_test: 10,
+    SessionPhase.calibration: 5,
+}
+"""Phase durations for a quick 15-minute session."""
 
 
 # ---------------------------------------------------------------------------
@@ -106,7 +134,11 @@ class SessionState:
 
 
 class SessionEngine:
-    """Manages a single 5-phase adaptive test prep session.
+    """Manages a single adaptive test prep session.
+
+    Supports two session types:
+    - ``"full"`` (45 min): all 5 phases (diagnostic -> calibration).
+    - ``"quick"`` (15 min): mixed_test + calibration only.
 
     Args:
         session_id: UUID primary key (DEC-006).
@@ -114,7 +146,8 @@ class SessionEngine:
         course_id: Canvas course ID.
         concepts: List of concepts being tested.
         initial_difficulty: Starting difficulty (default 0.5).
-        initial_phase: Starting phase (default ``diagnostic``).
+        initial_phase: Starting phase (auto-set for quick mode).
+        session_type: ``"full"`` or ``"quick"`` (default ``"full"``).
     """
 
     def __init__(
@@ -125,14 +158,32 @@ class SessionEngine:
         course_id: int,
         concepts: list[str],
         initial_difficulty: float = 0.5,
-        initial_phase: SessionPhase = SessionPhase.diagnostic,
+        initial_phase: SessionPhase | None = None,
+        session_type: str = "full",
     ) -> None:
+        if session_type not in ("full", "quick"):
+            msg = f"session_type must be 'full' or 'quick', got {session_type!r}"
+            raise ValueError(msg)
+
         self._session_id = session_id
         self._user_id = user_id
+        self._session_type = session_type
+
+        # Derive phase order and durations from session type
+        if session_type == "quick":
+            self._phase_order = list(QUICK_PHASE_ORDER)
+            self._phase_durations = dict(QUICK_PHASE_DURATIONS)
+            default_phase = SessionPhase.mixed_test
+        else:
+            self._phase_order = list(PHASE_ORDER)
+            self._phase_durations = dict(FULL_PHASE_DURATIONS)
+            default_phase = SessionPhase.diagnostic
+
+        start_phase = initial_phase if initial_phase is not None else default_phase
 
         clamped = _clamp_difficulty(initial_difficulty)
         self._state = SessionState(
-            phase=initial_phase,
+            phase=start_phase,
             difficulty=clamped,
             course_id=course_id,
             concepts=list(concepts),
@@ -156,10 +207,30 @@ class SessionEngine:
     def current_phase(self) -> SessionPhase:
         return self._state.phase
 
+    @property
+    def session_type(self) -> str:
+        """Session type: ``"full"`` or ``"quick"``."""
+        return self._session_type
+
+    @property
+    def phase_order(self) -> list[SessionPhase]:
+        """Ordered phases for this session type."""
+        return list(self._phase_order)
+
+    @property
+    def phase_durations(self) -> dict[SessionPhase, int]:
+        """Phase durations (minutes) for this session type."""
+        return dict(self._phase_durations)
+
+    @property
+    def current_phase_duration(self) -> int:
+        """Duration in minutes for the current phase."""
+        return self._phase_durations[self._state.phase]
+
     # -- Phase transitions ---------------------------------------------------
 
     def advance_phase(self) -> SessionPhase:
-        """Move to the next phase in PHASE_ORDER.
+        """Move to the next phase in the session's phase order.
 
         Returns:
             The new current phase.
@@ -167,12 +238,12 @@ class SessionEngine:
         Raises:
             ValueError: If already at the final phase (calibration).
         """
-        current_idx = PHASE_ORDER.index(self._state.phase)
-        if current_idx >= len(PHASE_ORDER) - 1:
+        current_idx = self._phase_order.index(self._state.phase)
+        if current_idx >= len(self._phase_order) - 1:
             msg = f"Cannot advance past the final phase ({self._state.phase.value!r})"
             raise ValueError(msg)
 
-        new_phase = PHASE_ORDER[current_idx + 1]
+        new_phase = self._phase_order[current_idx + 1]
         logger.info(
             "Session %s: phase %s -> %s",
             self._session_id,
@@ -275,6 +346,7 @@ class SessionEngine:
             "session_id": str(self._session_id),
             "user_id": str(self._user_id),
             "course_id": self._state.course_id,
+            "session_type": self._session_type,
             "phase": self._state.phase.value,
             "difficulty": self._state.difficulty,
             "concepts": self._state.concepts,
@@ -311,6 +383,7 @@ class SessionEngine:
         Returns:
             A fully reconstituted SessionEngine.
         """
+        session_type = state_dict.get("session_type", "full")
         engine = cls(
             session_id=session_id,
             user_id=user_id,
@@ -318,6 +391,7 @@ class SessionEngine:
             concepts=state_dict["concepts"],
             initial_difficulty=state_dict["difficulty"],
             initial_phase=SessionPhase(state_dict["phase"]),
+            session_type=session_type,
         )
         engine._state.concept_mastery = dict(state_dict.get("concept_mastery", {}))
         engine._state.total_problems = state_dict.get("total_problems", 0)
