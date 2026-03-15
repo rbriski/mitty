@@ -788,9 +788,11 @@
         if (mode === 'weakest' && this.weakestConcept()) {
           conceptList = [this.weakestConcept()];
         }
-        // Ensure at least one concept
+        // If no concepts available, user needs to analyze homework first
         if (conceptList.length === 0) {
-          conceptList = ['general'];
+          this.fetchError = 'No concepts found. Go to Test Prep to analyze homework first.';
+          this.viewState = this.currentAssessment ? 'upcoming_test' : 'no_test';
+          return;
         }
 
         try {

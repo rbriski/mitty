@@ -104,6 +104,55 @@ def _compute_trend_text(sessions: list[SessionHistoryEntry]) -> str | None:
     return f"Steady over {count} sessions"
 
 
+async def _concepts_from_homework(
+    client: AsyncClient,
+    user_id: str,
+    course_id: int,
+) -> list[MasteryConceptRow]:
+    """Extract concepts from homework analyses when no mastery data exists.
+
+    Queries homework_analyses for assignments in this course and builds
+    placeholder MasteryConceptRow entries (mastery_level=0) so the UI
+    has real concepts to work with.
+    """
+    # Find all assignment IDs for this course
+    assign_result = await (
+        client.table("assignments").select("id").eq("course_id", course_id).execute()
+    )
+    assignment_ids = [r["id"] for r in (assign_result.data or [])]
+    if not assignment_ids:
+        return []
+
+    # Fetch homework analyses for those assignments
+    ha_result = await (
+        client.table("homework_analyses")
+        .select("analysis_json")
+        .eq("user_id", user_id)
+        .in_("assignment_id", assignment_ids)
+        .execute()
+    )
+    ha_rows = ha_result.data or []
+
+    seen: set[str] = set()
+    concepts: list[MasteryConceptRow] = []
+    for ha_row in ha_rows:
+        aj = ha_row.get("analysis_json") or {}
+        for prob in aj.get("per_problem", []):
+            concept = prob.get("concept")
+            if concept and concept not in seen:
+                seen.add(concept)
+                concepts.append(
+                    MasteryConceptRow(
+                        concept=concept,
+                        mastery_level=0.0,
+                        calibration_status="unknown",
+                        has_resources=False,
+                        retrieval_count=0,
+                    )
+                )
+    return concepts
+
+
 @router.get(
     "/upcoming",
     response_model=UpcomingAssessmentResponse | None,
@@ -136,28 +185,80 @@ async def get_upcoming_assessment(
 
     assessment = rows[0]
 
-    # Fetch concepts from homework_analyses linked via canvas_assignment_id
+    # Extract concepts from homework analyses related to this assessment.
+    # Strategy: parse chapter number from assessment name (e.g. "Chapter 8 Quiz"
+    # or "CH6 Quiz"), find homework assignments for that chapter (e.g. "(8.1)
+    # Homework"), and pull concepts from their analyses.
     concepts: list[str] = []
-    canvas_assignment_id = assessment.get("canvas_assignment_id")
-    if canvas_assignment_id is not None:
-        ha_result = (
-            await client.table("homework_analyses")
-            .select("analysis_json")
-            .eq("assignment_id", canvas_assignment_id)
-            .eq("user_id", current_user["user_id"])
+    assessment_name = assessment.get("name", "")
+    a_course_id = assessment["course_id"]
+    user_id = current_user["user_id"]
+
+    # Parse chapter number(s) from assessment name
+    chapter_matches = re.findall(
+        r"(?:ch(?:apter)?|chapters?)\s*(\d+)", assessment_name, re.IGNORECASE
+    )
+    # Also handle ranges like "Chapter 6-7 Test"
+    range_matches = re.findall(
+        r"(?:ch(?:apter)?)\s*(\d+)\s*[-–]\s*(\d+)", assessment_name, re.IGNORECASE
+    )
+    chapters: set[str] = set(chapter_matches)
+    for start, end in range_matches:
+        for ch in range(int(start), int(end) + 1):
+            chapters.add(str(ch))
+
+    if chapters:
+        # Find homework assignments matching chapter patterns (e.g. "(8.1)")
+        assign_names_result = await (
+            client.table("assignments")
+            .select("id, name")
+            .eq("course_id", a_course_id)
             .execute()
         )
-        ha_rows = ha_result.data or []
+        chapter_hw_ids: list[int] = []
+        for row in assign_names_result.data or []:
+            name = row.get("name", "")
+            for ch in chapters:
+                if re.match(rf"\({ch}\.\d", name):
+                    chapter_hw_ids.append(row["id"])
+                    break
 
-        seen: set[str] = set()
-        for ha_row in ha_rows:
-            aj = ha_row.get("analysis_json") or {}
-            problems = aj.get("per_problem", [])
-            for problem in problems:
-                concept = problem.get("concept")
-                if concept and concept not in seen:
-                    seen.add(concept)
-                    concepts.append(concept)
+        if chapter_hw_ids:
+            ha_result = await (
+                client.table("homework_analyses")
+                .select("analysis_json")
+                .eq("user_id", user_id)
+                .in_("assignment_id", chapter_hw_ids)
+                .execute()
+            )
+            seen: set[str] = set()
+            for ha_row in ha_result.data or []:
+                aj = ha_row.get("analysis_json") or {}
+                for prob in aj.get("per_problem", []):
+                    concept = prob.get("concept")
+                    if concept and concept not in seen:
+                        seen.add(concept)
+                        concepts.append(concept)
+
+    # Fallback: try canvas_assignment_id direct link
+    if not concepts:
+        canvas_assignment_id = assessment.get("canvas_assignment_id")
+        if canvas_assignment_id is not None:
+            ha_result = await (
+                client.table("homework_analyses")
+                .select("analysis_json")
+                .eq("assignment_id", canvas_assignment_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+            seen_fb: set[str] = set()
+            for ha_row in ha_result.data or []:
+                aj = ha_row.get("analysis_json") or {}
+                for prob in aj.get("per_problem", []):
+                    concept = prob.get("concept")
+                    if concept and concept not in seen_fb:
+                        seen_fb.add(concept)
+                        concepts.append(concept)
 
     return UpcomingAssessmentResponse(
         assessment_id=assessment["id"],
@@ -271,6 +372,12 @@ async def get_mastery_dashboard(
         )
 
     sorted_concepts = _sort_concepts(concepts, sort_by)
+
+    # Fallback: if no mastery_states, extract concepts from homework analyses
+    if not sorted_concepts:
+        sorted_concepts = await _concepts_from_homework(
+            client, current_user["user_id"], course_id
+        )
 
     return MasteryDashboardResponse(
         course_id=course_id,
