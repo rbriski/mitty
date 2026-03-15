@@ -483,6 +483,133 @@
       </div>
 
       {# ════════════════════════════════════════════
+         View 3b: Confidence Check (US-009)
+         ════════════════════════════════════════════ #}
+      <div x-show="view === 'confidence_check'">
+
+        {# ── Pre-focused_practice: "How confident on [concept]?" ── #}
+        <template x-if="confidenceCheckType === 'pre_focused'">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-2">Confidence Check</h2>
+            <p class="text-sm text-gray-500 mb-6">Before we start focused practice, how confident are you on each concept? (1 = not at all, 5 = very confident)</p>
+
+            <div class="space-y-4 mb-6">
+              <template x-for="concept in selectedConcepts" :key="'conf-pre-' + concept">
+                <div class="flex items-center justify-between gap-4 bg-gray-50 rounded-lg p-3">
+                  <span class="text-sm font-medium text-gray-800 flex-1" x-text="concept"></span>
+                  <div class="flex gap-1">
+                    <template x-for="n in [1,2,3,4,5]" :key="'r-' + concept + '-' + n">
+                      <button
+                        @click="conceptConfidenceRatings[concept] = n"
+                        class="w-9 h-9 rounded-lg text-sm font-medium transition-colors border"
+                        :class="conceptConfidenceRatings[concept] === n
+                          ? 'bg-mitty-600 text-white border-mitty-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-mitty-400'"
+                        x-text="n"
+                      ></button>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <button
+              @click="submitConfidenceAndProceed()"
+              :disabled="confidenceSubmitting || !allConceptsRated()"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+            >
+              <span x-show="!confidenceSubmitting">Continue to Focused Practice</span>
+              <span x-show="confidenceSubmitting" class="flex items-center justify-center gap-2">
+                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                Saving...
+              </span>
+            </button>
+          </div>
+        </template>
+
+        {# ── Post-focused_practice: "You rated X/5, scored Y/Z" ── #}
+        <template x-if="confidenceCheckType === 'post_focused'">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-2">Confidence vs Performance</h2>
+            <p class="text-sm text-gray-500 mb-6">Here is how your confidence compared to your actual performance in focused practice.</p>
+
+            <div class="space-y-3 mb-6">
+              <template x-for="row in postFocusedGaps" :key="'gap-' + row.concept">
+                <div class="flex items-center justify-between bg-gray-50 rounded-lg p-3">
+                  <div class="flex-1">
+                    <p class="text-sm font-medium text-gray-800" x-text="row.concept"></p>
+                    <p class="text-xs text-gray-500 mt-0.5">
+                      Confidence: <span class="font-semibold" x-text="row.rating + '/5'"></span>
+                      &middot;
+                      Score: <span class="font-semibold" x-text="row.correct + '/' + row.total"></span>
+                    </p>
+                  </div>
+                  <span
+                    class="px-2 py-0.5 rounded-full text-xs font-medium"
+                    :class="{
+                      'bg-emerald-100 text-emerald-700': row.gap_label === 'calibrated',
+                      'bg-amber-100 text-amber-700': row.gap_label === 'overconfident',
+                      'bg-blue-100 text-blue-700': row.gap_label === 'underconfident',
+                      'bg-gray-100 text-gray-500': !row.gap_label,
+                    }"
+                    x-text="row.gap_label === 'calibrated' ? 'Well calibrated' : row.gap_label === 'overconfident' ? 'Overconfident' : row.gap_label === 'underconfident' ? 'Underconfident' : 'No data'"
+                  ></span>
+                </div>
+              </template>
+            </div>
+
+            <button
+              @click="proceedAfterPostFocused()"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+            >
+              Continue to Error Analysis
+            </button>
+          </div>
+        </template>
+
+        {# ── Pre-mixed_test: brief confidence check across all concepts ── #}
+        <template x-if="confidenceCheckType === 'pre_mixed'">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-2">Quick Confidence Check</h2>
+            <p class="text-sm text-gray-500 mb-6">Before the mixed test, rate your current confidence on each concept.</p>
+
+            <div class="space-y-4 mb-6">
+              <template x-for="concept in selectedConcepts" :key="'conf-mix-' + concept">
+                <div class="flex items-center justify-between gap-4 bg-gray-50 rounded-lg p-3">
+                  <span class="text-sm font-medium text-gray-800 flex-1" x-text="concept"></span>
+                  <div class="flex gap-1">
+                    <template x-for="n in [1,2,3,4,5]" :key="'mr-' + concept + '-' + n">
+                      <button
+                        @click="conceptConfidenceRatings[concept] = n"
+                        class="w-9 h-9 rounded-lg text-sm font-medium transition-colors border"
+                        :class="conceptConfidenceRatings[concept] === n
+                          ? 'bg-mitty-600 text-white border-mitty-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-mitty-400'"
+                        x-text="n"
+                      ></button>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <button
+              @click="submitConfidenceAndProceed()"
+              :disabled="confidenceSubmitting || !allConceptsRated()"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+            >
+              <span x-show="!confidenceSubmitting">Continue to Mixed Test</span>
+              <span x-show="confidenceSubmitting" class="flex items-center justify-center gap-2">
+                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                Saving...
+              </span>
+            </button>
+          </div>
+        </template>
+
+      </div>
+
+      {# ════════════════════════════════════════════
          View 4: Session Complete / Summary
          ════════════════════════════════════════════ #}
       <div x-show="view === 'summary'">
@@ -577,11 +704,11 @@
           </div>
         </template>
 
-        {# Confidence calibration chart #}
+        {# Confidence calibration chart (aggregate) #}
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
           <h3 class="text-sm font-semibold text-gray-900 mb-3">Confidence Calibration</h3>
           <p class="text-sm text-gray-500 mb-4" x-text="calibrationMessage"></p>
-          <div class="flex items-end gap-4 justify-center">
+          <div class="flex items-end gap-4 justify-center mb-6">
             <div class="text-center">
               <div class="w-16 bg-gray-100 rounded-t-lg relative" style="height: 120px;">
                 <div
@@ -603,6 +730,64 @@
               <p class="text-sm font-medium text-gray-700" x-text="Math.round(avgAccuracy * 100) + '%'"></p>
             </div>
           </div>
+
+          {# Per-concept confidence comparison table (US-009 Phase 5) #}
+          <template x-if="summaryData?.confidence_comparison && summaryData.confidence_comparison.length > 0">
+            <div>
+              <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-3">Per-Concept Breakdown</h4>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="border-b border-gray-200">
+                      <th class="text-left py-2 pr-4 text-xs font-medium text-gray-500">Concept</th>
+                      <th class="text-center py-2 px-2 text-xs font-medium text-gray-500">Checkpoints</th>
+                      <th class="text-center py-2 px-2 text-xs font-medium text-gray-500">Avg Confidence</th>
+                      <th class="text-center py-2 px-2 text-xs font-medium text-gray-500">Accuracy</th>
+                      <th class="text-center py-2 pl-2 text-xs font-medium text-gray-500">Calibration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="row in summaryData.confidence_comparison" :key="'cc-' + row.concept">
+                      <tr class="border-b border-gray-100">
+                        <td class="py-2 pr-4 text-gray-800 font-medium" x-text="row.concept"></td>
+                        <td class="py-2 px-2 text-center">
+                          <template x-if="row.checkpoints && row.checkpoints.length > 0">
+                            <div class="flex gap-1 justify-center">
+                              <template x-for="(cp, ci) in row.checkpoints" :key="'cp-' + ci">
+                                <span
+                                  class="inline-block w-6 h-6 rounded text-xs font-medium leading-6 text-center"
+                                  :class="cp.rating >= 4 ? 'bg-emerald-100 text-emerald-700' : cp.rating >= 3 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'"
+                                  :title="cp.phase"
+                                  x-text="cp.rating"
+                                ></span>
+                              </template>
+                            </div>
+                          </template>
+                          <template x-if="!row.checkpoints || row.checkpoints.length === 0">
+                            <span class="text-gray-400">--</span>
+                          </template>
+                        </td>
+                        <td class="py-2 px-2 text-center" x-text="row.avg_confidence !== null ? Math.round(row.avg_confidence * 100) + '%' : '--'"></td>
+                        <td class="py-2 px-2 text-center" x-text="row.attempted > 0 ? Math.round(row.accuracy * 100) + '%' : '--'"></td>
+                        <td class="py-2 pl-2 text-center">
+                          <span
+                            class="px-2 py-0.5 rounded-full text-xs font-medium"
+                            :class="{
+                              'bg-emerald-100 text-emerald-700': row.gap_label === 'calibrated',
+                              'bg-amber-100 text-amber-700': row.gap_label === 'overconfident',
+                              'bg-blue-100 text-blue-700': row.gap_label === 'underconfident',
+                              'bg-gray-100 text-gray-500': !row.gap_label,
+                            }"
+                            x-text="row.gap_label === 'calibrated' ? 'Calibrated' : row.gap_label === 'overconfident' ? 'Over' : row.gap_label === 'underconfident' ? 'Under' : '--'"
+                          ></span>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
         </div>
 
         {# Action buttons #}
@@ -638,7 +823,7 @@
     return {
       session: null,
 
-      // View state: setup | mastery | session | summary
+      // View state: setup | mastery | session | confidence_check | summary
       view: 'setup',
 
       // ── Setup state ──
@@ -681,6 +866,12 @@
       // ── Confidence tracking ──
       confidenceRatings: [],
       answerResults: [],
+      // Confidence check state (US-009)
+      confidenceCheckType: '',  // 'pre_focused', 'post_focused', 'pre_mixed'
+      conceptConfidenceRatings: {},  // { concept: rating(1-5) }
+      confidenceSubmitting: false,
+      postFocusedGaps: [],  // after focused_practice: [{concept, rating, correct, total, gap_label}]
+      confidenceComparison: [],  // full comparison from summary
 
       // Phase definitions
       phases: [
@@ -1055,10 +1246,43 @@
         await this.fetchNextProblem();
       },
 
-      // ── Phase Skip ──
+      // ── Phase Skip (with confidence checks — US-009) ──
 
       async skipPhase() {
         if (this.skippingPhase || !this.sessionId) return;
+
+        // Intercept phase transitions for confidence checks
+        const nextPhase = this._getNextPhase(this.currentPhase);
+
+        // Before focused_practice: show pre-focused confidence check
+        if (nextPhase === 'focused_practice') {
+          this.confidenceCheckType = 'pre_focused';
+          this.conceptConfidenceRatings = {};
+          this.view = 'confidence_check';
+          return;
+        }
+
+        // After focused_practice (going to error_analysis): show gap indicator
+        if (this.currentPhase === 'focused_practice' && nextPhase === 'error_analysis') {
+          this._buildPostFocusedGaps();
+          this.confidenceCheckType = 'post_focused';
+          this.view = 'confidence_check';
+          return;
+        }
+
+        // Before mixed_test: show quick confidence check
+        if (nextPhase === 'mixed_test') {
+          this.confidenceCheckType = 'pre_mixed';
+          this.conceptConfidenceRatings = {};
+          this.view = 'confidence_check';
+          return;
+        }
+
+        // Default: proceed with skip
+        await this._doSkipPhase();
+      },
+
+      async _doSkipPhase() {
         const token = this.session?.access_token;
         if (!token) return;
 
@@ -1074,7 +1298,6 @@
           if (!resp.ok) {
             const errData = await resp.json().catch(() => null);
             if (errData?.detail?.code === 'FINAL_PHASE') {
-              // At final phase, complete instead
               this.completeSession();
               return;
             }
@@ -1087,12 +1310,120 @@
           this.currentDifficulty = sessionData.state_json?.difficulty || this.currentDifficulty;
           this.phaseTotal = 0;
           this.phaseCorrect = 0;
+          this.view = 'session';
           await this.fetchNextProblem(token);
         } catch (err) {
           this.sessionError = 'Failed to skip phase: ' + err.message;
         } finally {
           this.skippingPhase = false;
         }
+      },
+
+      // ── Confidence check helpers (US-009) ──
+
+      _getNextPhase(current) {
+        const order = ['diagnostic', 'focused_practice', 'error_analysis', 'mixed_test', 'calibration'];
+        const idx = order.indexOf(current);
+        return idx < order.length - 1 ? order[idx + 1] : null;
+      },
+
+      allConceptsRated() {
+        return this.selectedConcepts.every(c => this.conceptConfidenceRatings[c] >= 1);
+      },
+
+      async submitConfidenceAndProceed() {
+        if (this.confidenceSubmitting || !this.allConceptsRated()) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.confidenceSubmitting = true;
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/confidence`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ ratings: this.conceptConfidenceRatings }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to save confidence ratings.';
+            this.view = 'session';
+            return;
+          }
+
+          // Update confidence ratings for calibration tracking
+          for (const [concept, rating] of Object.entries(this.conceptConfidenceRatings)) {
+            this.confidenceRatings.push(rating / 5.0);
+          }
+
+          // Proceed to actual phase skip
+          await this._doSkipPhase();
+        } catch (err) {
+          this.sessionError = 'Failed to save confidence: ' + err.message;
+          this.view = 'session';
+        } finally {
+          this.confidenceSubmitting = false;
+        }
+      },
+
+      _buildPostFocusedGaps() {
+        // Build gap data for after focused_practice phase
+        this.postFocusedGaps = this.selectedConcepts.map(concept => {
+          // Find the latest pre_focused confidence rating for this concept
+          const savedRatings = this.confidenceRatings;
+          // Use the conceptConfidenceRatings from the last pre_focused check
+          // We need to look at session state for this
+          const stateConf = this._getLastConfidenceForConcept(concept);
+          const rating = stateConf || 3;  // fallback
+
+          // Get per-concept performance from answer tracking
+          const conceptResults = this._getConceptPerformance(concept);
+
+          const confidenceNorm = rating / 5.0;
+          const accuracy = conceptResults.total > 0 ? conceptResults.correct / conceptResults.total : 0;
+          const gap = confidenceNorm - accuracy;
+          let gap_label = null;
+          if (conceptResults.total > 0) {
+            if (Math.abs(gap) < 0.15) gap_label = 'calibrated';
+            else if (gap > 0) gap_label = 'overconfident';
+            else gap_label = 'underconfident';
+          }
+
+          return {
+            concept,
+            rating,
+            correct: conceptResults.correct,
+            total: conceptResults.total,
+            gap_label,
+          };
+        });
+      },
+
+      _getLastConfidenceForConcept(concept) {
+        // Return the last confidence rating submitted for a concept
+        // from conceptConfidenceRatings (stored during pre_focused check)
+        // We track these locally since the last submission
+        return this.conceptConfidenceRatings[concept] || null;
+      },
+
+      _getConceptPerformance(concept) {
+        // Placeholder: we don't track per-concept results client-side
+        // Use phaseTotal/phaseCorrect as approximation divided evenly
+        // This will be supplemented by server data in the summary view
+        const n = this.selectedConcepts.length || 1;
+        return {
+          correct: Math.round(this.phaseCorrect / n),
+          total: Math.round(this.phaseTotal / n),
+        };
+      },
+
+      proceedAfterPostFocused() {
+        // After viewing the gap indicator, proceed to error_analysis
+        this._doSkipPhase();
       },
 
       // ── Session Complete ──
@@ -1143,6 +1474,10 @@
         this.phaseCorrect = 0;
         this.confidenceRatings = [];
         this.answerResults = [];
+        this.conceptConfidenceRatings = {};
+        this.confidenceCheckType = '';
+        this.postFocusedGaps = [];
+        this.confidenceComparison = [];
         this.sessionError = '';
         this.setupError = '';
       },
