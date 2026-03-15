@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
@@ -15,6 +16,7 @@ from mitty.api.schemas import (
     MasteryDashboardResponse,
     SessionHistoryEntry,
     SessionHistoryResponse,
+    UpcomingAssessmentResponse,
 )
 
 if TYPE_CHECKING:
@@ -100,6 +102,70 @@ def _compute_trend_text(sessions: list[SessionHistoryEntry]) -> str | None:
     if delta < -_TREND_THRESHOLD:
         return f"Declining: {delta:.0f}% over {count} sessions"
     return f"Steady over {count} sessions"
+
+
+@router.get(
+    "/upcoming",
+    response_model=UpcomingAssessmentResponse | None,
+)
+async def get_upcoming_assessment(
+    current_user: CurrentUser,
+    client: SupaClient,
+    course_id: int | None = Query(default=None),  # noqa: B008
+) -> UpcomingAssessmentResponse | None:
+    """Return the nearest future test/quiz assessment with concepts."""
+    now_iso = datetime.now(tz=UTC).isoformat()
+
+    # Build query: future assessments of type test/quiz, ordered nearest-first
+    query = (
+        client.table("assessments")
+        .select("*")
+        .in_("assessment_type", ["test", "quiz"])
+        .gt("scheduled_date", now_iso)
+        .order("scheduled_date")
+        .limit(1)
+    )
+    if course_id is not None:
+        query = query.eq("course_id", course_id)
+
+    result = await query.execute()
+    rows = result.data or []
+
+    if not rows:
+        return None
+
+    assessment = rows[0]
+
+    # Fetch concepts from homework_analyses linked via canvas_assignment_id
+    concepts: list[str] = []
+    canvas_assignment_id = assessment.get("canvas_assignment_id")
+    if canvas_assignment_id is not None:
+        ha_result = (
+            await client.table("homework_analyses")
+            .select("per_problem_json")
+            .eq("assignment_id", canvas_assignment_id)
+            .eq("user_id", current_user["user_id"])
+            .execute()
+        )
+        ha_rows = ha_result.data or []
+
+        seen: set[str] = set()
+        for ha_row in ha_rows:
+            problems = ha_row.get("per_problem_json") or []
+            for problem in problems:
+                concept = problem.get("concept")
+                if concept and concept not in seen:
+                    seen.add(concept)
+                    concepts.append(concept)
+
+    return UpcomingAssessmentResponse(
+        assessment_id=assessment["id"],
+        name=assessment["name"],
+        scheduled_date=assessment["scheduled_date"],
+        assessment_type=assessment["assessment_type"],
+        course_id=assessment["course_id"],
+        concepts=concepts,
+    )
 
 
 @router.get("/session-history", response_model=SessionHistoryResponse)

@@ -675,6 +675,17 @@ class MasteryDashboardResponse(BaseModel):
     concepts: list[MasteryConceptRow]
 
 
+class UpcomingAssessmentResponse(BaseModel):
+    """Nearest upcoming test/quiz assessment with related concepts."""
+
+    assessment_id: int
+    name: str
+    scheduled_date: datetime
+    assessment_type: str
+    course_id: int
+    concepts: list[str] = Field(default_factory=list)
+
+
 class SessionHistoryEntry(BaseModel):
     """A single completed test prep session in the history list."""
 
