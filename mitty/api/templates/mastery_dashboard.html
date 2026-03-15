@@ -166,7 +166,7 @@
             @click="startPractice('weakest')"
             class="flex-1 py-3 px-5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-xl transition-colors text-center shadow-sm"
           >
-            <span x-text="weakestConcept() ? 'Start Practice — ' + weakestConcept() : 'Start Practice'"></span>
+            <span x-text="weakestConcept() ? 'Start Practice — ' + (weakestConcept().length > 40 ? weakestConcept().slice(0, 37) + '...' : weakestConcept()) : 'Start Practice'"></span>
           </button>
 
           {# Secondary: Full session #}
@@ -212,9 +212,9 @@
                     :class="concept.mastery_level > 0.4 ? 'text-white' : 'text-gray-600'"
                     x-text="Math.round(concept.mastery_level * 100) + '%'"></span>
                 </div>
-                <div class="w-24 flex-shrink-0 text-right">
+                <div class="w-28 flex-shrink-0 text-right">
                   <span
-                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap"
                     :class="calibrationBadge(concept.calibration_status)"
                     x-text="calibrationLabel(concept.calibration_status)"
                   ></span>
@@ -329,7 +329,7 @@
               @click="startPractice('weakest')"
               class="flex-1 py-3 px-5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-xl transition-colors text-center shadow-sm"
             >
-              <span x-text="weakestConcept() ? 'Start Practice — ' + weakestConcept() : 'Start Practice'"></span>
+              <span x-text="weakestConcept() ? 'Start Practice — ' + (weakestConcept().length > 40 ? weakestConcept().slice(0, 37) + '...' : weakestConcept()) : 'Start Practice'"></span>
             </button>
             <button
               @click="startPractice('full')"
