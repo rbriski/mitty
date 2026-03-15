@@ -553,11 +553,14 @@ async def submit_answer(
             "explanation": "Reflection recorded. Nice work!",
         }
     else:
-        # Evaluate the answer (LLM for free-response, exact for MC)
+        # Use LLM evaluation for focused phases; exact-match for
+        # diagnostic/calibration to keep them fast (~instant vs ~5s).
+        phase = session_data.get("state_json", {}).get("phase", "")
+        use_llm = phase not in ("diagnostic", "calibration")
         evaluation = await _evaluate_answer(
             problem_json=problem_json,
             student_answer=data.student_answer,
-            ai_client=ai_client,
+            ai_client=ai_client if use_llm else None,
         )
 
     # Update the result row
