@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Mitty — Mastery Dashboard{% endblock %}
+{% block title %}Mitty — Mastery Hub{% endblock %}
 
 {% block nav %}
 {# Hide default nav; Alpine.js controls nav visibility based on auth state #}
 {% endblock %}
 
 {% block content %}
-<div x-data="masteryDashboardApp()" x-init="init()" x-cloak>
+<div x-data="masteryHubApp()" x-init="init()" x-cloak>
 
   {# ── Nav (only when authenticated) ── #}
   <template x-if="session">
@@ -41,7 +41,7 @@
   {# ── Not authenticated ── #}
   <template x-if="!session">
     <div class="text-center py-16">
-      <p class="text-gray-500 mb-4">Please sign in to view your mastery dashboard.</p>
+      <p class="text-gray-500 mb-4">Please sign in to view your mastery hub.</p>
       <a href="/" class="text-mitty-600 hover:text-mitty-700 font-medium">Go to Dashboard</a>
     </div>
   </template>
@@ -58,41 +58,9 @@
         Back to Dashboard
       </a>
 
-      {# Page header #}
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-2">
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900">Mastery Dashboard</h1>
-          <p class="text-sm text-gray-500">Track your concept mastery and calibration</p>
-        </div>
-      </div>
-
-      {# Controls: course selector + sort #}
-      <div class="flex flex-col sm:flex-row gap-3 mb-6">
-        <select
-          x-model="selectedCourseId"
-          @change="fetchDashboard()"
-          class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
-        >
-          <option value="">Select a course</option>
-          <template x-for="c in courses" :key="c.id">
-            <option :value="c.id" x-text="c.name"></option>
-          </template>
-        </select>
-
-        <select
-          x-model="sortBy"
-          @change="fetchDashboard()"
-          class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
-        >
-          <option value="mastery_level">Sort by mastery level</option>
-          <option value="next_review_at">Sort by next review</option>
-          <option value="calibration_gap">Sort by calibration gap</option>
-        </select>
-      </div>
-
       {# Loading state #}
-      <div x-show="loading" class="text-center py-12">
-        <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+      <div x-show="loading" class="text-center py-16">
+        <div class="inline-block w-8 h-8 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
         <p class="text-sm text-gray-500 mt-3">Loading mastery data...</p>
       </div>
 
@@ -101,98 +69,344 @@
         <p class="text-sm text-red-700" x-text="fetchError"></p>
       </div>
 
-      {# No course selected #}
-      <div x-show="!loading && !fetchError && !selectedCourseId" class="text-center py-12">
-        <p class="text-gray-500">Select a course above to view mastery data.</p>
-      </div>
+      {# ════════════════════════════════════════════
+         View: Upcoming Test (default when test found)
+         ════════════════════════════════════════════ #}
+      <div x-show="!loading && !fetchError && viewState === 'upcoming_test'">
 
-      {# Empty state #}
-      <div x-show="!loading && !fetchError && selectedCourseId && concepts.length === 0" class="text-center py-12">
-        <p class="text-gray-500">No mastery data yet for this course.</p>
-        <p class="text-sm text-gray-400 mt-1">Complete some practice sessions to start tracking your mastery.</p>
-      </div>
+        {# Header with assessment switcher #}
+        <div class="flex flex-col sm:flex-row sm:items-start justify-between mb-6 gap-3">
+          <div>
+            <h1 class="text-2xl font-bold text-gray-900">Mastery Hub</h1>
+            <p class="text-sm text-gray-500 mt-0.5">Prepare for your upcoming assessment</p>
+          </div>
 
-      {# Concept rows #}
-      <div x-show="!loading && !fetchError && concepts.length > 0" class="space-y-3">
-        <template x-for="concept in concepts" :key="concept.concept">
-          <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-            <div class="flex items-start justify-between gap-3 mb-3">
-              <div class="flex-1 min-w-0">
-                <h3 class="font-semibold text-gray-900" x-text="concept.concept"></h3>
-                <div class="flex flex-wrap items-center gap-2 mt-1">
-                  {# Calibration badge #}
+          {# Assessment switcher dropdown (14-day window) #}
+          <div x-show="upcomingAssessments.length > 1" class="flex-shrink-0">
+            <label class="block text-xs text-gray-400 mb-1">Upcoming assessments</label>
+            <select
+              x-model="selectedAssessmentId"
+              @change="switchAssessment()"
+              class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
+            >
+              <template x-for="a in upcomingAssessments" :key="a.assessment_id">
+                <option :value="a.assessment_id"
+                  x-text="a.name + ' — ' + formatDate(a.scheduled_date)">
+                </option>
+              </template>
+            </select>
+          </div>
+        </div>
+
+        {# Assessment info card #}
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+          <div class="flex items-start gap-3">
+            <div class="flex-shrink-0 w-10 h-10 bg-mitty-100 rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5 text-mitty-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <h2 class="text-lg font-semibold text-gray-900" x-text="currentAssessment.name"></h2>
+              <div class="flex flex-wrap items-center gap-3 mt-1">
+                <span class="inline-flex items-center gap-1 text-sm text-gray-500">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                  </svg>
+                  <span x-text="formatDateLong(currentAssessment.scheduled_date)"></span>
+                </span>
+                <span class="inline-flex items-center gap-1 text-sm text-gray-500">
+                  <span x-text="daysUntilTest() + ' days away'" class="font-medium"
+                    :class="daysUntilTest() <= 2 ? 'text-red-600' : daysUntilTest() <= 5 ? 'text-yellow-600' : 'text-gray-600'"></span>
+                </span>
+                <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-mitty-100 text-mitty-700"
+                  x-text="currentAssessment.assessment_type"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {# Calibration callout #}
+        <template x-if="hasCalibrationWarning()">
+          <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl mb-6 flex items-start gap-3">
+            <svg class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+            </svg>
+            <div>
+              <p class="text-sm font-medium text-amber-800">Calibration gap detected</p>
+              <p class="text-sm text-amber-700 mt-0.5">
+                You may be overconfident on some concepts. Your self-rated confidence is significantly higher
+                than your actual mastery on
+                <span x-text="overconfidentConcepts().join(', ')"></span>.
+                Focus practice here to close the gap.
+              </p>
+            </div>
+          </div>
+        </template>
+
+        {# ── Primary + Secondary CTAs ── #}
+        <div class="flex flex-col sm:flex-row gap-3 mb-8">
+          {# Primary: Start Practice - [weakest concept] #}
+          <button
+            @click="startPractice('weakest')"
+            class="flex-1 py-3 px-5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-xl transition-colors text-center shadow-sm"
+          >
+            <span x-text="weakestConcept() ? 'Start Practice — ' + weakestConcept() : 'Start Practice'"></span>
+          </button>
+
+          {# Secondary: Full session #}
+          <button
+            @click="startPractice('full')"
+            class="py-3 px-5 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl border border-gray-300 transition-colors text-center"
+          >
+            Full session
+          </button>
+
+          {# Secondary: Quick review #}
+          <button
+            @click="startPractice('quick')"
+            class="py-3 px-5 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl border border-gray-300 transition-colors text-center"
+          >
+            Quick review
+          </button>
+        </div>
+
+        {# ── Concept Heat Map ── #}
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+          <h3 class="text-base font-semibold text-gray-900 mb-4">Concept Mastery</h3>
+
+          {# Empty mastery state #}
+          <div x-show="concepts.length === 0" class="text-center py-6">
+            <p class="text-gray-500 text-sm">No mastery data yet for this course.</p>
+            <p class="text-gray-400 text-xs mt-1">Complete some practice sessions to start tracking your mastery.</p>
+          </div>
+
+          {# Desktop heat map (>= 768px) #}
+          <div x-show="concepts.length > 0" class="hidden md:block space-y-3">
+            <template x-for="concept in sortedConcepts()" :key="concept.concept">
+              <div class="flex items-center gap-3">
+                <div class="w-40 flex-shrink-0 truncate text-sm text-gray-700" :title="concept.concept"
+                  x-text="concept.concept"></div>
+                <div class="flex-1 bg-gray-100 rounded-full h-5 relative overflow-hidden">
+                  <div
+                    class="h-5 rounded-full transition-all duration-500"
+                    :class="heatColor(concept.mastery_level)"
+                    :style="'width: ' + Math.round(concept.mastery_level * 100) + '%'"
+                  ></div>
+                  <span class="absolute inset-0 flex items-center justify-center text-xs font-medium"
+                    :class="concept.mastery_level > 0.4 ? 'text-white' : 'text-gray-600'"
+                    x-text="Math.round(concept.mastery_level * 100) + '%'"></span>
+                </div>
+                <div class="w-24 flex-shrink-0 text-right">
                   <span
                     class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
                     :class="calibrationBadge(concept.calibration_status)"
                     x-text="calibrationLabel(concept.calibration_status)"
                   ></span>
-
-                  {# No study materials indicator #}
-                  <span
-                    x-show="!concept.has_resources"
-                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
-                  >
-                    No study materials
-                  </span>
-
-                  {# Retrieval count #}
-                  <span class="text-xs text-gray-400" x-text="(concept.retrieval_count || 0) + ' retrievals'"></span>
-
-                  {# Success rate #}
-                  <span
-                    x-show="concept.success_rate !== null"
-                    class="text-xs text-gray-400"
-                    x-text="Math.round((concept.success_rate || 0) * 100) + '% success'"
-                  ></span>
-                </div>
-              </div>
-
-              {# Next review date #}
-              <div class="flex-shrink-0 text-right">
-                <template x-if="concept.next_review_at">
-                  <div>
-                    <p class="text-xs text-gray-400">Next review</p>
-                    <p class="text-sm text-gray-600" x-text="formatDate(concept.next_review_at)"></p>
-                  </div>
-                </template>
-                <template x-if="!concept.next_review_at">
-                  <p class="text-xs text-gray-400">No review scheduled</p>
-                </template>
-              </div>
-            </div>
-
-            {# Mastery bar #}
-            <div class="mb-2">
-              <div class="flex items-center justify-between mb-1">
-                <span class="text-xs text-gray-500">Mastery</span>
-                <span class="text-xs font-medium text-gray-700" x-text="Math.round((concept.mastery_level || 0) * 100) + '%'"></span>
-              </div>
-              <div class="w-full bg-gray-100 rounded-full h-2.5">
-                <div
-                  class="h-2.5 rounded-full transition-all duration-500"
-                  :class="masteryBarColor(concept.mastery_level || 0)"
-                  :style="'width: ' + Math.round((concept.mastery_level || 0) * 100) + '%'"
-                ></div>
-              </div>
-            </div>
-
-            {# Confidence bar (if available) #}
-            <template x-if="concept.confidence_self_report !== null">
-              <div>
-                <div class="flex items-center justify-between mb-1">
-                  <span class="text-xs text-gray-500">Self-reported confidence</span>
-                  <span class="text-xs font-medium text-gray-700" x-text="Math.round((concept.confidence_self_report || 0) * 100) + '%'"></span>
-                </div>
-                <div class="w-full bg-gray-100 rounded-full h-2">
-                  <div
-                    class="h-2 rounded-full transition-all duration-500 bg-blue-400"
-                    :style="'width: ' + Math.round((concept.confidence_self_report || 0) * 100) + '%'"
-                  ></div>
                 </div>
               </div>
             </template>
           </div>
-        </template>
+
+          {# Mobile heat map (< 768px): collapsed progress bars #}
+          <div x-show="concepts.length > 0" class="md:hidden space-y-4">
+            <template x-for="concept in sortedConcepts()" :key="concept.concept">
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-sm text-gray-700 truncate mr-2" x-text="concept.concept"></span>
+                  <span class="text-xs font-medium text-gray-600 flex-shrink-0"
+                    x-text="Math.round(concept.mastery_level * 100) + '%'"></span>
+                </div>
+                <div class="w-full bg-gray-100 rounded-full h-2.5">
+                  <div
+                    class="h-2.5 rounded-full transition-all duration-500"
+                    :class="heatColor(concept.mastery_level)"
+                    :style="'width: ' + Math.round(concept.mastery_level * 100) + '%'"
+                  ></div>
+                </div>
+                <div class="flex items-center justify-between mt-1">
+                  <span
+                    class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                    :class="calibrationBadge(concept.calibration_status)"
+                    x-text="calibrationLabel(concept.calibration_status)"
+                  ></span>
+                  <span x-show="concept.confidence_self_report !== null && (concept.confidence_self_report - concept.mastery_level) > 0.2"
+                    class="text-xs text-amber-600 font-medium">Overconfident</span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        {# ── Session History ── #}
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+          <h3 class="text-base font-semibold text-gray-900 mb-4">Session History</h3>
+
+          <div x-show="sessions.length === 0" class="text-center py-4">
+            <p class="text-gray-500 text-sm">No sessions yet. Start practicing to build your history.</p>
+          </div>
+
+          <div x-show="sessions.length > 0">
+            {# Trend text #}
+            <div x-show="trendText" class="mb-4 px-3 py-2 bg-gray-50 rounded-lg">
+              <p class="text-sm font-medium"
+                :class="trendText && trendText.startsWith('Improving') ? 'text-emerald-700' : trendText && trendText.startsWith('Declining') ? 'text-red-600' : 'text-gray-600'"
+                x-text="'Trend: ' + trendText"></p>
+            </div>
+
+            {# Session list #}
+            <div class="space-y-2">
+              <template x-for="s in sessions" :key="s.session_id">
+                <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold"
+                      :class="s.accuracy >= 80 ? 'bg-emerald-100 text-emerald-700' : s.accuracy >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'"
+                      x-text="Math.round(s.accuracy) + '%'">
+                    </div>
+                    <div>
+                      <p class="text-sm text-gray-700">
+                        <span x-text="s.total_correct + '/' + s.total_problems + ' correct'"></span>
+                        <span x-show="s.session_type === 'quick'" class="ml-1 text-xs text-gray-400">(quick)</span>
+                      </p>
+                      <p class="text-xs text-gray-400" x-text="formatDateLong(s.started_at)"></p>
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <span x-show="s.phase_reached" class="text-xs text-gray-400" x-text="formatPhase(s.phase_reached)"></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {# ════════════════════════════════════════════
+         View: No-test fallback
+         ════════════════════════════════════════════ #}
+      <div x-show="!loading && !fetchError && viewState === 'no_test'">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Mastery Hub</h1>
+          <p class="text-sm text-gray-500 mt-0.5">No upcoming tests found. Review your mastery across courses.</p>
+        </div>
+
+        {# Course selector #}
+        <div class="mb-6">
+          <label class="block text-xs text-gray-400 mb-1">Course</label>
+          <select
+            x-model="selectedCourseId"
+            @change="fetchMasteryForCourse()"
+            class="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
+          >
+            <option value="">Select a course</option>
+            <template x-for="c in courses" :key="c.id">
+              <option :value="c.id" x-text="c.name"></option>
+            </template>
+          </select>
+        </div>
+
+        {# Mastery data for selected course (no-test mode) #}
+        <div x-show="selectedCourseId && concepts.length > 0">
+          {# CTAs for no-test mode #}
+          <div class="flex flex-col sm:flex-row gap-3 mb-6">
+            <button
+              @click="startPractice('weakest')"
+              class="flex-1 py-3 px-5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-xl transition-colors text-center shadow-sm"
+            >
+              <span x-text="weakestConcept() ? 'Start Practice — ' + weakestConcept() : 'Start Practice'"></span>
+            </button>
+            <button
+              @click="startPractice('full')"
+              class="py-3 px-5 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl border border-gray-300 transition-colors text-center"
+            >
+              Full session
+            </button>
+            <button
+              @click="startPractice('quick')"
+              class="py-3 px-5 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl border border-gray-300 transition-colors text-center"
+            >
+              Quick review
+            </button>
+          </div>
+
+          {# Concept heat map (reuses same layout) #}
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h3 class="text-base font-semibold text-gray-900 mb-4">Concept Mastery</h3>
+
+            {# Desktop #}
+            <div class="hidden md:block space-y-3">
+              <template x-for="concept in sortedConcepts()" :key="concept.concept">
+                <div class="flex items-center gap-3">
+                  <div class="w-40 flex-shrink-0 truncate text-sm text-gray-700" :title="concept.concept"
+                    x-text="concept.concept"></div>
+                  <div class="flex-1 bg-gray-100 rounded-full h-5 relative overflow-hidden">
+                    <div
+                      class="h-5 rounded-full transition-all duration-500"
+                      :class="heatColor(concept.mastery_level)"
+                      :style="'width: ' + Math.round(concept.mastery_level * 100) + '%'"
+                    ></div>
+                    <span class="absolute inset-0 flex items-center justify-center text-xs font-medium"
+                      :class="concept.mastery_level > 0.4 ? 'text-white' : 'text-gray-600'"
+                      x-text="Math.round(concept.mastery_level * 100) + '%'"></span>
+                  </div>
+                  <div class="w-24 flex-shrink-0 text-right">
+                    <span
+                      class="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                      :class="calibrationBadge(concept.calibration_status)"
+                      x-text="calibrationLabel(concept.calibration_status)"
+                    ></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            {# Mobile #}
+            <div class="md:hidden space-y-4">
+              <template x-for="concept in sortedConcepts()" :key="concept.concept">
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm text-gray-700 truncate mr-2" x-text="concept.concept"></span>
+                    <span class="text-xs font-medium text-gray-600 flex-shrink-0"
+                      x-text="Math.round(concept.mastery_level * 100) + '%'"></span>
+                  </div>
+                  <div class="w-full bg-gray-100 rounded-full h-2.5">
+                    <div
+                      class="h-2.5 rounded-full transition-all duration-500"
+                      :class="heatColor(concept.mastery_level)"
+                      :style="'width: ' + Math.round(concept.mastery_level * 100) + '%'"
+                    ></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        {# No mastery data for selected course #}
+        <div x-show="selectedCourseId && concepts.length === 0 && !masteryLoading" class="text-center py-12">
+          <p class="text-gray-500">No mastery data yet for this course.</p>
+          <p class="text-sm text-gray-400 mt-1">Complete some practice sessions to start tracking your mastery.</p>
+        </div>
+
+        {# No course selected #}
+        <div x-show="!selectedCourseId" class="text-center py-12">
+          <p class="text-gray-500">Select a course above to view mastery data.</p>
+        </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         View: Session entry (placeholder for US-006)
+         ════════════════════════════════════════════ #}
+      <div x-show="!loading && !fetchError && viewState === 'session_entry'">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold text-gray-900">Starting Session...</h1>
+          <p class="text-sm text-gray-500 mt-0.5" x-text="'Preparing ' + sessionMode + ' practice session'"></p>
+        </div>
+        <div class="text-center py-16">
+          <div class="inline-block w-8 h-8 border-2 border-gray-300 border-t-mitty-600 rounded-full animate-spin"></div>
+          <p class="text-sm text-gray-500 mt-3">Setting up your session...</p>
+        </div>
       </div>
 
     </div>
@@ -205,18 +419,39 @@
   const SUPABASE_URL = 'https://wzpdagroulirdgezsoil.supabase.co';
   const SUPABASE_ANON_KEY = 'sb_publishable_Qk1umEGN6kb7knbpU1JNOg_ilDi11W4';
 
-  function masteryDashboardApp() {
+  function masteryHubApp() {
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     return {
+      // Auth
       session: null,
+
+      // Loading / error
       loading: false,
+      masteryLoading: false,
       fetchError: '',
 
+      // View state: 'upcoming_test' | 'no_test' | 'session_entry'
+      viewState: 'upcoming_test',
+
+      // Course data
       courses: [],
-      concepts: [],
       selectedCourseId: '',
-      sortBy: 'mastery_level',
+
+      // Assessment data
+      currentAssessment: null,
+      upcomingAssessments: [],
+      selectedAssessmentId: '',
+
+      // Mastery data
+      concepts: [],
+
+      // Session history
+      sessions: [],
+      trendText: null,
+
+      // Session entry state
+      sessionMode: '',
 
       async init() {
         const { data: { session } } = await supabase.auth.getSession();
@@ -224,10 +459,10 @@
 
         supabase.auth.onAuthStateChange((_event, session) => {
           this.session = session;
-          if (session) this.fetchCourses();
+          if (session) this.loadHub();
         });
 
-        if (this.session) this.fetchCourses();
+        if (this.session) this.loadHub();
       },
 
       async signOut() {
@@ -236,87 +471,212 @@
         window.location.href = '/';
       },
 
-      async fetchCourses() {
-        try {
-          // Fetch only courses with active enrollments in the current term
-          // (matches the main dashboard filter)
-          const CURRENT_TERM = '2025-2026 Second Semester';
-          const { data, error } = await supabase
-            .from('enrollments')
-            .select('course_id, courses (id, name, workflow_state, term_name)')
-            .eq('enrollment_state', 'active');
-          if (error) {
-            this.fetchError = 'Failed to load courses. Please refresh the page.';
-            return;
-          }
-          this.courses = (data || [])
-            .filter(e => e.courses
-              && e.courses.workflow_state === 'available'
-              && e.courses.term_name === CURRENT_TERM)
-            .map(e => ({ id: e.courses.id, name: e.courses.name }))
-            .sort((a, b) => a.name.localeCompare(b.name));
-          // Deduplicate (multiple enrollments for same course)
-          const seen = new Set();
-          this.courses = this.courses.filter(c => {
-            if (seen.has(c.id)) return false;
-            seen.add(c.id);
-            return true;
-          });
-          if (this.courses.length > 0 && !this.selectedCourseId) {
-            this.selectedCourseId = this.courses[0].id;
-            this.fetchDashboard();
-          }
-        } catch (err) {
-          console.warn('Failed to fetch courses:', err.message);
-          this.fetchError = 'Failed to load courses. Please refresh the page.';
-        }
-      },
-
-      async fetchDashboard() {
-        if (!this.selectedCourseId) {
-          this.concepts = [];
-          return;
-        }
-
+      async loadHub() {
         this.loading = true;
         this.fetchError = '';
-        this.concepts = [];
 
         try {
+          // Fetch courses first (needed for fallback)
+          await this.fetchCourses();
+
+          // Try to get upcoming assessment
           const token = this.session?.access_token;
           if (!token) {
             this.fetchError = 'Not authenticated.';
             return;
           }
 
-          const resp = await fetch(
-            `/mastery-dashboard/${this.selectedCourseId}?sort_by=${this.sortBy}`,
-            { headers: { 'Authorization': 'Bearer ' + token } }
-          );
+          const upcomingResp = await fetch('/mastery-dashboard/upcoming', {
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
 
-          if (!resp.ok) {
-            this.fetchError = 'Failed to load mastery data (HTTP ' + resp.status + ')';
-            return;
+          if (upcomingResp.ok) {
+            const upcomingData = await upcomingResp.json();
+            if (upcomingData && upcomingData.assessment_id) {
+              this.currentAssessment = upcomingData;
+              this.selectedAssessmentId = String(upcomingData.assessment_id);
+              this.viewState = 'upcoming_test';
+
+              // Fetch all upcoming assessments in 14-day window + mastery + session history in parallel
+              await Promise.all([
+                this.fetchUpcomingAssessments(upcomingData.course_id),
+                this.fetchMastery(upcomingData.course_id),
+                this.fetchSessionHistory(upcomingData.course_id),
+              ]);
+            } else {
+              // No upcoming test
+              this.viewState = 'no_test';
+              if (this.courses.length > 0) {
+                this.selectedCourseId = String(this.courses[0].id);
+                await this.fetchMasteryForCourse();
+              }
+            }
+          } else {
+            // No upcoming test
+            this.viewState = 'no_test';
+            if (this.courses.length > 0) {
+              this.selectedCourseId = String(this.courses[0].id);
+              await this.fetchMasteryForCourse();
+            }
           }
-
-          const data = await resp.json();
-          this.concepts = data.concepts || [];
         } catch (err) {
-          this.fetchError = 'Failed to load mastery data: ' + err.message;
+          this.fetchError = 'Failed to load mastery hub: ' + err.message;
         } finally {
           this.loading = false;
         }
       },
 
-      formatDate(isoString) {
-        if (!isoString) return '';
-        const d = new Date(isoString);
-        return d.toLocaleDateString('en-US', {
-          month: 'short', day: 'numeric',
+      async fetchCourses() {
+        const CURRENT_TERM = '2025-2026 Second Semester';
+        const { data, error } = await supabase
+          .from('enrollments')
+          .select('course_id, courses (id, name, workflow_state, term_name)')
+          .eq('enrollment_state', 'active');
+        if (error) {
+          this.fetchError = 'Failed to load courses.';
+          return;
+        }
+        this.courses = (data || [])
+          .filter(e => e.courses
+            && e.courses.workflow_state === 'available'
+            && e.courses.term_name === CURRENT_TERM)
+          .map(e => ({ id: e.courses.id, name: e.courses.name }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        // Deduplicate
+        const seen = new Set();
+        this.courses = this.courses.filter(c => {
+          if (seen.has(c.id)) return false;
+          seen.add(c.id);
+          return true;
         });
       },
 
-      masteryBarColor(level) {
+      async fetchUpcomingAssessments(courseId) {
+        // Fetch assessments within 14 days from Supabase directly
+        const now = new Date().toISOString();
+        const twoWeeks = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
+
+        const { data, error } = await supabase
+          .from('assessments')
+          .select('id, name, scheduled_date, assessment_type, course_id')
+          .in('assessment_type', ['test', 'quiz'])
+          .gt('scheduled_date', now)
+          .lt('scheduled_date', twoWeeks)
+          .order('scheduled_date');
+
+        if (!error && data) {
+          this.upcomingAssessments = data.map(a => ({
+            assessment_id: a.id,
+            name: a.name,
+            scheduled_date: a.scheduled_date,
+            assessment_type: a.assessment_type,
+            course_id: a.course_id,
+          }));
+        }
+      },
+
+      async fetchMastery(courseId) {
+        const token = this.session?.access_token;
+        if (!token || !courseId) return;
+
+        const resp = await fetch(
+          `/mastery-dashboard/${courseId}?sort_by=mastery_level`,
+          { headers: { 'Authorization': 'Bearer ' + token } }
+        );
+
+        if (resp.ok) {
+          const data = await resp.json();
+          this.concepts = data.concepts || [];
+        }
+      },
+
+      async fetchSessionHistory(courseId) {
+        const token = this.session?.access_token;
+        if (!token || !courseId) return;
+
+        const resp = await fetch(
+          `/mastery-dashboard/session-history?course_id=${courseId}`,
+          { headers: { 'Authorization': 'Bearer ' + token } }
+        );
+
+        if (resp.ok) {
+          const data = await resp.json();
+          this.sessions = data.sessions || [];
+          this.trendText = data.trend_text || null;
+        }
+      },
+
+      async fetchMasteryForCourse() {
+        if (!this.selectedCourseId) {
+          this.concepts = [];
+          this.sessions = [];
+          this.trendText = null;
+          return;
+        }
+
+        this.masteryLoading = true;
+        try {
+          await Promise.all([
+            this.fetchMastery(this.selectedCourseId),
+            this.fetchSessionHistory(this.selectedCourseId),
+          ]);
+        } finally {
+          this.masteryLoading = false;
+        }
+      },
+
+      async switchAssessment() {
+        const selected = this.upcomingAssessments.find(
+          a => String(a.assessment_id) === String(this.selectedAssessmentId)
+        );
+        if (!selected) return;
+
+        this.currentAssessment = selected;
+        this.concepts = [];
+        this.sessions = [];
+
+        await Promise.all([
+          this.fetchMastery(selected.course_id),
+          this.fetchSessionHistory(selected.course_id),
+        ]);
+      },
+
+      // ── Computed helpers ──
+
+      sortedConcepts() {
+        // Sort weakest-last (ascending by mastery_level — weakest at bottom)
+        return [...this.concepts].sort((a, b) => b.mastery_level - a.mastery_level);
+      },
+
+      weakestConcept() {
+        if (this.concepts.length === 0) return null;
+        const weakest = [...this.concepts].sort((a, b) => a.mastery_level - b.mastery_level)[0];
+        return weakest ? weakest.concept : null;
+      },
+
+      daysUntilTest() {
+        if (!this.currentAssessment?.scheduled_date) return 0;
+        const diff = new Date(this.currentAssessment.scheduled_date) - new Date();
+        return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+      },
+
+      hasCalibrationWarning() {
+        return this.concepts.some(c =>
+          c.confidence_self_report !== null &&
+          (c.confidence_self_report - c.mastery_level) > 0.2
+        );
+      },
+
+      overconfidentConcepts() {
+        return this.concepts
+          .filter(c =>
+            c.confidence_self_report !== null &&
+            (c.confidence_self_report - c.mastery_level) > 0.2
+          )
+          .map(c => c.concept);
+      },
+
+      heatColor(level) {
         if (level >= 0.8) return 'bg-emerald-500';
         if (level >= 0.5) return 'bg-yellow-500';
         return 'bg-red-400';
@@ -340,6 +700,56 @@
           unknown: 'Not calibrated',
         };
         return map[status] || status;
+      },
+
+      formatDate(isoString) {
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      },
+
+      formatDateLong(isoString) {
+        if (!isoString) return '';
+        const d = new Date(isoString);
+        return d.toLocaleDateString('en-US', {
+          weekday: 'short', month: 'short', day: 'numeric',
+        });
+      },
+
+      formatPhase(phase) {
+        if (!phase) return '';
+        const map = {
+          diagnostic: 'Diagnostic',
+          focused_practice: 'Focused',
+          error_analysis: 'Error Analysis',
+          mixed_test: 'Mixed Test',
+          calibration: 'Calibration',
+        };
+        return map[phase] || phase;
+      },
+
+      // ── Session entry ──
+
+      startPractice(mode) {
+        this.sessionMode = mode;
+        this.viewState = 'session_entry';
+        // US-006 will connect this to POST /test-prep/sessions
+        // For now, navigate to test prep page with params
+        const courseId = this.currentAssessment?.course_id || this.selectedCourseId;
+        const assessmentId = this.currentAssessment?.assessment_id || '';
+        const concepts = mode === 'weakest' && this.weakestConcept()
+          ? encodeURIComponent(this.weakestConcept())
+          : '';
+        const sessionType = mode === 'quick' ? 'quick' : 'full';
+
+        // Navigate to test prep with pre-filled params
+        const params = new URLSearchParams();
+        if (courseId) params.set('course_id', courseId);
+        if (assessmentId) params.set('assessment_id', assessmentId);
+        if (concepts) params.set('concepts', concepts);
+        params.set('session_type', sessionType);
+
+        window.location.href = '/test-prep?' + params.toString();
       },
     };
   }
