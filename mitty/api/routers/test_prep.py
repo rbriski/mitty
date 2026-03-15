@@ -39,6 +39,7 @@ from mitty.api.schemas import (
     TestPrepSessionResponse,
     TestPrepSessionSummary,
 )
+from mitty.practice.evaluator import PracticeItem, evaluate_answer
 from mitty.prep.analyzer import analyze_homework_set
 from mitty.prep.generator import build_review_own_errors, generate_problem
 from mitty.prep.profiler import build_mastery_profile
@@ -191,30 +192,60 @@ async def _build_student_context(
     return "\n\n".join(parts) if parts else None
 
 
+# Map test-prep problem types to evaluator practice types.
+# Types not listed here default to "short_answer" (LLM evaluation).
+_EVAL_TYPE_MAP: dict[str, str] = {
+    "multiple_choice": "multiple_choice",
+    "worked_example": "worked_example",
+}
+
+
 async def _evaluate_answer(
     *,
     problem_json: dict[str, Any],
     student_answer: str,
+    ai_client: AIClient | None = None,
 ) -> dict[str, Any]:
-    """Evaluate a student answer against the stored correct answer.
+    """Evaluate a student answer using the hybrid evaluator.
 
-    Simple exact-match evaluation for now.  Returns a dict with
-    is_correct, score, explanation.
+    Multiple-choice uses exact match; all other types use LLM
+    evaluation for semantic comparison (partial credit, alternate
+    formats). Falls back to simple exact-match when AI is unavailable.
     """
-    correct_answer = problem_json.get("correct_answer", "")
-    # Normalise whitespace for comparison
-    normalised_student = student_answer.strip().lower()
-    normalised_correct = str(correct_answer).strip().lower()
+    problem_type = problem_json.get("type", "free_response")
+    eval_type = _EVAL_TYPE_MAP.get(problem_type, "short_answer")
 
-    is_correct = normalised_student == normalised_correct
-    score = 1.0 if is_correct else 0.0
-    explanation = "Correct!" if is_correct else "Not quite."
+    item = PracticeItem(
+        practice_type=eval_type,
+        question_text=problem_json.get("prompt", ""),
+        correct_answer=str(problem_json.get("correct_answer", "")),
+        options_json=problem_json.get("choices"),
+        explanation=problem_json.get("explanation"),
+        concept=problem_json.get("concept", ""),
+    )
 
-    return {
-        "is_correct": is_correct,
-        "score": score,
-        "explanation": explanation,
-    }
+    try:
+        result = await evaluate_answer(ai_client, item, student_answer)
+        return {
+            "is_correct": result.is_correct,
+            "score": result.score,
+            "explanation": result.feedback,
+        }
+    except (ValueError, Exception):
+        # AI unavailable — fall back to exact match
+        logger.debug(
+            "LLM evaluation unavailable, using exact match",
+            exc_info=True,
+        )
+        correct = str(problem_json.get("correct_answer", ""))
+        normalised_student = student_answer.strip().lower()
+        normalised_correct = correct.strip().lower()
+        is_correct = normalised_student == normalised_correct
+        return {
+            "is_correct": is_correct,
+            "score": 1.0 if is_correct else 0.0,
+            "explanation": "Correct!" if is_correct else "Not quite.",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +510,7 @@ async def submit_answer(
     data: TestPrepAnswerSubmit,
     current_user: CurrentUser,
     client: UserClient,
+    ai_client: OptionalAI,
 ) -> TestPrepAnswerResult:
     """Submit an answer for a problem in a test prep session.
 
@@ -521,10 +553,11 @@ async def submit_answer(
             "explanation": "Reflection recorded. Nice work!",
         }
     else:
-        # Evaluate the answer
+        # Evaluate the answer (LLM for free-response, exact for MC)
         evaluation = await _evaluate_answer(
             problem_json=problem_json,
             student_answer=data.student_answer,
+            ai_client=ai_client,
         )
 
     # Update the result row
