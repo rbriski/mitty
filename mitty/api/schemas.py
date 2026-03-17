@@ -1001,6 +1001,11 @@ class TestPrepAnswerSubmit(BaseModel):
     session_id: UUID
     problem_id: int
     student_answer: str = Field(max_length=5000)
+    image_base64: str | None = Field(
+        default=None,
+        max_length=10_000_000,
+        description="Base64-encoded JPEG/PNG of handwritten work (camera capture).",
+    )
     time_spent_seconds: int | None = Field(default=None, ge=0)
 
 

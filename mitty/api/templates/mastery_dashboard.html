@@ -279,8 +279,8 @@
                 <div class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
                   <div class="flex items-center gap-3">
                     <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold"
-                      :class="s.accuracy >= 80 ? 'bg-emerald-100 text-emerald-700' : s.accuracy >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'"
-                      x-text="Math.round(s.accuracy) + '%'">
+                      :class="(s.accuracy ?? 0) >= 80 ? 'bg-emerald-100 text-emerald-700' : (s.accuracy ?? 0) >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'"
+                      x-text="s.accuracy != null ? Math.round(s.accuracy) + '%' : '—'">
                     </div>
                     <div>
                       <p class="text-sm text-gray-700">
@@ -564,7 +564,17 @@
       },
 
       async fetchCourses() {
-        const CURRENT_TERM = '2025-2026 Second Semester';
+        // Fetch current term from config (same pattern as dashboard.html)
+        const DEFAULT_TERM = '2025-2026 Second Semester';
+        let currentTerm = DEFAULT_TERM;
+        try {
+          const cfgResp = await fetch('/config/');
+          if (cfgResp.ok) {
+            const cfg = await cfgResp.json();
+            currentTerm = cfg.current_term_name || DEFAULT_TERM;
+          }
+        } catch { /* use default */ }
+
         const { data, error } = await supabase
           .from('enrollments')
           .select('course_id, courses (id, name, workflow_state, term_name)')
@@ -576,7 +586,7 @@
         this.courses = (data || [])
           .filter(e => e.courses
             && e.courses.workflow_state === 'available'
-            && e.courses.term_name === CURRENT_TERM)
+            && e.courses.term_name === currentTerm)
           .map(e => ({ id: e.courses.id, name: e.courses.name }))
           .sort((a, b) => a.name.localeCompare(b.name));
         // Deduplicate
@@ -682,7 +692,7 @@
       // ── Computed helpers ──
 
       sortedConcepts() {
-        // Sort weakest-last (ascending by mastery_level — weakest at bottom)
+        // Sort descending by mastery_level (highest first, weakest at bottom)
         return [...this.concepts].sort((a, b) => b.mastery_level - a.mastery_level);
       },
 

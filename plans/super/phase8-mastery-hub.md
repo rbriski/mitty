@@ -48,7 +48,7 @@ Redesign the app around a single learning loop: **see the gap → practice → r
 ### Decisions
 
 **DEC-001 — Concept-to-assessment mapping**
-Add nullable `chapter` text field to `assignments` table. Parse from assignment name at Canvas ingestion time (e.g., "(4.1) Homework" → chapter "4"). Match to `assessments.unit_or_topic` for scoping.
+Add nullable `chapter` text field to `assignments` table. Parse from assignment name at Canvas ingestion time (e.g., "(4.1) Homework" → chapter "4"). Match to `assessments.unit_or_topic` for scoping. Log parse failures with assignment context for monitoring; fall back to all course concepts when chapter is null.
 *Rationale:* Reliable for Canvas naming conventions, no join table needed, single migration.
 
 **DEC-002 — URL routing**
@@ -142,9 +142,9 @@ Local Alpine.js state updates after each answer (from session engine's per-conce
 
 **Acceptance Criteria:**
 - `GET /mastery-dashboard/upcoming?course_id={id}` returns nearest assessment with `scheduled_date > now()` and `assessment_type IN ('test', 'quiz')`
-- Response includes: assessment_id, name, scheduled_date, assessment_type, course_id, concepts (from homework_analyses for same course)
+- Response includes: assessment_id, name, scheduled_date, assessment_type, course_id, concepts (from homework_analyses for same course, filtered by matching `assignments.chapter` → `assessments.unit_or_topic`; falls back to all course concepts if no chapter match or null values)
 - If no upcoming assessment, returns null/empty
-- Optional `course_id` param — if omitted, searches across all enrolled courses
+- Optional `course_id` param — if omitted, searches across enrolled courses only (enrollment-filtered, no data exposure)
 - Auth-protected, RLS-enforced
 - `uv run ruff check . && uv run pytest` pass
 
@@ -202,7 +202,8 @@ Local Alpine.js state updates after each answer (from session engine's per-conce
 **Traces to:** DEC-005, DEC-007, DEC-008
 
 **Acceptance Criteria:**
-- On load, fetches upcoming assessment + mastery data + session history (3 parallel API calls)
+- On load, fetches upcoming assessment + mastery data + session history (3 parallel API calls via `Promise.allSettled`; each section has independent loading/error state; partial data displayed when some calls fail)
+- Current term fetched dynamically from `GET /config/` (falls back to hardcoded default)
 - Concept heat map: visual bars sorted weakest-last, color-coded (green >80%, yellow 50-80%, red <50%)
 - Calibration callout: prominent message when any concept has confidence - mastery > 0.2
 - Primary CTA: "Start Practice — [weakest concept]" button
@@ -392,10 +393,12 @@ Local Alpine.js state updates after each answer (from session engine's per-conce
 ```
 US-001 (migrations) ──┬──→ US-003 (upcoming assessment) ──→ US-005 (hub template) ──→ US-006 (session entry + return)
                       │                                         ↑
+                      ├──→ US-007 (phase timing + quick) ──────┤
+                      │                                         │
 US-002 (nav surgery) ─┘          US-004 (session history) ─────┘
 
-US-007 (phase timing + quick) ──→ US-009 (calibration)
-                                  US-010 (error analysis)
+US-007 (phase timing + quick) ──┬──→ US-009 (calibration)
+                                └──→ US-010 (error analysis)
 
 US-008 (feedback + hide difficulty) — independent
 

@@ -350,3 +350,85 @@ async def _evaluate_with_llm(
         feedback=llm_result.feedback,
         misconceptions_detected=llm_result.misconceptions_detected,
     )
+
+
+# ---------------------------------------------------------------------------
+# Vision-based evaluation (camera/photo input)
+# ---------------------------------------------------------------------------
+
+_VISION_EVAL_PROMPT = """\
+You are evaluating a student's handwritten answer to a math problem.
+
+**Question:** {question}
+**Correct answer:** {correct}
+**Concept:** {concept}
+**Explanation/solution:** {explanation}
+
+The student submitted a photo of their work. Read the handwritten work carefully.
+
+Evaluate:
+1. Is the final answer correct?
+2. Is the method/approach correct?
+3. Are intermediate steps shown and correct?
+4. Are there any errors in arithmetic, sign, or procedure?
+
+Award a score from 0.0 to 1.0:
+- 1.0 = correct answer with valid work shown
+- 0.7-0.9 = correct approach but minor errors (arithmetic, sign)
+- 0.4-0.6 = partially correct approach or method
+- 0.1-0.3 = some relevant work but fundamentally wrong
+- 0.0 = blank, irrelevant, or completely wrong
+
+Be encouraging but accurate. Reference specific parts of their work in feedback."""
+
+
+async def evaluate_answer_with_image(
+    ai_client: AIClient,
+    practice_item: PracticeItem,
+    image_bytes: bytes,
+    student_text: str = "",
+) -> EvaluationResult:
+    """Evaluate a student's answer from a photo of handwritten work.
+
+    Uses Claude Vision to read handwritten math and evaluate correctness.
+
+    Args:
+        ai_client: AIClient instance (required — vision always uses LLM).
+        practice_item: The practice item being answered.
+        image_bytes: Raw JPEG/PNG bytes of the student's work.
+        student_text: Optional text the student typed alongside the photo.
+
+    Returns:
+        EvaluationResult with score, feedback, and any misconceptions.
+    """
+    from mitty.ai.prompts import wrap_user_input
+
+    user_prompt = (
+        _VISION_EVAL_PROMPT.replace("{question}", practice_item.question_text)
+        .replace("{correct}", practice_item.correct_answer or "(no reference answer)")
+        .replace("{concept}", practice_item.concept)
+        .replace("{explanation}", practice_item.explanation or "(none provided)")
+    )
+
+    if student_text.strip():
+        user_prompt += f"\n\nThe student also typed: {wrap_user_input(student_text)}"
+
+    logger.info(
+        "Vision evaluation: concept=%s",
+        practice_item.concept,
+    )
+
+    llm_result = await ai_client.call_vision(
+        images=[image_bytes],
+        system=_SYSTEM_PROMPT_BASE,
+        user_prompt=user_prompt,
+        response_model=_LLMEvaluation,
+        call_type="vision_eval",
+    )
+
+    return EvaluationResult(
+        is_correct=llm_result.is_correct,
+        score=llm_result.score,
+        feedback=llm_result.feedback,
+        misconceptions_detected=llm_result.misconceptions_detected,
+    )

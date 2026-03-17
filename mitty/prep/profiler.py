@@ -205,7 +205,9 @@ async def build_mastery_profile(
     # 1. Fetch homework_analyses rows.
     # Build the list of assignment IDs to query
     ids_to_query: list[int] | None = None
-    if assignment_ids:
+    if assignment_ids is not None:
+        if not assignment_ids:
+            return []  # Explicit empty list means no assignments to query
         ids_to_query = assignment_ids
     elif assignment_id:
         ids_to_query = [assignment_id]

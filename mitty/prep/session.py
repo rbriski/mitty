@@ -134,7 +134,7 @@ class SessionState:
     phase_correct: dict[str, int] = field(default_factory=dict)
 
     # Per-concept confidence ratings at phase transitions (US-009 / DEC-008, R5)
-    # Structure: { concept: [ {phase, rating, timestamp}, ... ] }
+    # Structure: { concept: [ {phase, rating}, ... ] }
     per_concept_confidence: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )

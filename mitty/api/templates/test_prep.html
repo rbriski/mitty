@@ -396,27 +396,41 @@
             </div>
           </template>
 
-          {# Free-form answer input — math field + text toggle #}
+          {# Free-form answer input — math / text / photo toggle #}
           <template x-if="!currentProblem?.choices || currentProblem.choices.length === 0">
             <div class="mb-6">
-              {# Toggle between math and text input #}
+              {# Toggle between math, text, and photo input #}
               <div class="flex items-center gap-2 mb-2">
                 <button
-                  @click="mathMode = true"
-                  :class="mathMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
+                  @click="mathMode = true; photoMode = false"
+                  :class="mathMode && !photoMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
                   class="px-3 py-1 text-xs font-medium rounded-md border transition-colors"
                   :disabled="answered"
                 >Math</button>
                 <button
-                  @click="mathMode = false"
-                  :class="!mathMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
+                  @click="mathMode = false; photoMode = false"
+                  :class="!mathMode && !photoMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
                   class="px-3 py-1 text-xs font-medium rounded-md border transition-colors"
                   :disabled="answered"
                 >Text</button>
+                <button
+                  @click="photoMode = true; mathMode = false"
+                  :class="photoMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
+                  class="px-3 py-1 text-xs font-medium rounded-md border transition-colors"
+                  :disabled="answered"
+                >
+                  <span class="flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    Photo
+                  </span>
+                </button>
               </div>
 
               {# MathLive math-field #}
-              <div x-show="mathMode" x-ref="mathFieldWrap">
+              <div x-show="mathMode && !photoMode" x-ref="mathFieldWrap">
                 <math-field
                   x-ref="mathField"
                   virtual-keyboard-mode="manual"
@@ -427,7 +441,7 @@
               </div>
 
               {# Plain text fallback #}
-              <div x-show="!mathMode">
+              <div x-show="!mathMode && !photoMode">
                 <textarea
                   x-model="studentAnswer"
                   :disabled="answered"
@@ -436,6 +450,59 @@
                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm resize-none disabled:bg-gray-50 disabled:cursor-not-allowed"
                   placeholder="Type your answer..."
                 ></textarea>
+              </div>
+
+              {# Photo capture / upload #}
+              <div x-show="photoMode">
+                <template x-if="!capturedImage">
+                  <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                    <svg class="mx-auto w-10 h-10 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <p class="text-sm text-gray-600 mb-3">Take a photo of your handwritten work</p>
+                    <div class="flex flex-col sm:flex-row items-center justify-center gap-2">
+                      <label class="cursor-pointer px-4 py-2 bg-mitty-600 hover:bg-mitty-700 text-white text-sm font-medium rounded-lg transition-colors">
+                        <span class="flex items-center gap-1.5">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                          </svg>
+                          Take Photo
+                        </span>
+                        <input type="file" accept="image/*" capture="environment" class="hidden"
+                          @change="handlePhotoCapture($event)" :disabled="answered">
+                      </label>
+                      <label class="cursor-pointer px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium rounded-lg border border-gray-300 transition-colors">
+                        <span class="flex items-center gap-1.5">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                          </svg>
+                          Upload Image
+                        </span>
+                        <input type="file" accept="image/*" class="hidden"
+                          @change="handlePhotoCapture($event)" :disabled="answered">
+                      </label>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-3">Write your work on paper, then snap a photo</p>
+                  </div>
+                </template>
+                <template x-if="capturedImage">
+                  <div class="relative">
+                    <img :src="capturedImage.dataUrl" class="w-full rounded-lg border border-gray-200 max-h-64 object-contain bg-gray-50">
+                    <button
+                      x-show="!answered"
+                      @click="capturedImage = null; studentAnswer = ''"
+                      class="absolute top-2 right-2 p-1.5 bg-white/90 hover:bg-white rounded-full shadow-sm border border-gray-200 transition-colors"
+                      title="Remove photo"
+                    >
+                      <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                    <p class="text-xs text-gray-500 mt-2 text-center">Photo captured — ready to submit</p>
+                  </div>
+                </template>
               </div>
             </div>
           </template>
@@ -468,13 +535,13 @@
             <template x-if="!currentProblem?.is_reflection">
               <button
                 @click="submitAnswer()"
-                :disabled="!studentAnswer || submitting"
+                :disabled="(!studentAnswer && !capturedImage) || submitting"
                 class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
               >
-                <span x-show="!submitting">Submit Answer</span>
+                <span x-show="!submitting" x-text="capturedImage ? 'Submit Photo' : 'Submit Answer'">Submit Answer</span>
                 <span x-show="submitting" class="flex items-center justify-center gap-2">
                   <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                  Checking...
+                  <span x-text="capturedImage ? 'Reading your work...' : 'Checking...'">Checking...</span>
                 </span>
               </button>
             </template>
@@ -973,6 +1040,8 @@
       studentAnswer: '',
       answered: false,
       mathMode: false,
+      photoMode: false,
+      capturedImage: null,  // { dataUrl, base64 }
       submitting: false,
       problemLoading: false,
       _prefetchedProblem: null,
@@ -1050,7 +1119,17 @@
 
       async fetchCourses() {
         try {
-          const CURRENT_TERM = '2025-2026 Second Semester';
+          // Fetch current term from config (same pattern as dashboard.html)
+          const DEFAULT_TERM = '2025-2026 Second Semester';
+          let currentTerm = DEFAULT_TERM;
+          try {
+            const cfgResp = await fetch('/config/');
+            if (cfgResp.ok) {
+              const cfg = await cfgResp.json();
+              currentTerm = cfg.current_term_name || DEFAULT_TERM;
+            }
+          } catch { /* use default */ }
+
           const { data, error } = await supabase
             .from('enrollments')
             .select('course_id, courses (id, name, workflow_state, term_name)')
@@ -1062,7 +1141,7 @@
           this.courses = (data || [])
             .filter(e => e.courses
               && e.courses.workflow_state === 'available'
-              && e.courses.term_name === CURRENT_TERM)
+              && e.courses.term_name === currentTerm)
             .map(e => ({ id: e.courses.id, name: e.courses.name }))
             .sort((a, b) => a.name.localeCompare(b.name));
           // Deduplicate
@@ -1383,6 +1462,7 @@
         this.problemLoading = true;
         this.currentProblem = null;
         this.studentAnswer = '';
+        this.capturedImage = null;
         this.answered = false;
         this.lastResult = null;
         // Clear the math field if it exists
@@ -1504,8 +1584,39 @@
 
       // ── Answer Submission ──
 
+      // ── Photo capture handler ──
+
+      handlePhotoCapture(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        // Validate file type and size (max 10 MB)
+        if (!file.type.startsWith('image/')) {
+          this.sessionError = 'Please select an image file.';
+          return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          this.sessionError = 'Image too large (max 10 MB).';
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          this.capturedImage = {
+            dataUrl: e.target.result,
+            base64: e.target.result,  // includes data:image/...;base64, prefix
+          };
+          // Set a placeholder so submit button enables
+          this.studentAnswer = '[photo submitted]';
+        };
+        reader.readAsDataURL(file);
+
+        // Reset file input so same file can be re-selected
+        event.target.value = '';
+      },
+
       async submitAnswer() {
-        if (!this.studentAnswer || this.submitting || !this.currentProblem) return;
+        if ((!this.studentAnswer && !this.capturedImage) || this.submitting || !this.currentProblem) return;
         const token = this.session?.access_token;
         if (!token) return;
 
@@ -1513,18 +1624,25 @@
         this.sessionError = '';
 
         try {
+          const payload = {
+            session_id: this.sessionId,
+            problem_id: this.currentProblem.id,
+            student_answer: this.capturedImage ? '[photo]' : this.studentAnswer,
+            time_spent_seconds: null,
+          };
+
+          // Include image if photo was captured
+          if (this.capturedImage) {
+            payload.image_base64 = this.capturedImage.base64;
+          }
+
           const resp = await fetch(`/test-prep/sessions/${this.sessionId}/answer`, {
             method: 'POST',
             headers: {
               'Authorization': 'Bearer ' + token,
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              session_id: this.sessionId,
-              problem_id: this.currentProblem.id,
-              student_answer: this.studentAnswer,
-              time_spent_seconds: null,
-            }),
+            body: JSON.stringify(payload),
           });
 
           if (!resp.ok) {
@@ -1831,6 +1949,7 @@
         this.sessionId = null;
         this.currentProblem = null;
         this.studentAnswer = '';
+        this.capturedImage = null;
         this.answered = false;
         this.lastResult = null;
         this.summaryData = null;

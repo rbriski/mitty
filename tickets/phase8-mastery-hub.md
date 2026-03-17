@@ -436,17 +436,17 @@ The quick review uses the existing mastery data to set initial difficulty and co
 - [ ] Review-own-errors problems in Error Analysis phase (pull from earlier phases)
 - [ ] Quick Review mode (15 min, Phase 4+5 only) available from Mastery
 - [ ] Test Prep removed as standalone nav item
-- [ ] Mobile-responsive: heat map collapses to progress bar on small screens
+- [ ] Mobile-responsive: heat map collapses to progress bar on small screens (dedicated work item — implement Tailwind responsive breakpoints for concept grid, session history, and CTAs)
 - [ ] Quality gates pass
 
 ## Risks & open questions
 
-- **Upcoming assessment detection**: Relies on `is_assessment` flag being accurate in the assessments table. May need a heuristic (assignment name contains "Test", "Exam", "Quiz" + high point value) as a fallback. Also needs a way for the student to manually select which test to prep for if the auto-detection is wrong.
-- **Concept-to-assessment mapping**: How do we know which concepts belong to Chapter 4 vs. Chapter 5? Currently driven by which homework assignments were analyzed. If the student only analyzed 3 of 6 Chapter 4 homeworks, the concept map is incomplete. May need a "Analyze all Chapter 4 homework" batch action.
+- **Upcoming assessment detection**: Relies on `is_assessment` flag being accurate in the assessments table. May need a heuristic (assignment name contains "Test", "Exam", "Quiz" + high point value) as a fallback. Also needs a way for the student to manually select which test to prep for if the auto-detection is wrong. *Scope: fallback heuristic is in-scope for Phase 8 (added to US-003 acceptance criteria); manual test selection is implemented via the assessment switcher dropdown in US-005.*
+- **Concept-to-assessment mapping**: How do we know which concepts belong to Chapter 4 vs. Chapter 5? Currently driven by which homework assignments were analyzed. If the student only analyzed 3 of 6 Chapter 4 homeworks, the concept map is incomplete. May need a "Analyze all Chapter 4 homework" batch action. *Scope: chapter parsing with logging + fallback to all course concepts is in-scope (DEC-001); batch analysis action deferred to Phase 9.*
 - **Cold start**: A student who hasn't analyzed any homework sees an empty Mastery view. The onboarding flow needs to guide them: "Select a course → We'll analyze your homework → Then you can start practicing." This should be as close to one-click as possible.
 - **Study Plan removal**: Some students might have bookmarked or rely on the Study Plan. The redirect notice should be clear about where the functionality moved. Consider keeping the route alive for one release cycle.
-- **Session length flexibility**: 45 minutes is the new default. Students should be able to choose 30, 45, or 60 minutes, with phase durations scaling proportionally.
-- **Multi-test prep**: What if a student has two tests in the same week (Pre-Calc + Chemistry)? The Mastery hub should allow switching between upcoming tests, not just show the nearest one. A tab or dropdown for "Pre-Calc Ch 4 Test (Mar 16) | Chem Ch 12 Test (Mar 18)" would work.
+- **Session length flexibility**: 45 minutes is the new default. Students should be able to choose 30, 45, or 60 minutes, with phase durations scaling proportionally. *Scope: deferred to Phase 9 — Phase 8 uses fixed durations with "extend phase" option.*
+- **Multi-test prep**: What if a student has two tests in the same week (Pre-Calc + Chemistry)? The Mastery hub should allow switching between upcoming tests, not just show the nearest one. A tab or dropdown for "Pre-Calc Ch 4 Test (Mar 16) | Chem Ch 12 Test (Mar 18)" would work. *Scope: assessment switcher dropdown in US-005 handles this (shows next 14 days of assessments).*
 
 ## Dependencies
 

@@ -16,6 +16,7 @@ authoritative state), DEC-010 (SSE, 30-min timeout, 1 concurrent per user).
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any
@@ -39,7 +40,11 @@ from mitty.api.schemas import (
     TestPrepSessionResponse,
     TestPrepSessionSummary,
 )
-from mitty.practice.evaluator import PracticeItem, evaluate_answer
+from mitty.practice.evaluator import (
+    PracticeItem,
+    evaluate_answer,
+    evaluate_answer_with_image,
+)
 from mitty.prep.analyzer import analyze_homework_set
 from mitty.prep.generator import build_review_own_errors, generate_problem
 from mitty.prep.profiler import build_mastery_profile
@@ -205,12 +210,16 @@ async def _evaluate_answer(
     problem_json: dict[str, Any],
     student_answer: str,
     ai_client: AIClient | None = None,
+    image_bytes: bytes | None = None,
 ) -> dict[str, Any]:
     """Evaluate a student answer using the hybrid evaluator.
 
     Multiple-choice uses exact match; all other types use LLM
     evaluation for semantic comparison (partial credit, alternate
     formats). Falls back to simple exact-match when AI is unavailable.
+
+    When *image_bytes* is provided (camera/photo input), uses Claude
+    Vision to read handwritten work and evaluate it.
     """
     problem_type = problem_json.get("type", "free_response")
     eval_type = _EVAL_TYPE_MAP.get(problem_type, "short_answer")
@@ -223,6 +232,24 @@ async def _evaluate_answer(
         explanation=problem_json.get("explanation"),
         concept=problem_json.get("concept", ""),
     )
+
+    # Vision path: student submitted a photo of handwritten work
+    if image_bytes and ai_client:
+        try:
+            result = await evaluate_answer_with_image(
+                ai_client, item, image_bytes, student_text=student_answer
+            )
+            return {
+                "is_correct": result.is_correct,
+                "score": result.score,
+                "explanation": result.feedback,
+            }
+        except Exception:
+            logger.warning(
+                "Vision evaluation failed, falling back to text evaluation",
+                exc_info=True,
+            )
+            # Fall through to text-based evaluation
 
     try:
         result = await evaluate_answer(ai_client, item, student_answer)
@@ -557,10 +584,24 @@ async def submit_answer(
         # diagnostic/calibration to keep them fast (~instant vs ~5s).
         phase = session_data.get("state_json", {}).get("phase", "")
         use_llm = phase not in ("diagnostic", "calibration")
+
+        # Decode image if student submitted a photo of their work
+        image_bytes: bytes | None = None
+        if data.image_base64:
+            try:
+                # Strip data-URL prefix if present (e.g. "data:image/jpeg;base64,...")
+                raw = data.image_base64
+                if "," in raw:
+                    raw = raw.split(",", 1)[1]
+                image_bytes = base64.b64decode(raw)
+            except Exception:
+                logger.warning("Failed to decode image_base64, ignoring image")
+
         evaluation = await _evaluate_answer(
             problem_json=problem_json,
             student_answer=data.student_answer,
-            ai_client=ai_client if use_llm else None,
+            ai_client=ai_client if (use_llm or image_bytes) else None,
+            image_bytes=image_bytes,
         )
 
     # Update the result row

@@ -163,7 +163,22 @@ async def get_upcoming_assessment(
     course_id: int | None = Query(default=None),  # noqa: B008
 ) -> UpcomingAssessmentResponse | None:
     """Return the nearest future test/quiz assessment with concepts."""
+    user_id = current_user["user_id"]
     now_iso = datetime.now(tz=UTC).isoformat()
+
+    # When no course_id provided, restrict to courses the user is enrolled in
+    enrolled_course_ids: list[int] | None = None
+    if course_id is None:
+        enroll_result = await (
+            client.table("enrollments")
+            .select("course_id")
+            .eq("user_id", user_id)
+            .eq("enrollment_state", "active")
+            .execute()
+        )
+        enrolled_course_ids = [r["course_id"] for r in (enroll_result.data or [])]
+        if not enrolled_course_ids:
+            return None
 
     # Build query: future assessments of type test/quiz, ordered nearest-first
     query = (
@@ -176,6 +191,8 @@ async def get_upcoming_assessment(
     )
     if course_id is not None:
         query = query.eq("course_id", course_id)
+    elif enrolled_course_ids:
+        query = query.in_("course_id", enrolled_course_ids)
 
     result = await query.execute()
     rows = result.data or []
@@ -192,15 +209,14 @@ async def get_upcoming_assessment(
     concepts: list[str] = []
     assessment_name = assessment.get("name", "")
     a_course_id = assessment["course_id"]
-    user_id = current_user["user_id"]
 
     # Parse chapter number(s) from assessment name
     chapter_matches = re.findall(
         r"(?:ch(?:apter)?|chapters?)\s*(\d+)", assessment_name, re.IGNORECASE
     )
-    # Also handle ranges like "Chapter 6-7 Test"
+    # Also handle ranges like "Chapter 6-7 Test" or "Chapters 6-7 Test"
     range_matches = re.findall(
-        r"(?:ch(?:apter)?)\s*(\d+)\s*[-–]\s*(\d+)", assessment_name, re.IGNORECASE
+        r"(?:ch(?:apters?)?)\s*(\d+)\s*[-–]\s*(\d+)", assessment_name, re.IGNORECASE
     )
     chapters: set[str] = set(chapter_matches)
     for start, end in range_matches:
@@ -240,25 +256,36 @@ async def get_upcoming_assessment(
                         seen.add(concept)
                         concepts.append(concept)
 
-    # Fallback: try canvas_assignment_id direct link
+    # Fallback: try canvas_assignment_id direct link — look up the internal
+    # assignment ID first since homework_analyses.assignment_id references
+    # assignments.id (not the Canvas ID).
     if not concepts:
         canvas_assignment_id = assessment.get("canvas_assignment_id")
         if canvas_assignment_id is not None:
-            ha_result = await (
-                client.table("homework_analyses")
-                .select("analysis_json")
-                .eq("assignment_id", canvas_assignment_id)
-                .eq("user_id", user_id)
+            assign_lookup = await (
+                client.table("assignments")
+                .select("id")
+                .eq("canvas_assignment_id", canvas_assignment_id)
+                .limit(1)
                 .execute()
             )
-            seen_fb: set[str] = set()
-            for ha_row in ha_result.data or []:
-                aj = ha_row.get("analysis_json") or {}
-                for prob in aj.get("per_problem", []):
-                    concept = prob.get("concept")
-                    if concept and concept not in seen_fb:
-                        seen_fb.add(concept)
-                        concepts.append(concept)
+            internal_id = assign_lookup.data[0]["id"] if assign_lookup.data else None
+            if internal_id is not None:
+                ha_result = await (
+                    client.table("homework_analyses")
+                    .select("analysis_json")
+                    .eq("assignment_id", internal_id)
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+                seen_fb: set[str] = set()
+                for ha_row in ha_result.data or []:
+                    aj = ha_row.get("analysis_json") or {}
+                    for prob in aj.get("per_problem", []):
+                        concept = prob.get("concept")
+                        if concept and concept not in seen_fb:
+                            seen_fb.add(concept)
+                            concepts.append(concept)
 
     return UpcomingAssessmentResponse(
         assessment_id=assessment["id"],
@@ -375,9 +402,10 @@ async def get_mastery_dashboard(
 
     # Fallback: if no mastery_states, extract concepts from homework analyses
     if not sorted_concepts:
-        sorted_concepts = await _concepts_from_homework(
+        fallback_concepts = await _concepts_from_homework(
             client, current_user["user_id"], course_id
         )
+        sorted_concepts = _sort_concepts(fallback_concepts, sort_by)
 
     return MasteryDashboardResponse(
         course_id=course_id,

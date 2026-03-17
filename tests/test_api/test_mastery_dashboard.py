@@ -550,7 +550,7 @@ class TestSessionHistoryReturnsLast5:
     """GET /mastery-dashboard/session-history returns last 5 completed sessions."""
 
     def test_returns_last_5(self) -> None:
-        """When 6 sessions exist, only 5 are returned (DB LIMIT)."""
+        """Verifies last 5 completed sessions are returned with required fields."""
         sessions = [_make_session(i) for i in range(5)]
         mock_client = MagicMock()
         _setup_session_history_mock(mock_client, sessions)
@@ -836,16 +836,20 @@ def _setup_upcoming_mock(
     mock_client: MagicMock,
     assessments: list[dict],
     homework_analyses: list[dict] | None = None,
+    assignments: list[dict] | None = None,
 ) -> None:
-    """Configure mock for assessments and homework_analyses tables."""
+    """Configure mock for assessments, homework_analyses, and assignments tables."""
     assessment_chain = _chain_mock(assessments)
     homework_chain = _chain_mock(homework_analyses or [])
+    assignment_chain = _chain_mock(assignments or [])
 
     def table_router(name: str) -> MagicMock:
         if name == "assessments":
             return assessment_chain
         if name == "homework_analyses":
             return homework_chain
+        if name == "assignments":
+            return assignment_chain
         return _chain_mock([])
 
     mock_client.table = MagicMock(side_effect=table_router)
@@ -861,7 +865,7 @@ class TestUpcomingReturnsNearest:
         _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST])
         app = _build_app(mock_client)
         with TestClient(app) as tc:
-            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -881,7 +885,7 @@ class TestUpcomingNoFutureReturnsEmpty:
         _setup_upcoming_mock(mock_client, [])
         app = _build_app(mock_client)
         with TestClient(app) as tc:
-            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -899,7 +903,7 @@ class TestUpcomingFiltersByType:
         _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_QUIZ])
         app = _build_app(mock_client)
         with TestClient(app) as tc:
-            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -917,10 +921,11 @@ class TestUpcomingIncludesConcepts:
             mock_client,
             [_ASSESSMENT_FUTURE_TEST],
             [_HOMEWORK_ANALYSIS_1, _HOMEWORK_ANALYSIS_2],
+            assignments=[{"id": 500, "name": "Ch 5 HW", "canvas_assignment_id": 500}],
         )
         app = _build_app(mock_client)
         with TestClient(app) as tc:
-            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -939,7 +944,7 @@ class TestUpcomingIncludesConcepts:
         _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST], [])
         app = _build_app(mock_client)
         with TestClient(app) as tc:
-            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -965,9 +970,21 @@ class TestUpcomingCourseIdFilter:
         assert data["assessment_id"] == 100
 
     def test_without_course_id(self) -> None:
-        """Should work without course_id param (returns from any course)."""
+        """Should work without course_id param (returns from enrolled courses)."""
         mock_client = MagicMock()
-        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST])
+
+        # Need to mock enrollments table for the no-course_id path
+        enrollment_chain = _chain_mock([{"course_id": 10}])
+        assessment_chain = _chain_mock([_ASSESSMENT_FUTURE_TEST])
+
+        def table_router(name: str) -> MagicMock:
+            if name == "enrollments":
+                return enrollment_chain
+            if name == "assessments":
+                return assessment_chain
+            return _chain_mock([])
+
+        mock_client.table = MagicMock(side_effect=table_router)
         app = _build_app(mock_client)
         with TestClient(app) as tc:
             resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
