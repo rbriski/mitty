@@ -47,15 +47,17 @@ def _build_failing_ai_client(exc: Exception) -> AsyncMock:
 
 
 class TestProblemTypeEnum:
-    """ProblemType enum has all 6 required types."""
+    """ProblemType enum has all 8 required types (6 original + 2 US-010)."""
 
-    def test_all_six_types_present(self) -> None:
-        assert len(ProblemType) == 6
+    def test_all_eight_types_present(self) -> None:
+        assert len(ProblemType) == 8
         expected = {
             "multiple_choice",
             "free_response",
             "worked_example",
             "error_analysis",
+            "find_the_mistake",
+            "review_own_errors",
             "mixed",
             "calibration",
         }

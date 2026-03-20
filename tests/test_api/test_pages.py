@@ -43,31 +43,26 @@ class TestDashboardPage:
         assert "Grades Dashboard" in response.text
 
 
-class TestStudyPlanPage:
-    """GET /study-plan returns the study plan HTML page."""
+class TestStudyPlanRedirect:
+    """GET /study-plan shows a redirect banner to Mastery Hub."""
 
     def test_returns_html(self, client: TestClient) -> None:
         response = client.get("/study-plan")
 
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
-        assert "Study Plan" in response.text
 
-    def test_contains_checkin_form(self, client: TestClient) -> None:
+    def test_contains_redirect_banner(self, client: TestClient) -> None:
         response = client.get("/study-plan")
 
-        assert "Daily Check-in" in response.text
+        assert "Study Plan has moved" in response.text
+        assert "Mastery Hub" in response.text
 
-    def test_contains_back_to_dashboard_link(self, client: TestClient) -> None:
+    def test_contains_mastery_hub_link(self, client: TestClient) -> None:
         response = client.get("/study-plan")
 
-        assert 'href="/"' in response.text
-        assert "Dashboard" in response.text
-
-    def test_contains_study_plan_app_script(self, client: TestClient) -> None:
-        response = client.get("/study-plan")
-
-        assert "studyPlanApp()" in response.text
+        assert 'href="/mastery"' in response.text
+        assert "Go to Mastery Hub" in response.text
 
 
 class TestAssessmentsManagePage:
@@ -189,11 +184,11 @@ class TestPracticeSessionPage:
 
         assert "Please sign in to start a practice session." in response.text
 
-    def test_contains_back_to_study_plan_link(self, client: TestClient) -> None:
+    def test_contains_back_to_mastery_hub_link(self, client: TestClient) -> None:
         response = client.get("/practice")
 
-        assert 'href="/study-plan"' in response.text
-        assert "Back to Study Plan" in response.text
+        assert 'href="/mastery"' in response.text
+        assert "Back to Mastery Hub" in response.text
 
     def test_contains_practice_session_app_script(self, client: TestClient) -> None:
         response = client.get("/practice")
@@ -257,19 +252,19 @@ class TestPracticeSessionPage:
         assert "View Mastery" in response.text
 
 
-class TestStudyPlanPracticeButton:
-    """Study plan page includes Start Practice button for retrieval blocks."""
+class TestTestPrepPage:
+    """GET /test-prep returns the test prep HTML page."""
 
-    def test_contains_start_practice_link(self, client: TestClient) -> None:
-        response = client.get("/study-plan")
+    def test_returns_html(self, client: TestClient) -> None:
+        response = client.get("/test-prep")
 
-        assert "Start Practice" in response.text
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
 
-    def test_practice_link_targets_retrieval_blocks(self, client: TestClient) -> None:
-        response = client.get("/study-plan")
+    def test_contains_test_prep_title(self, client: TestClient) -> None:
+        response = client.get("/test-prep")
 
-        assert "block.block_type === 'retrieval'" in response.text
-        assert "/practice?block_id=" in response.text
+        assert "Test Prep" in response.text
 
 
 class TestClassDetailPage:

@@ -6,7 +6,7 @@ request/response models (US-002).
 """
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -675,6 +675,37 @@ class MasteryDashboardResponse(BaseModel):
     concepts: list[MasteryConceptRow]
 
 
+class UpcomingAssessmentResponse(BaseModel):
+    """Nearest upcoming test/quiz assessment with related concepts."""
+
+    assessment_id: int
+    name: str
+    scheduled_date: datetime
+    assessment_type: str
+    course_id: int
+    concepts: list[str] = Field(default_factory=list)
+
+
+class SessionHistoryEntry(BaseModel):
+    """A single completed test prep session in the history list."""
+
+    session_id: str
+    started_at: datetime
+    total_problems: int
+    total_correct: int
+    accuracy: float
+    duration_seconds: int | None
+    phase_reached: str | None
+    session_type: str
+
+
+class SessionHistoryResponse(BaseModel):
+    """Response for the session history endpoint."""
+
+    sessions: list[SessionHistoryEntry]
+    trend_text: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # AI Usage / Cost Summary
 # ---------------------------------------------------------------------------
@@ -822,6 +853,8 @@ TestPrepProblemType = Literal[
     "free_response",
     "worked_example",
     "error_analysis",
+    "find_the_mistake",
+    "review_own_errors",
     "mixed",
     "calibration",
 ]
@@ -908,6 +941,7 @@ class TestPrepSessionCreate(BaseModel):
     course_id: int
     assessment_id: int | None = None
     concepts: list[str] = Field(min_length=1, max_length=50)
+    session_type: Literal["full", "quick"] = "full"
 
 
 class TestPrepSessionResponse(BaseModel):
@@ -926,6 +960,7 @@ class TestPrepSessionResponse(BaseModel):
     total_correct: int = 0
     duration_seconds: int | None = None
     phase_reached: SessionPhase | None = None
+    session_type: Literal["full", "quick"] = "full"
 
 
 # ---------------------------------------------------------------------------
@@ -945,6 +980,14 @@ class TestPrepProblem(BaseModel):
     prompt: str = Field(max_length=10000)
     choices: list[str] | None = None
     correct_answer: str | None = Field(default=None, max_length=10000)
+    is_reflection: bool = Field(
+        default=False,
+        description="True for review_own_errors (ungraded reflection).",
+    )
+    phase: str | None = Field(
+        default=None,
+        description="Current session phase (sent when phase auto-advances).",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -958,6 +1001,11 @@ class TestPrepAnswerSubmit(BaseModel):
     session_id: UUID
     problem_id: int
     student_answer: str = Field(max_length=5000)
+    image_base64: str | None = Field(
+        default=None,
+        max_length=10_000_000,
+        description="Base64-encoded JPEG/PNG of handwritten work (camera capture).",
+    )
     time_spent_seconds: int | None = Field(default=None, ge=0)
 
 
@@ -967,6 +1015,8 @@ class TestPrepAnswerResult(BaseModel):
     is_correct: bool
     score: float = Field(ge=0.0, le=1.0)
     explanation: str
+    correct_answer: str | None = None
+    worked_solution: str | None = None
     next_problem: TestPrepProblem | None = None
 
 
@@ -1000,6 +1050,28 @@ class PhaseScore(BaseModel):
     accuracy: float = Field(ge=0.0, le=1.0)
 
 
+class TestPrepConfidenceSubmit(BaseModel):
+    """POST request to submit confidence ratings at a phase transition."""
+
+    ratings: dict[str, Annotated[int, Field(ge=1, le=5)]] = Field(
+        max_length=50,
+        description="Mapping of concept -> confidence rating (1-5)",
+    )
+
+
+class TestPrepConfidenceComparison(BaseModel):
+    """Per-concept confidence vs performance comparison row."""
+
+    concept: str
+    checkpoints: list[dict] = Field(default_factory=list)
+    attempted: int = 0
+    correct: int = 0
+    accuracy: float = 0.0
+    avg_confidence: float | None = None
+    gap: float | None = None
+    gap_label: str | None = None
+
+
 class TestPrepSessionSummary(BaseModel):
     """End-of-session summary for a test prep session."""
 
@@ -1010,3 +1082,6 @@ class TestPrepSessionSummary(BaseModel):
     duration_seconds: int | None = None
     mastery_profile: list[TestPrepMasteryProfile] = Field(default_factory=list)
     recommendations: list[str] = Field(default_factory=list)
+    confidence_comparison: list[TestPrepConfidenceComparison] = Field(
+        default_factory=list
+    )

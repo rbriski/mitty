@@ -22,8 +22,8 @@ async def index(request: Request) -> HTMLResponse:
 
 @router.get("/study-plan", response_class=HTMLResponse)
 async def study_plan(request: Request) -> HTMLResponse:
-    """Render the study plan page for today."""
-    return templates.TemplateResponse("study_plan.html", {"request": request})
+    """Redirect banner — Study Plan has moved to Mastery Hub."""
+    return templates.TemplateResponse("study_plan_redirect.html", {"request": request})
 
 
 @router.get("/assessments/manage", response_class=HTMLResponse)
@@ -50,18 +50,18 @@ async def mastery_dashboard(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("mastery_dashboard.html", {"request": request})
 
 
+@router.get("/test-prep", response_class=HTMLResponse)
+async def test_prep(request: Request) -> HTMLResponse:
+    """Render the test prep session page."""
+    return templates.TemplateResponse("test_prep.html", {"request": request})
+
+
 @router.get("/blocks/{block_id}/coach", response_class=HTMLResponse)
 async def coach_chat(request: Request, block_id: int) -> HTMLResponse:
     """Render the coach chat page for a study block."""
     return templates.TemplateResponse(
         "coach_chat.html", {"request": request, "block_id": block_id}
     )
-
-
-@router.get("/test-prep", response_class=HTMLResponse)
-async def test_prep(request: Request) -> HTMLResponse:
-    """Render the test prep session page."""
-    return templates.TemplateResponse("test_prep.html", {"request": request})
 
 
 @router.get("/class/{course_id}", response_class=HTMLResponse)
