@@ -63,6 +63,7 @@ def _mock_supabase_client(
 
     select_chain = MagicMock()
     select_chain.eq.return_value = select_chain
+    select_chain.in_.return_value = select_chain
     select_chain.execute = AsyncMock(return_value=select_result)
 
     table_mock = MagicMock()

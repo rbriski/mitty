@@ -32,13 +32,9 @@
                class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
               Dashboard
             </a>
-            <a href="/study-plan"
-               class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
-              Study Plan
-            </a>
             <a href="/mastery"
                class="text-sm font-medium text-gray-600 hover:text-mitty-600 transition-colors">
-              Mastery
+              Mastery Hub
             </a>
             <a href="/test-prep"
                class="text-sm font-medium text-mitty-600 border-b-2 border-mitty-600 pb-0.5">
@@ -88,12 +84,12 @@
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
           <h2 class="text-lg font-semibold text-gray-900 mb-4">Homework Analysis</h2>
 
-          {# Course selector #}
+          {# Step 1: Course selector #}
           <div class="mb-4">
             <label class="block text-sm font-medium text-gray-700 mb-1">Course</label>
             <select
               x-model="selectedCourseId"
-              @change="selectedAssignmentId = ''; assignments = []; fetchAssignments()"
+              @change="selectedAssessmentId = ''; assessments = []; homeworkList = []; fetchAssessments()"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm"
             >
               <option value="">Select a course</option>
@@ -103,31 +99,70 @@
             </select>
           </div>
 
-          {# Assignment selector #}
+          {# Step 2: Quiz/Test selector #}
           <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1">Assignment</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Preparing for</label>
             <select
-              x-model="selectedAssignmentId"
-              :disabled="!selectedCourseId"
+              x-model="selectedAssessmentId"
+              :disabled="!selectedCourseId || assessments.length === 0"
+              @change="homeworkList = []; if (selectedAssessmentId) fetchHomework()"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-mitty-500 focus:border-transparent outline-none text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
             >
-              <option value="">Select an assignment</option>
-              <template x-for="a in assignments" :key="a.id">
-                <option :value="a.id" x-text="a.name"></option>
+              <option value="">Select a quiz or test</option>
+              <template x-for="a in assessments" :key="a.id">
+                <option :value="a.id" x-text="a.name + (a.scheduled_date ? ' — ' + new Date(a.scheduled_date).toLocaleDateString() : '')"></option>
               </template>
             </select>
+            <p x-show="selectedCourseId && assessments.length === 0 && !setupError" class="text-xs text-gray-400 mt-1">No upcoming quizzes or tests found for this course.</p>
           </div>
 
-          {# Analyze button #}
+          {# Step 3: Homework checklist #}
+          <div x-show="selectedAssessmentId && homeworkList.length > 0" class="mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <label class="block text-sm font-medium text-gray-700">Homework to analyze</label>
+              <button
+                @click="toggleAllHomework()"
+                class="text-xs text-mitty-600 hover:text-mitty-700 font-medium"
+                x-text="homeworkList.every(h => h.selected) ? 'Deselect All' : 'Select All'"
+              ></button>
+            </div>
+            <div class="max-h-64 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+              <template x-for="hw in homeworkList" :key="hw.id">
+                <label class="flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    :checked="hw.selected"
+                    @change="hw.selected = !hw.selected"
+                    class="w-4 h-4 text-mitty-600 rounded border-gray-300 focus:ring-mitty-500"
+                  >
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-gray-900 truncate" x-text="hw.name"></p>
+                    <p class="text-xs text-gray-400" x-text="hw.due_at ? 'Due ' + new Date(hw.due_at).toLocaleDateString() : 'No due date'"></p>
+                  </div>
+                  <span x-show="hw.analyzed" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                    &#10003; Analyzed
+                  </span>
+                </label>
+              </template>
+            </div>
+            <p class="text-xs text-gray-500 mt-1.5">
+              <span x-text="homeworkList.filter(h => h.selected).length"></span> selected,
+              <span x-text="homeworkList.filter(h => h.analyzed).length"></span> already analyzed
+            </p>
+          </div>
+
+          <p x-show="selectedAssessmentId && homeworkList.length === 0 && !setupError" class="text-xs text-gray-400 mb-4">No homework assignments found for this course.</p>
+
+          {# Step 4: Analyze button #}
           <button
             @click="analyzeHomework()"
-            :disabled="!selectedCourseId || !selectedAssignmentId || analyzing"
+            :disabled="!selectedAssessmentId || unanalyzedSelectedCount() === 0 || analyzing"
             class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
           >
-            <span x-show="!analyzing">Analyze Homework</span>
+            <span x-show="!analyzing" x-text="unanalyzedSelectedCount() > 0 ? 'Analyze ' + unanalyzedSelectedCount() + ' Homework Assignment' + (unanalyzedSelectedCount() !== 1 ? 's' : '') : 'Analyze Homework'"></span>
             <span x-show="analyzing" class="flex items-center justify-center gap-2">
               <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-              Analyzing...
+              <span x-text="'Analyzing ' + (currentAnalysisIndex + 1) + ' of ' + totalAnalysisCount + '...'"></span>
             </span>
           </button>
         </div>
@@ -154,15 +189,6 @@
               </div>
             </template>
           </div>
-
-          {# View Mastery Profile button after analysis complete #}
-          <button
-            x-show="analysisComplete"
-            @click="fetchMasteryProfile()"
-            class="mt-4 w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
-          >
-            View Mastery Profile
-          </button>
 
           {# Error retry button #}
           <button
@@ -307,10 +333,6 @@
           <div class="flex items-center justify-between text-sm">
             <div class="flex items-center gap-2">
               <span class="font-medium text-gray-900" x-text="phaseLabel(currentPhase)"></span>
-              <span
-                class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600"
-                x-text="'Difficulty: ' + Math.round(currentDifficulty * 100) + '%'"
-              ></span>
             </div>
             <span class="text-gray-500" x-text="phaseCorrect + '/' + phaseTotal + ' correct'"></span>
           </div>
@@ -333,6 +355,22 @@
             ></span>
             <span class="text-xs text-gray-400" x-text="currentProblem?.concept"></span>
           </div>
+
+          {# US-010: Reflection banner for review_own_errors #}
+          <template x-if="currentProblem?.is_reflection">
+            <div class="mb-4 px-4 py-3 bg-rose-50 border border-rose-200 rounded-lg">
+              <p class="text-sm text-rose-700 font-medium">Ungraded Reflection</p>
+              <p class="text-xs text-rose-600 mt-1">This is a self-reflection exercise. Explain what went wrong in your own words — there is no right or wrong answer here.</p>
+            </div>
+          </template>
+
+          {# US-010: Find-the-mistake instruction banner #}
+          <template x-if="currentProblem?.problem_type === 'find_the_mistake' && !currentProblem?.is_reflection">
+            <div class="mb-4 px-4 py-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <p class="text-sm text-orange-700 font-medium">Find the Mistake</p>
+              <p class="text-xs text-orange-600 mt-1">The worked solution below contains one deliberate error. Identify the incorrect step and explain the correction.</p>
+            </div>
+          </template>
 
           {# Problem text with KaTeX rendering #}
           <div x-ref="problemArea" class="mb-6">
@@ -358,27 +396,41 @@
             </div>
           </template>
 
-          {# Free-form answer input — math field + text toggle #}
+          {# Free-form answer input — math / text / photo toggle #}
           <template x-if="!currentProblem?.choices || currentProblem.choices.length === 0">
             <div class="mb-6">
-              {# Toggle between math and text input #}
+              {# Toggle between math, text, and photo input #}
               <div class="flex items-center gap-2 mb-2">
                 <button
-                  @click="mathMode = true"
-                  :class="mathMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
+                  @click="mathMode = true; photoMode = false"
+                  :class="mathMode && !photoMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
                   class="px-3 py-1 text-xs font-medium rounded-md border transition-colors"
                   :disabled="answered"
                 >Math</button>
                 <button
-                  @click="mathMode = false"
-                  :class="!mathMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
+                  @click="mathMode = false; photoMode = false"
+                  :class="!mathMode && !photoMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
                   class="px-3 py-1 text-xs font-medium rounded-md border transition-colors"
                   :disabled="answered"
                 >Text</button>
+                <button
+                  @click="photoMode = true; mathMode = false"
+                  :class="photoMode ? 'bg-mitty-100 text-mitty-700 border-mitty-300' : 'bg-white text-gray-500 border-gray-200'"
+                  class="px-3 py-1 text-xs font-medium rounded-md border transition-colors"
+                  :disabled="answered"
+                >
+                  <span class="flex items-center gap-1">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    Photo
+                  </span>
+                </button>
               </div>
 
               {# MathLive math-field #}
-              <div x-show="mathMode" x-ref="mathFieldWrap">
+              <div x-show="mathMode && !photoMode" x-ref="mathFieldWrap">
                 <math-field
                   x-ref="mathField"
                   virtual-keyboard-mode="manual"
@@ -389,7 +441,7 @@
               </div>
 
               {# Plain text fallback #}
-              <div x-show="!mathMode">
+              <div x-show="!mathMode && !photoMode">
                 <textarea
                   x-model="studentAnswer"
                   :disabled="answered"
@@ -399,51 +451,161 @@
                   placeholder="Type your answer..."
                 ></textarea>
               </div>
+
+              {# Photo capture / upload #}
+              <div x-show="photoMode">
+                <template x-if="!capturedImage">
+                  <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                    <svg class="mx-auto w-10 h-10 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <p class="text-sm text-gray-600 mb-3">Take a photo of your handwritten work</p>
+                    <div class="flex flex-col sm:flex-row items-center justify-center gap-2">
+                      <label class="cursor-pointer px-4 py-2 bg-mitty-600 hover:bg-mitty-700 text-white text-sm font-medium rounded-lg transition-colors">
+                        <span class="flex items-center gap-1.5">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/>
+                          </svg>
+                          Take Photo
+                        </span>
+                        <input type="file" accept="image/*" capture="environment" class="hidden"
+                          @change="handlePhotoCapture($event)" :disabled="answered">
+                      </label>
+                      <label class="cursor-pointer px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 text-sm font-medium rounded-lg border border-gray-300 transition-colors">
+                        <span class="flex items-center gap-1.5">
+                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                          </svg>
+                          Upload Image
+                        </span>
+                        <input type="file" accept="image/*" class="hidden"
+                          @change="handlePhotoCapture($event)" :disabled="answered">
+                      </label>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-3">Write your work on paper, then snap a photo</p>
+                  </div>
+                </template>
+                <template x-if="capturedImage">
+                  <div class="relative">
+                    <img :src="capturedImage.dataUrl" class="w-full rounded-lg border border-gray-200 max-h-64 object-contain bg-gray-50">
+                    <button
+                      x-show="!answered"
+                      @click="capturedImage = null; studentAnswer = ''"
+                      class="absolute top-2 right-2 p-1.5 bg-white/90 hover:bg-white rounded-full shadow-sm border border-gray-200 transition-colors"
+                      title="Remove photo"
+                    >
+                      <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                    <p class="text-xs text-gray-500 mt-2 text-center">Photo captured — ready to submit</p>
+                  </div>
+                </template>
+              </div>
             </div>
           </template>
 
           {# Submit button (before answer) #}
           <div x-show="!answered">
-            <button
-              @click="submitAnswer()"
-              :disabled="!studentAnswer || submitting"
-              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
-            >
-              <span x-show="!submitting">Submit Answer</span>
-              <span x-show="submitting" class="flex items-center justify-center gap-2">
-                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                Checking...
-              </span>
-            </button>
+            {# US-010: Reflection submit (ungraded) #}
+            <template x-if="currentProblem?.is_reflection">
+              <div class="flex gap-2">
+                <button
+                  @click="submitReflection()"
+                  :disabled="!studentAnswer || submitting"
+                  class="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                >
+                  <span x-show="!submitting">Submit Reflection</span>
+                  <span x-show="submitting" class="flex items-center justify-center gap-2">
+                    <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                    Saving...
+                  </span>
+                </button>
+                <button
+                  @click="skipReflection()"
+                  class="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+                >
+                  Skip
+                </button>
+              </div>
+            </template>
+            {# Standard submit #}
+            <template x-if="!currentProblem?.is_reflection">
+              <button
+                @click="submitAnswer()"
+                :disabled="(!studentAnswer && !capturedImage) || submitting"
+                class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+              >
+                <span x-show="!submitting" x-text="capturedImage ? 'Submit Photo' : 'Submit Answer'">Submit Answer</span>
+                <span x-show="submitting" class="flex items-center justify-center gap-2">
+                  <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  <span x-text="capturedImage ? 'Reading your work...' : 'Checking...'">Checking...</span>
+                </span>
+              </button>
+            </template>
           </div>
         </div>
 
         {# Feedback display (after answer) #}
-        <div x-show="answered && lastResult" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
-          <div class="flex items-center gap-3 mb-4">
-            <div
-              class="w-10 h-10 rounded-full flex items-center justify-center text-lg"
-              :class="lastResult?.is_correct ? 'bg-emerald-100' : 'bg-red-100'"
-            >
-              <span x-text="lastResult?.is_correct ? '\u2713' : '\u2717'"></span>
+        <div x-show="answered && lastResult" x-data="{ showWorked: false }" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-4">
+          {# US-010: Reflection acknowledgment (ungraded) #}
+          <template x-if="lastResult?.is_reflection">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm bg-rose-100">
+                <span>&#9998;</span>
+              </div>
+              <p class="text-rose-700 font-medium" x-text="lastResult?.explanation"></p>
             </div>
-            <div>
-              <p
-                class="font-semibold"
-                :class="lastResult?.is_correct ? 'text-emerald-700' : 'text-red-700'"
-                x-text="lastResult?.is_correct ? 'Correct!' : 'Incorrect'"
-              ></p>
-              <p class="text-xs text-gray-500" x-text="'Score: ' + Math.round((lastResult?.score || 0) * 100) + '%'"></p>
-            </div>
-          </div>
+          </template>
 
-          {# Explanation #}
-          <div x-ref="feedbackArea" class="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4">
-            <p class="text-sm text-gray-700 leading-relaxed" x-text="lastResult?.explanation" x-effect="renderMath()"></p>
-          </div>
+          {# Correct answer feedback: brief confirmation + answer #}
+          <template x-if="lastResult?.is_correct && !lastResult?.is_reflection">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm bg-emerald-100">
+                <span>&#10003;</span>
+              </div>
+              <p x-ref="feedbackArea" class="text-emerald-700 font-medium" x-effect="renderMath()">
+                Correct! Answer: <span x-text="lastResult?.correct_answer || studentAnswer"></span>
+              </p>
+            </div>
+          </template>
+
+          {# Wrong answer feedback: one-line summary + correct answer + expandable worked solution #}
+          <template x-if="!lastResult?.is_correct">
+            <div>
+              <div class="flex items-center gap-3 mb-2">
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm bg-red-100">
+                  <span>&#10007;</span>
+                </div>
+                <div x-ref="feedbackArea" x-effect="renderMath()">
+                  <p class="text-red-700 font-medium" x-text="lastResult?.explanation"></p>
+                  <div class="text-sm text-gray-700 mt-1">
+                    <span class="text-gray-500">Correct answer:</span>
+                    <p class="font-medium whitespace-pre-wrap mt-0.5" x-text="lastResult?.correct_answer"></p>
+                  </div>
+                </div>
+              </div>
+
+              {# Expandable worked solution (collapsed by default) #}
+              <template x-if="lastResult?.worked_solution">
+                <div class="mt-3">
+                  <button
+                    @click="showWorked = !showWorked"
+                    class="text-sm text-mitty-600 hover:text-mitty-700 font-medium transition-colors"
+                    x-text="showWorked ? 'Hide worked solution' : 'Show worked solution'"
+                  ></button>
+                  <div x-show="showWorked" x-transition class="mt-2 bg-gray-50 rounded-lg p-4 border border-gray-200">
+                    <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap" x-text="lastResult?.worked_solution" x-effect="renderMath()"></p>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
 
           {# Next problem / skip phase / complete buttons #}
-          <div class="flex gap-2">
+          <div class="flex gap-2 mt-4">
             <button
               @click="nextProblem()"
               class="flex-1 py-2.5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
@@ -471,6 +633,133 @@
         <div x-show="sessionError" class="p-4 bg-red-50 border border-red-200 rounded-xl mb-4">
           <p class="text-sm text-red-700" x-text="sessionError"></p>
         </div>
+      </div>
+
+      {# ════════════════════════════════════════════
+         View 3b: Confidence Check (US-009)
+         ════════════════════════════════════════════ #}
+      <div x-show="view === 'confidence_check'">
+
+        {# ── Pre-focused_practice: "How confident on [concept]?" ── #}
+        <template x-if="confidenceCheckType === 'pre_focused'">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-2">Confidence Check</h2>
+            <p class="text-sm text-gray-500 mb-6">Before we start focused practice, how confident are you on each concept? (1 = not at all, 5 = very confident)</p>
+
+            <div class="space-y-4 mb-6">
+              <template x-for="concept in selectedConcepts" :key="'conf-pre-' + concept">
+                <div class="flex items-center justify-between gap-4 bg-gray-50 rounded-lg p-3">
+                  <span class="text-sm font-medium text-gray-800 flex-1" x-text="concept"></span>
+                  <div class="flex gap-1">
+                    <template x-for="n in [1,2,3,4,5]" :key="'r-' + concept + '-' + n">
+                      <button
+                        @click="conceptConfidenceRatings[concept] = n"
+                        class="w-9 h-9 rounded-lg text-sm font-medium transition-colors border"
+                        :class="conceptConfidenceRatings[concept] === n
+                          ? 'bg-mitty-600 text-white border-mitty-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-mitty-400'"
+                        x-text="n"
+                      ></button>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <button
+              @click="submitConfidenceAndProceed()"
+              :disabled="confidenceSubmitting || !allConceptsRated()"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+            >
+              <span x-show="!confidenceSubmitting">Continue to Focused Practice</span>
+              <span x-show="confidenceSubmitting" class="flex items-center justify-center gap-2">
+                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                Saving...
+              </span>
+            </button>
+          </div>
+        </template>
+
+        {# ── Post-focused_practice: "You rated X/5, scored Y/Z" ── #}
+        <template x-if="confidenceCheckType === 'post_focused'">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-2">Confidence vs Performance</h2>
+            <p class="text-sm text-gray-500 mb-6">Here is how your confidence compared to your actual performance in focused practice.</p>
+
+            <div class="space-y-3 mb-6">
+              <template x-for="row in postFocusedGaps" :key="'gap-' + row.concept">
+                <div class="flex items-center justify-between bg-gray-50 rounded-lg p-3">
+                  <div class="flex-1">
+                    <p class="text-sm font-medium text-gray-800" x-text="row.concept"></p>
+                    <p class="text-xs text-gray-500 mt-0.5">
+                      Confidence: <span class="font-semibold" x-text="row.rating + '/5'"></span>
+                      &middot;
+                      Score: <span class="font-semibold" x-text="row.correct + '/' + row.total"></span>
+                    </p>
+                  </div>
+                  <span
+                    class="px-2 py-0.5 rounded-full text-xs font-medium"
+                    :class="{
+                      'bg-emerald-100 text-emerald-700': row.gap_label === 'calibrated',
+                      'bg-amber-100 text-amber-700': row.gap_label === 'overconfident',
+                      'bg-blue-100 text-blue-700': row.gap_label === 'underconfident',
+                      'bg-gray-100 text-gray-500': !row.gap_label,
+                    }"
+                    x-text="row.gap_label === 'calibrated' ? 'Well calibrated' : row.gap_label === 'overconfident' ? 'Overconfident' : row.gap_label === 'underconfident' ? 'Underconfident' : 'No data'"
+                  ></span>
+                </div>
+              </template>
+            </div>
+
+            <button
+              @click="proceedAfterPostFocused()"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+            >
+              Continue to Error Analysis
+            </button>
+          </div>
+        </template>
+
+        {# ── Pre-mixed_test: brief confidence check across all concepts ── #}
+        <template x-if="confidenceCheckType === 'pre_mixed'">
+          <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-2">Quick Confidence Check</h2>
+            <p class="text-sm text-gray-500 mb-6">Before the mixed test, rate your current confidence on each concept.</p>
+
+            <div class="space-y-4 mb-6">
+              <template x-for="concept in selectedConcepts" :key="'conf-mix-' + concept">
+                <div class="flex items-center justify-between gap-4 bg-gray-50 rounded-lg p-3">
+                  <span class="text-sm font-medium text-gray-800 flex-1" x-text="concept"></span>
+                  <div class="flex gap-1">
+                    <template x-for="n in [1,2,3,4,5]" :key="'mr-' + concept + '-' + n">
+                      <button
+                        @click="conceptConfidenceRatings[concept] = n"
+                        class="w-9 h-9 rounded-lg text-sm font-medium transition-colors border"
+                        :class="conceptConfidenceRatings[concept] === n
+                          ? 'bg-mitty-600 text-white border-mitty-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-mitty-400'"
+                        x-text="n"
+                      ></button>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <button
+              @click="submitConfidenceAndProceed()"
+              :disabled="confidenceSubmitting || !allConceptsRated()"
+              class="w-full py-2.5 bg-mitty-600 hover:bg-mitty-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+            >
+              <span x-show="!confidenceSubmitting">Continue to Mixed Test</span>
+              <span x-show="confidenceSubmitting" class="flex items-center justify-center gap-2">
+                <span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                Saving...
+              </span>
+            </button>
+          </div>
+        </template>
+
       </div>
 
       {# ════════════════════════════════════════════
@@ -568,11 +857,11 @@
           </div>
         </template>
 
-        {# Confidence calibration chart #}
+        {# Confidence calibration chart (aggregate) #}
         <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 mb-6">
           <h3 class="text-sm font-semibold text-gray-900 mb-3">Confidence Calibration</h3>
           <p class="text-sm text-gray-500 mb-4" x-text="calibrationMessage"></p>
-          <div class="flex items-end gap-4 justify-center">
+          <div class="flex items-end gap-4 justify-center mb-6">
             <div class="text-center">
               <div class="w-16 bg-gray-100 rounded-t-lg relative" style="height: 120px;">
                 <div
@@ -594,22 +883,113 @@
               <p class="text-sm font-medium text-gray-700" x-text="Math.round(avgAccuracy * 100) + '%'"></p>
             </div>
           </div>
+
+          {# Per-concept confidence comparison table (US-009 Phase 5) #}
+          <template x-if="summaryData?.confidence_comparison && summaryData.confidence_comparison.length > 0">
+            <div>
+              <h4 class="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-3">Per-Concept Breakdown</h4>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="border-b border-gray-200">
+                      <th class="text-left py-2 pr-4 text-xs font-medium text-gray-500">Concept</th>
+                      <th class="text-center py-2 px-2 text-xs font-medium text-gray-500">Checkpoints</th>
+                      <th class="text-center py-2 px-2 text-xs font-medium text-gray-500">Avg Confidence</th>
+                      <th class="text-center py-2 px-2 text-xs font-medium text-gray-500">Accuracy</th>
+                      <th class="text-center py-2 pl-2 text-xs font-medium text-gray-500">Calibration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="row in summaryData.confidence_comparison" :key="'cc-' + row.concept">
+                      <tr class="border-b border-gray-100">
+                        <td class="py-2 pr-4 text-gray-800 font-medium" x-text="row.concept"></td>
+                        <td class="py-2 px-2 text-center">
+                          <template x-if="row.checkpoints && row.checkpoints.length > 0">
+                            <div class="flex gap-1 justify-center">
+                              <template x-for="(cp, ci) in row.checkpoints" :key="'cp-' + ci">
+                                <span
+                                  class="inline-block w-6 h-6 rounded text-xs font-medium leading-6 text-center"
+                                  :class="cp.rating >= 4 ? 'bg-emerald-100 text-emerald-700' : cp.rating >= 3 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'"
+                                  :title="cp.phase"
+                                  x-text="cp.rating"
+                                ></span>
+                              </template>
+                            </div>
+                          </template>
+                          <template x-if="!row.checkpoints || row.checkpoints.length === 0">
+                            <span class="text-gray-400">--</span>
+                          </template>
+                        </td>
+                        <td class="py-2 px-2 text-center" x-text="row.avg_confidence !== null ? Math.round(row.avg_confidence * 100) + '%' : '--'"></td>
+                        <td class="py-2 px-2 text-center" x-text="row.attempted > 0 ? Math.round(row.accuracy * 100) + '%' : '--'"></td>
+                        <td class="py-2 pl-2 text-center">
+                          <span
+                            class="px-2 py-0.5 rounded-full text-xs font-medium"
+                            :class="{
+                              'bg-emerald-100 text-emerald-700': row.gap_label === 'calibrated',
+                              'bg-amber-100 text-amber-700': row.gap_label === 'overconfident',
+                              'bg-blue-100 text-blue-700': row.gap_label === 'underconfident',
+                              'bg-gray-100 text-gray-500': !row.gap_label,
+                            }"
+                            x-text="row.gap_label === 'calibrated' ? 'Calibrated' : row.gap_label === 'overconfident' ? 'Over' : row.gap_label === 'underconfident' ? 'Under' : '--'"
+                          ></span>
+                        </td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
         </div>
+
+        {# Post-session suggestion (US-006) #}
+        <template x-if="postSessionSuggestionText">
+          <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl mb-6 flex items-start gap-3">
+            <svg class="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <p class="text-sm font-medium text-emerald-800" x-text="postSessionSuggestionText"></p>
+          </div>
+        </template>
 
         {# Action buttons #}
         <div class="flex gap-3">
-          <button
-            @click="resetToSetup()"
-            class="flex-1 py-2.5 text-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
-          >
-            Start New Session
-          </button>
-          <a
-            href="/"
-            class="flex-1 py-2.5 text-center bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
-          >
-            Back to Dashboard
-          </a>
+          {# Back to Mastery Hub when launched from Mastery (US-006) #}
+          <template x-if="fromMastery">
+            <a
+              :href="masteryReturnUrl()"
+              class="flex-1 py-2.5 text-center bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+            >
+              Back to Mastery Hub
+            </a>
+          </template>
+          {# Default: Start New Session + Back to Dashboard #}
+          <template x-if="!fromMastery">
+            <button
+              @click="resetToSetup()"
+              class="flex-1 py-2.5 text-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
+            >
+              Start New Session
+            </button>
+          </template>
+          <template x-if="!fromMastery">
+            <a
+              href="/"
+              class="flex-1 py-2.5 text-center bg-mitty-600 hover:bg-mitty-700 text-white font-medium rounded-lg transition-colors"
+            >
+              Back to Dashboard
+            </a>
+          </template>
+          {# Quick Review CTA (US-006) #}
+          <template x-if="fromMastery && weakestSummaryConcept()">
+            <button
+              @click="startQuickReviewFromSummary()"
+              class="flex-1 py-2.5 text-center bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors"
+            >
+              Quick Review
+            </button>
+          </template>
         </div>
       </div>
 
@@ -629,15 +1009,18 @@
     return {
       session: null,
 
-      // View state: setup | mastery | session | summary
+      // View state: setup | mastery | session | confidence_check | summary
       view: 'setup',
 
       // ── Setup state ──
       courses: [],
-      assignments: [],
+      assessments: [],
+      homeworkList: [],
       selectedCourseId: '',
-      selectedAssignmentId: '',
+      selectedAssessmentId: '',
       analyzing: false,
+      currentAnalysisIndex: 0,
+      totalAnalysisCount: 0,
       analysisEvents: [],
       analysisComplete: false,
       analysisError: false,
@@ -656,9 +1039,13 @@
       currentProblem: null,
       studentAnswer: '',
       answered: false,
-      mathMode: true,
+      mathMode: false,
+      photoMode: false,
+      capturedImage: null,  // { dataUrl, base64 }
       submitting: false,
       problemLoading: false,
+      _prefetchedProblem: null,
+      _prefetchPromise: null,
       lastResult: null,
       phaseTotal: 0,
       phaseCorrect: 0,
@@ -672,6 +1059,15 @@
       // ── Confidence tracking ──
       confidenceRatings: [],
       answerResults: [],
+      // Confidence check state (US-009)
+      confidenceCheckType: '',  // 'pre_focused', 'post_focused', 'pre_mixed'
+      conceptConfidenceRatings: {},  // { concept: rating(1-5) }
+      confidenceSubmitting: false,
+      postFocusedGaps: [],  // after focused_practice: [{concept, rating, correct, total, gap_label}]
+      confidenceComparison: [],  // full comparison from summary
+
+      // Whether user navigated from Mastery Hub (US-006 return flow)
+      fromMastery: false,
 
       // Phase definitions
       phases: [
@@ -693,7 +1089,24 @@
           if (session && this.courses.length === 0) this.fetchCourses();
         });
 
-        if (this.session) this.fetchCourses();
+        if (this.session) {
+          this.fetchCourses();
+
+          // US-006: Check for session_id param (created by Mastery Hub)
+          const urlParams = new URLSearchParams(window.location.search);
+          const sessionIdParam = urlParams.get('session_id');
+          this.fromMastery = urlParams.get('from') === 'mastery';
+
+          if (sessionIdParam) {
+            // Resume a pre-created session
+            this.sessionId = sessionIdParam;
+            this.view = 'session';
+            // Clean URL
+            window.history.replaceState({}, '', '/test-prep');
+            // Load the session and first problem
+            await this.resumeSession(sessionIdParam);
+          }
+        }
       },
 
       async signOut() {
@@ -706,7 +1119,17 @@
 
       async fetchCourses() {
         try {
-          const CURRENT_TERM = '2025-2026 Second Semester';
+          // Fetch current term from config (same pattern as dashboard.html)
+          const DEFAULT_TERM = '2025-2026 Second Semester';
+          let currentTerm = DEFAULT_TERM;
+          try {
+            const cfgResp = await fetch('/config/');
+            if (cfgResp.ok) {
+              const cfg = await cfgResp.json();
+              currentTerm = cfg.current_term_name || DEFAULT_TERM;
+            }
+          } catch { /* use default */ }
+
           const { data, error } = await supabase
             .from('enrollments')
             .select('course_id, courses (id, name, workflow_state, term_name)')
@@ -718,7 +1141,7 @@
           this.courses = (data || [])
             .filter(e => e.courses
               && e.courses.workflow_state === 'available'
-              && e.courses.term_name === CURRENT_TERM)
+              && e.courses.term_name === currentTerm)
             .map(e => ({ id: e.courses.id, name: e.courses.name }))
             .sort((a, b) => a.name.localeCompare(b.name));
           // Deduplicate
@@ -733,93 +1156,174 @@
         }
       },
 
-      async fetchAssignments() {
+      async fetchAssessments() {
         if (!this.selectedCourseId) {
-          this.assignments = [];
+          this.assessments = [];
           return;
         }
         try {
           const { data, error } = await supabase
-            .from('assignments')
-            .select('id, name')
+            .from('assessments')
+            .select('id, name, assessment_type, scheduled_date')
             .eq('course_id', parseInt(this.selectedCourseId))
-            .order('due_at', { ascending: false });
+            .in('assessment_type', ['test', 'quiz'])
+            .order('scheduled_date', { ascending: false });
           if (error) {
-            this.setupError = 'Failed to load assignments.';
+            this.setupError = 'Failed to load assessments.';
             return;
           }
-          this.assignments = data || [];
+          this.assessments = data || [];
         } catch (err) {
-          this.setupError = 'Failed to load assignments: ' + err.message;
+          this.setupError = 'Failed to load assessments: ' + err.message;
         }
+      },
+
+      async fetchHomework() {
+        if (!this.selectedCourseId) {
+          this.homeworkList = [];
+          return;
+        }
+        try {
+          // Fetch assignments for this course
+          const { data: assignments, error: assignErr } = await supabase
+            .from('assignments')
+            .select('id, name, due_at')
+            .eq('course_id', parseInt(this.selectedCourseId))
+            .order('due_at', { ascending: true });
+          if (assignErr) {
+            this.setupError = 'Failed to load homework.';
+            return;
+          }
+
+          // Fetch existing homework analyses to mark already-analyzed ones
+          const assignmentIds = (assignments || []).map(a => a.id);
+          let analyzedIds = new Set();
+          if (assignmentIds.length > 0) {
+            const { data: analyses, error: analysisErr } = await supabase
+              .from('homework_analyses')
+              .select('assignment_id')
+              .in('assignment_id', assignmentIds);
+            if (!analysisErr && analyses) {
+              analyzedIds = new Set(analyses.map(a => a.assignment_id));
+            }
+          }
+
+          this.homeworkList = (assignments || []).map(a => ({
+            id: a.id,
+            name: a.name,
+            due_at: a.due_at,
+            selected: false,
+            analyzed: analyzedIds.has(a.id),
+          }));
+        } catch (err) {
+          this.setupError = 'Failed to load homework: ' + err.message;
+        }
+      },
+
+      toggleAllHomework() {
+        const allSelected = this.homeworkList.every(h => h.selected);
+        this.homeworkList.forEach(h => h.selected = !allSelected);
+      },
+
+      unanalyzedSelectedCount() {
+        return this.homeworkList.filter(h => h.selected && !h.analyzed).length;
       },
 
       // ── Homework Analysis (SSE) ──
 
       async analyzeHomework() {
-        if (!this.selectedCourseId || !this.selectedAssignmentId || this.analyzing) return;
+        if (!this.selectedCourseId || !this.selectedAssessmentId || this.analyzing) return;
         const token = this.session?.access_token;
         if (!token) {
           this.setupError = 'Not authenticated.';
           return;
         }
 
+        // Get un-analyzed selected homework
+        const toAnalyze = this.homeworkList.filter(h => h.selected && !h.analyzed);
+        if (toAnalyze.length === 0) return;
+
         this.analyzing = true;
         this.analysisEvents = [];
         this.analysisComplete = false;
         this.analysisError = false;
         this.setupError = '';
+        this.currentAnalysisIndex = 0;
+        this.totalAnalysisCount = toAnalyze.length;
 
         try {
-          const resp = await fetch('/test-prep/analyze-homework', {
-            method: 'POST',
-            headers: {
-              'Authorization': 'Bearer ' + token,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              assignment_id: parseInt(this.selectedAssignmentId),
-              course_id: parseInt(this.selectedCourseId),
-            }),
-          });
+          for (let i = 0; i < toAnalyze.length; i++) {
+            this.currentAnalysisIndex = i;
+            const hw = toAnalyze[i];
 
-          if (!resp.ok) {
-            const errData = await resp.json().catch(() => null);
-            const msg = errData?.detail?.message || errData?.detail || 'Analysis request failed';
-            this.setupError = typeof msg === 'string' ? msg : JSON.stringify(msg);
-            this.analyzing = false;
-            return;
-          }
+            // Add a separator event for multi-homework analysis
+            if (toAnalyze.length > 1) {
+              this.analysisEvents.push({
+                status: 'started',
+                message: `Analyzing "${hw.name}" (${i + 1} of ${toAnalyze.length})...`,
+              });
+            }
 
-          // Read SSE stream
-          const reader = resp.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
+            const resp = await fetch('/test-prep/analyze-homework', {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Bearer ' + token,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                assignment_id: parseInt(hw.id),
+                course_id: parseInt(this.selectedCourseId),
+              }),
+            });
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+            if (!resp.ok) {
+              const errData = await resp.json().catch(() => null);
+              const msg = errData?.detail?.message || errData?.detail || 'Analysis request failed';
+              this.analysisEvents.push({
+                status: 'error',
+                message: `Failed to analyze "${hw.name}": ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`,
+              });
+              // Continue with remaining homework
+              continue;
+            }
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+            // Read SSE stream
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                try {
-                  const evt = JSON.parse(line.slice(6));
-                  this.analysisEvents.push(evt);
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
 
-                  if (evt.status === 'complete') {
-                    this.analysisComplete = true;
-                  } else if (evt.status === 'error') {
-                    this.analysisError = true;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const evt = JSON.parse(line.slice(6));
+                    this.analysisEvents.push(evt);
+
+                    if (evt.status === 'error') {
+                      this.analysisError = true;
+                    }
+                  } catch (parseErr) {
+                    // Skip malformed events
                   }
-                } catch (parseErr) {
-                  // Skip malformed events
                 }
               }
             }
+
+            // Mark this homework as analyzed
+            hw.analyzed = true;
+          }
+
+          // All done — auto-proceed to mastery profile
+          this.analysisComplete = true;
+          if (!this.analysisError) {
+            await this.fetchMasteryProfile();
           }
         } catch (err) {
           this.setupError = 'Analysis failed: ' + err.message;
@@ -842,7 +1346,7 @@
 
         try {
           const resp = await fetch(
-            `/test-prep/mastery-profile?course_id=${this.selectedCourseId}&assignment_id=${this.selectedAssignmentId}`,
+            `/test-prep/mastery-profile?course_id=${this.selectedCourseId}&assignment_id=${this.selectedAssessmentId}`,
             { headers: { 'Authorization': 'Bearer ' + token } }
           );
 
@@ -931,6 +1435,25 @@
         }
       },
 
+      _parseProblem(problem) {
+        // Detect phase auto-advance from server
+        if (problem.phase && problem.phase !== this.currentPhase) {
+          this.currentPhase = problem.phase;
+          this.phaseTotal = 0;
+          this.phaseCorrect = 0;
+        }
+        return {
+          id: problem.id,
+          problem_type: problem.problem_type || 'free_response',
+          concept: problem.concept || '',
+          difficulty: problem.difficulty || this.currentDifficulty,
+          prompt: problem.prompt || '',
+          choices: problem.choices || null,
+          correct_answer: null,
+          is_reflection: problem.is_reflection || false,
+        };
+      },
+
       async fetchNextProblem(token) {
         if (!this.sessionId) return;
         if (!token) token = this.session?.access_token;
@@ -939,12 +1462,33 @@
         this.problemLoading = true;
         this.currentProblem = null;
         this.studentAnswer = '';
+        this.capturedImage = null;
         this.answered = false;
         this.lastResult = null;
         // Clear the math field if it exists
         if (this.$refs.mathField) this.$refs.mathField.setValue('');
 
         try {
+          // Use prefetched problem if available
+          if (this._prefetchedProblem) {
+            this.currentProblem = this._prefetchedProblem;
+            this._prefetchedProblem = null;
+            this._prefetchPromise = null;
+            return;
+          }
+          // Wait for in-flight prefetch if one is running
+          if (this._prefetchPromise) {
+            try {
+              const problem = await this._prefetchPromise;
+              this._prefetchPromise = null;
+              if (problem) {
+                this.currentProblem = problem;
+                return;
+              }
+            } catch { /* fall through to fresh fetch */ }
+            this._prefetchPromise = null;
+          }
+
           const resp = await fetch(`/test-prep/sessions/${this.sessionId}/next-problem`, {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + token },
@@ -956,21 +1500,30 @@
             return;
           }
 
-          const problem = await resp.json();
-          this.currentProblem = {
-            id: problem.id,
-            problem_type: problem.problem_type || 'free_response',
-            concept: problem.concept || '',
-            difficulty: problem.difficulty || this.currentDifficulty,
-            prompt: problem.prompt || '',
-            choices: problem.choices || null,
-            correct_answer: null,
-          };
+          this.currentProblem = this._parseProblem(await resp.json());
         } catch (err) {
           this.sessionError = 'Failed to load problem: ' + err.message;
         } finally {
           this.problemLoading = false;
         }
+      },
+
+      // Pre-fetch the next problem while the student reviews feedback
+      _startPrefetch() {
+        if (!this.sessionId) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this._prefetchedProblem = null;
+        this._prefetchPromise = fetch(`/test-prep/sessions/${this.sessionId}/next-problem`, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + token },
+        }).then(async (resp) => {
+          if (!resp.ok) return null;
+          const problem = this._parseProblem(await resp.json());
+          this._prefetchedProblem = problem;
+          return problem;
+        }).catch(() => null);
       },
 
       async refreshSession() {
@@ -996,10 +1549,74 @@
         }
       },
 
+      // ── Resume pre-created session (US-006) ──
+
+      async resumeSession(sessionId) {
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${sessionId}`, {
+            headers: { 'Authorization': 'Bearer ' + token },
+          });
+          if (!resp.ok) {
+            this.sessionError = 'Failed to load session.';
+            this.view = 'setup';
+            return;
+          }
+          const sessionData = await resp.json();
+          this.sessionId = sessionData.id;
+          this.currentPhase = sessionData.phase_reached || 'diagnostic';
+          this.currentDifficulty = sessionData.state_json?.difficulty || 0.5;
+          this.selectedCourseId = String(sessionData.course_id || '');
+          this.selectedConcepts = sessionData.state_json?.concepts || [];
+          this.phaseTotal = 0;
+          this.phaseCorrect = 0;
+          this.confidenceRatings = [];
+          this.answerResults = [];
+          this.view = 'session';
+          await this.fetchNextProblem(token);
+        } catch (err) {
+          this.sessionError = 'Failed to resume session: ' + err.message;
+          this.view = 'setup';
+        }
+      },
+
       // ── Answer Submission ──
 
+      // ── Photo capture handler ──
+
+      handlePhotoCapture(event) {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        // Validate file type and size (max 10 MB)
+        if (!file.type.startsWith('image/')) {
+          this.sessionError = 'Please select an image file.';
+          return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          this.sessionError = 'Image too large (max 10 MB).';
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          this.capturedImage = {
+            dataUrl: e.target.result,
+            base64: e.target.result,  // includes data:image/...;base64, prefix
+          };
+          // Set a placeholder so submit button enables
+          this.studentAnswer = '[photo submitted]';
+        };
+        reader.readAsDataURL(file);
+
+        // Reset file input so same file can be re-selected
+        event.target.value = '';
+      },
+
       async submitAnswer() {
-        if (!this.studentAnswer || this.submitting || !this.currentProblem) return;
+        if ((!this.studentAnswer && !this.capturedImage) || this.submitting || !this.currentProblem) return;
         const token = this.session?.access_token;
         if (!token) return;
 
@@ -1007,18 +1624,25 @@
         this.sessionError = '';
 
         try {
+          const payload = {
+            session_id: this.sessionId,
+            problem_id: this.currentProblem.id,
+            student_answer: this.capturedImage ? '[photo]' : this.studentAnswer,
+            time_spent_seconds: null,
+          };
+
+          // Include image if photo was captured
+          if (this.capturedImage) {
+            payload.image_base64 = this.capturedImage.base64;
+          }
+
           const resp = await fetch(`/test-prep/sessions/${this.sessionId}/answer`, {
             method: 'POST',
             headers: {
               'Authorization': 'Bearer ' + token,
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-              session_id: this.sessionId,
-              problem_id: this.currentProblem.id,
-              student_answer: this.studentAnswer,
-              time_spent_seconds: null,
-            }),
+            body: JSON.stringify(payload),
           });
 
           if (!resp.ok) {
@@ -1035,6 +1659,9 @@
 
           // Track for calibration
           this.answerResults.push(result.is_correct ? 1 : 0);
+
+          // Pre-fetch next problem while student reviews feedback
+          this._startPrefetch();
         } catch (err) {
           this.sessionError = 'Failed to submit answer: ' + err.message;
         } finally {
@@ -1042,14 +1669,105 @@
         }
       },
 
+      // US-010: Submit ungraded reflection (review_own_errors)
+      async submitReflection() {
+        if (!this.studentAnswer || this.submitting || !this.currentProblem) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.submitting = true;
+        this.sessionError = '';
+
+        try {
+          // Record the reflection answer but treat it as ungraded
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/answer`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              session_id: this.sessionId,
+              problem_id: this.currentProblem.id,
+              student_answer: this.studentAnswer,
+              time_spent_seconds: null,
+            }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to save reflection.';
+            return;
+          }
+
+          // Show a simple acknowledgment — no correct/wrong judgment
+          this.lastResult = {
+            is_correct: true,
+            score: 1.0,
+            explanation: 'Thank you for reflecting on your work. Self-explanation strengthens understanding.',
+            correct_answer: null,
+            worked_solution: null,
+            is_reflection: true,
+          };
+          this.answered = true;
+          this.phaseTotal++;
+
+          // Pre-fetch next problem while student reviews
+          this._startPrefetch();
+        } catch (err) {
+          this.sessionError = 'Failed to save reflection: ' + err.message;
+        } finally {
+          this.submitting = false;
+        }
+      },
+
+      // US-010: Skip reflection and move to next problem
+      skipReflection() {
+        this.phaseTotal++;
+        this.fetchNextProblem();
+      },
+
       async nextProblem() {
         await this.fetchNextProblem();
       },
 
-      // ── Phase Skip ──
+      // ── Phase Skip (with confidence checks — US-009) ──
 
       async skipPhase() {
         if (this.skippingPhase || !this.sessionId) return;
+
+        // Intercept phase transitions for confidence checks
+        const nextPhase = this._getNextPhase(this.currentPhase);
+
+        // Before focused_practice: show pre-focused confidence check
+        if (nextPhase === 'focused_practice') {
+          this.confidenceCheckType = 'pre_focused';
+          this.conceptConfidenceRatings = {};
+          this.view = 'confidence_check';
+          return;
+        }
+
+        // After focused_practice (going to error_analysis): show gap indicator
+        if (this.currentPhase === 'focused_practice' && nextPhase === 'error_analysis') {
+          this._buildPostFocusedGaps();
+          this.confidenceCheckType = 'post_focused';
+          this.view = 'confidence_check';
+          return;
+        }
+
+        // Before mixed_test: show quick confidence check
+        if (nextPhase === 'mixed_test') {
+          this.confidenceCheckType = 'pre_mixed';
+          this.conceptConfidenceRatings = {};
+          this.view = 'confidence_check';
+          return;
+        }
+
+        // Default: proceed with skip
+        await this._doSkipPhase();
+      },
+
+      async _doSkipPhase() {
         const token = this.session?.access_token;
         if (!token) return;
 
@@ -1065,7 +1783,6 @@
           if (!resp.ok) {
             const errData = await resp.json().catch(() => null);
             if (errData?.detail?.code === 'FINAL_PHASE') {
-              // At final phase, complete instead
               this.completeSession();
               return;
             }
@@ -1078,12 +1795,120 @@
           this.currentDifficulty = sessionData.state_json?.difficulty || this.currentDifficulty;
           this.phaseTotal = 0;
           this.phaseCorrect = 0;
+          this.view = 'session';
           await this.fetchNextProblem(token);
         } catch (err) {
           this.sessionError = 'Failed to skip phase: ' + err.message;
         } finally {
           this.skippingPhase = false;
         }
+      },
+
+      // ── Confidence check helpers (US-009) ──
+
+      _getNextPhase(current) {
+        const order = ['diagnostic', 'focused_practice', 'error_analysis', 'mixed_test', 'calibration'];
+        const idx = order.indexOf(current);
+        return idx < order.length - 1 ? order[idx + 1] : null;
+      },
+
+      allConceptsRated() {
+        return this.selectedConcepts.every(c => this.conceptConfidenceRatings[c] >= 1);
+      },
+
+      async submitConfidenceAndProceed() {
+        if (this.confidenceSubmitting || !this.allConceptsRated()) return;
+        const token = this.session?.access_token;
+        if (!token) return;
+
+        this.confidenceSubmitting = true;
+
+        try {
+          const resp = await fetch(`/test-prep/sessions/${this.sessionId}/confidence`, {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ ratings: this.conceptConfidenceRatings }),
+          });
+
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to save confidence ratings.';
+            this.view = 'session';
+            return;
+          }
+
+          // Update confidence ratings for calibration tracking
+          for (const [concept, rating] of Object.entries(this.conceptConfidenceRatings)) {
+            this.confidenceRatings.push(rating / 5.0);
+          }
+
+          // Proceed to actual phase skip
+          await this._doSkipPhase();
+        } catch (err) {
+          this.sessionError = 'Failed to save confidence: ' + err.message;
+          this.view = 'session';
+        } finally {
+          this.confidenceSubmitting = false;
+        }
+      },
+
+      _buildPostFocusedGaps() {
+        // Build gap data for after focused_practice phase
+        this.postFocusedGaps = this.selectedConcepts.map(concept => {
+          // Find the latest pre_focused confidence rating for this concept
+          const savedRatings = this.confidenceRatings;
+          // Use the conceptConfidenceRatings from the last pre_focused check
+          // We need to look at session state for this
+          const stateConf = this._getLastConfidenceForConcept(concept);
+          const rating = stateConf || 3;  // fallback
+
+          // Get per-concept performance from answer tracking
+          const conceptResults = this._getConceptPerformance(concept);
+
+          const confidenceNorm = rating / 5.0;
+          const accuracy = conceptResults.total > 0 ? conceptResults.correct / conceptResults.total : 0;
+          const gap = confidenceNorm - accuracy;
+          let gap_label = null;
+          if (conceptResults.total > 0) {
+            if (Math.abs(gap) < 0.15) gap_label = 'calibrated';
+            else if (gap > 0) gap_label = 'overconfident';
+            else gap_label = 'underconfident';
+          }
+
+          return {
+            concept,
+            rating,
+            correct: conceptResults.correct,
+            total: conceptResults.total,
+            gap_label,
+          };
+        });
+      },
+
+      _getLastConfidenceForConcept(concept) {
+        // Return the last confidence rating submitted for a concept
+        // from conceptConfidenceRatings (stored during pre_focused check)
+        // We track these locally since the last submission
+        return this.conceptConfidenceRatings[concept] || null;
+      },
+
+      _getConceptPerformance(concept) {
+        // Placeholder: we don't track per-concept results client-side
+        // Use phaseTotal/phaseCorrect as approximation divided evenly
+        // This will be supplemented by server data in the summary view
+        const n = this.selectedConcepts.length || 1;
+        return {
+          correct: Math.round(this.phaseCorrect / n),
+          total: Math.round(this.phaseTotal / n),
+        };
+      },
+
+      proceedAfterPostFocused() {
+        // After viewing the gap indicator, proceed to error_analysis
+        this._doSkipPhase();
       },
 
       // ── Session Complete ──
@@ -1124,16 +1949,23 @@
         this.sessionId = null;
         this.currentProblem = null;
         this.studentAnswer = '';
+        this.capturedImage = null;
         this.answered = false;
         this.lastResult = null;
         this.summaryData = null;
         this.analysisEvents = [];
         this.analysisComplete = false;
         this.analysisError = false;
+        this.currentAnalysisIndex = 0;
+        this.totalAnalysisCount = 0;
         this.phaseTotal = 0;
         this.phaseCorrect = 0;
         this.confidenceRatings = [];
         this.answerResults = [];
+        this.conceptConfidenceRatings = {};
+        this.confidenceCheckType = '';
+        this.postFocusedGaps = [];
+        this.confidenceComparison = [];
         this.sessionError = '';
         this.setupError = '';
       },
@@ -1190,6 +2022,8 @@
           free_response: 'bg-purple-100 text-purple-700',
           worked_example: 'bg-teal-100 text-teal-700',
           error_analysis: 'bg-amber-100 text-amber-700',
+          find_the_mistake: 'bg-orange-100 text-orange-700',
+          review_own_errors: 'bg-rose-100 text-rose-700',
           mixed: 'bg-indigo-100 text-indigo-700',
           calibration: 'bg-pink-100 text-pink-700',
         };
@@ -1202,6 +2036,8 @@
           free_response: 'Free Response',
           worked_example: 'Worked Example',
           error_analysis: 'Error Analysis',
+          find_the_mistake: 'Find the Mistake',
+          review_own_errors: 'Review Your Errors',
           mixed: 'Mixed',
           calibration: 'Calibration',
         };
@@ -1237,6 +2073,95 @@
           return 'You were more confident than your results suggest. Consider reviewing this material more carefully.';
         } else {
           return 'You performed better than expected! You may know more than you think.';
+        }
+      },
+
+      // ── Post-session helpers (US-006) ──
+
+      get postSessionSuggestionText() {
+        if (!this.summaryData?.mastery_profile || this.summaryData.mastery_profile.length === 0) return '';
+        const best = this.bestImprovedConcept();
+        const weakest = this.weakestSummaryConcept();
+        if (!best) return '';
+        const pct = Math.round(best.mastery_level * 100);
+        let text = `You scored ${pct}% on ${best.concept}.`;
+        if (weakest && weakest.concept !== best.concept) {
+          text += ` Next focus: ${weakest.concept}.`;
+        }
+        return text;
+      },
+
+      bestImprovedConcept() {
+        const mp = this.summaryData?.mastery_profile || [];
+        if (mp.length === 0) return null;
+        // Pick concept with best accuracy (highest correct/attempted ratio)
+        return [...mp].sort((a, b) => {
+          const aRate = a.problems_attempted > 0 ? a.problems_correct / a.problems_attempted : 0;
+          const bRate = b.problems_attempted > 0 ? b.problems_correct / b.problems_attempted : 0;
+          return bRate - aRate;
+        })[0];
+      },
+
+      weakestSummaryConcept() {
+        const mp = this.summaryData?.mastery_profile || [];
+        if (mp.length === 0) return null;
+        return [...mp].sort((a, b) => a.mastery_level - b.mastery_level)[0];
+      },
+
+      masteryReturnUrl() {
+        const params = new URLSearchParams();
+        params.set('from_session', '1');
+        const best = this.bestImprovedConcept();
+        const weakest = this.weakestSummaryConcept();
+        if (best) {
+          params.set('improved', best.concept);
+          params.set('delta', String(Math.round(best.mastery_level * 100)));
+        }
+        if (weakest && (!best || weakest.concept !== best.concept)) {
+          params.set('next_focus', weakest.concept);
+        }
+        return '/mastery?' + params.toString();
+      },
+
+      async startQuickReviewFromSummary() {
+        const token = this.session?.access_token;
+        if (!token) return;
+        const weakest = this.weakestSummaryConcept();
+        if (!weakest) return;
+        const courseId = this.selectedCourseId;
+        if (!courseId) return;
+
+        try {
+          const resp = await fetch('/test-prep/sessions', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              course_id: parseInt(courseId),
+              concepts: [weakest.concept],
+              session_type: 'quick',
+            }),
+          });
+          if (!resp.ok) {
+            const errData = await resp.json().catch(() => null);
+            this.sessionError = errData?.detail?.message || 'Failed to create session.';
+            return;
+          }
+          const sessionData = await resp.json();
+          this.sessionId = sessionData.id;
+          this.currentPhase = sessionData.phase_reached || 'diagnostic';
+          this.currentDifficulty = sessionData.state_json?.difficulty || 0.5;
+          this.summaryData = null;
+          this.phaseTotal = 0;
+          this.phaseCorrect = 0;
+          this.confidenceRatings = [];
+          this.answerResults = [];
+          this.view = 'session';
+          await this.fetchNextProblem(token);
+        } catch (err) {
+          this.sessionError = 'Failed to start quick review: ' + err.message;
         }
       },
 

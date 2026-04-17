@@ -131,8 +131,22 @@ def _chain_mock(
 
     chain = MagicMock()
     chain.execute = AsyncMock(return_value=result)
-    for attr in ("select", "eq", "order", "range", "in_"):
+    for attr in (
+        "select",
+        "eq",
+        "order",
+        "range",
+        "in_",
+        "limit",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "is_",
+    ):
         getattr(chain, attr).return_value = chain
+    # .not_ is a property that returns an object supporting .is_(), .eq(), etc.
+    chain.not_ = chain
     return chain
 
 
@@ -434,7 +448,7 @@ class TestMasteryPage:
 
         assert response.status_code == 200
         assert "text/html" in response.headers["content-type"]
-        assert "Mastery Dashboard" in response.text
+        assert "Mastery Hub" in response.text
 
     def test_contains_auth_gate(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
@@ -450,7 +464,7 @@ class TestMasteryPage:
     def test_contains_mastery_app_script(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
 
-        assert "masteryDashboardApp()" in response.text
+        assert "masteryHubApp()" in response.text
 
     def test_contains_mastery_bar(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
@@ -462,12 +476,10 @@ class TestMasteryPage:
 
         assert "calibration_status" in response.text
 
-    def test_contains_no_study_materials_indicator(
-        self, page_client: TestClient
-    ) -> None:
+    def test_contains_start_practice_cta(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
 
-        assert "No study materials" in response.text
+        assert "startPractice" in response.text
 
     def test_contains_course_selector(self, page_client: TestClient) -> None:
         response = page_client.get("/mastery")
@@ -478,3 +490,505 @@ class TestMasteryPage:
         response = page_client.get("/mastery")
 
         assert "sort" in response.text.lower()
+
+
+# ===========================================================================
+# Session History endpoint tests: GET /mastery-dashboard/session-history
+# ===========================================================================
+
+_SESSION_BASE = {
+    "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "user_id": USER_ID,
+    "course_id": 10,
+    "assessment_id": None,
+    "state_json": {},
+    "started_at": "2026-03-10T10:00:00",
+    "completed_at": "2026-03-10T11:00:00",
+    "total_problems": 20,
+    "total_correct": 15,
+    "duration_seconds": 3600,
+    "phase_reached": "calibration",
+    "session_type": "full",
+}
+
+
+def _make_session(
+    idx: int,
+    *,
+    total_problems: int = 20,
+    total_correct: int = 15,
+    duration_seconds: int = 3600,
+) -> dict:
+    """Create a session dict with a unique id and started_at shifted by idx hours."""
+    return {
+        **_SESSION_BASE,
+        "id": f"aaaaaaaa-bbbb-cccc-dddd-{idx:012d}",
+        "started_at": f"2026-03-{10 + idx:02d}T10:00:00",
+        "completed_at": f"2026-03-{10 + idx:02d}T11:00:00",
+        "total_problems": total_problems,
+        "total_correct": total_correct,
+        "duration_seconds": duration_seconds,
+    }
+
+
+def _setup_session_history_mock(
+    mock_client: MagicMock,
+    sessions: list[dict],
+) -> None:
+    """Configure mock for test_prep_sessions table queries."""
+    session_chain = _chain_mock(sessions)
+
+    def table_router(name: str) -> MagicMock:
+        if name == "test_prep_sessions":
+            return session_chain
+        return _chain_mock([])
+
+    mock_client.table = MagicMock(side_effect=table_router)
+
+
+class TestSessionHistoryReturnsLast5:
+    """GET /mastery-dashboard/session-history returns last 5 completed sessions."""
+
+    def test_returns_last_5(self) -> None:
+        """Verifies last 5 completed sessions are returned with required fields."""
+        sessions = [_make_session(i) for i in range(5)]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["sessions"]) == 5
+        # Verify each session has required fields
+        for session in data["sessions"]:
+            assert "session_id" in session
+            assert "started_at" in session
+            assert "total_problems" in session
+            assert "total_correct" in session
+            assert "accuracy" in session
+            assert "duration_seconds" in session
+            assert "phase_reached" in session
+            assert "session_type" in session
+
+    def test_accuracy_computed_correctly(self) -> None:
+        """Accuracy should be total_correct / total_problems as a percentage."""
+        sessions = [_make_session(0, total_problems=20, total_correct=15)]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        session = resp.json()["sessions"][0]
+        assert session["accuracy"] == pytest.approx(75.0)
+
+
+class TestSessionHistoryTrend:
+    """trend_text computation from 3+ sessions."""
+
+    def test_trend_text_3_sessions_improving(self) -> None:
+        """With 3+ sessions showing improving accuracy, trend_text is present."""
+        # Mock returns newest-first (DESC order from DB)
+        sessions = [
+            _make_session(2, total_problems=20, total_correct=16),  # 80% newest
+            _make_session(1, total_problems=20, total_correct=14),  # 70%
+            _make_session(0, total_problems=20, total_correct=10),  # 50% oldest
+        ]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trend_text"] is not None
+        assert "Improving" in data["trend_text"]
+
+    def test_trend_text_3_sessions_declining(self) -> None:
+        """With 3+ sessions showing declining accuracy, trend_text reflects it."""
+        # Mock returns newest-first (DESC order from DB)
+        sessions = [
+            _make_session(2, total_problems=20, total_correct=10),  # 50% newest
+            _make_session(1, total_problems=20, total_correct=14),  # 70%
+            _make_session(0, total_problems=20, total_correct=16),  # 80% oldest
+        ]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trend_text"] is not None
+        assert "Declining" in data["trend_text"]
+
+    def test_trend_text_3_sessions_steady(self) -> None:
+        """With 3+ sessions showing similar accuracy, trend_text says Steady."""
+        sessions = [
+            _make_session(0, total_problems=20, total_correct=15),  # 75%
+            _make_session(1, total_problems=20, total_correct=15),  # 75%
+            _make_session(2, total_problems=20, total_correct=15),  # 75%
+        ]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trend_text"] is not None
+        assert "Steady" in data["trend_text"]
+
+    def test_trend_text_fewer_than_3_sessions_is_none(self) -> None:
+        """With fewer than 3 sessions, trend_text should be None."""
+        sessions = [
+            _make_session(0, total_problems=20, total_correct=15),
+            _make_session(1, total_problems=20, total_correct=18),
+        ]
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, sessions)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["trend_text"] is None
+
+
+class TestSessionHistoryEmpty:
+    """Edge case: no sessions."""
+
+    def test_no_sessions_empty(self) -> None:
+        """When no sessions exist, return empty list and no trend_text."""
+        mock_client = MagicMock()
+        _setup_session_history_mock(mock_client, [])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/session-history?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sessions"] == []
+        assert data["trend_text"] is None
+
+
+# ===========================================================================
+# Upcoming assessment endpoint tests: GET /mastery-dashboard/upcoming
+# ===========================================================================
+
+# Future assessment (test) — scheduled tomorrow relative to test time
+_ASSESSMENT_FUTURE_TEST = {
+    "id": 100,
+    "course_id": 10,
+    "name": "Chapter 5 Test",
+    "assessment_type": "test",
+    "scheduled_date": "2026-03-20T10:00:00",
+    "weight": 0.3,
+    "unit_or_topic": "Chapter 5",
+    "description": "Unit test on Chapter 5",
+    "canvas_assignment_id": 500,
+    "canvas_quiz_id": None,
+    "auto_created": False,
+    "source": None,
+    "created_at": "2026-03-01T10:00:00",
+    "updated_at": "2026-03-01T10:00:00",
+}
+
+# Future assessment (quiz) — scheduled further out
+_ASSESSMENT_FUTURE_QUIZ = {
+    "id": 101,
+    "course_id": 10,
+    "name": "Weekly Quiz 8",
+    "assessment_type": "quiz",
+    "scheduled_date": "2026-03-25T10:00:00",
+    "weight": 0.1,
+    "unit_or_topic": "Chapter 5-6",
+    "description": "Weekly quiz",
+    "canvas_assignment_id": 501,
+    "canvas_quiz_id": None,
+    "auto_created": False,
+    "source": None,
+    "created_at": "2026-03-01T10:00:00",
+    "updated_at": "2026-03-01T10:00:00",
+}
+
+# Past assessment (already happened)
+_ASSESSMENT_PAST = {
+    "id": 102,
+    "course_id": 10,
+    "name": "Old Test",
+    "assessment_type": "test",
+    "scheduled_date": "2026-03-01T10:00:00",
+    "weight": 0.3,
+    "unit_or_topic": "Chapter 3",
+    "description": None,
+    "canvas_assignment_id": 502,
+    "canvas_quiz_id": None,
+    "auto_created": False,
+    "source": None,
+    "created_at": "2026-02-01T10:00:00",
+    "updated_at": "2026-02-01T10:00:00",
+}
+
+# Assessment of type "essay" (should be excluded)
+_ASSESSMENT_ESSAY = {
+    "id": 103,
+    "course_id": 10,
+    "name": "Research Essay",
+    "assessment_type": "essay",
+    "scheduled_date": "2026-03-22T10:00:00",
+    "weight": 0.2,
+    "unit_or_topic": "Research",
+    "description": None,
+    "canvas_assignment_id": 503,
+    "canvas_quiz_id": None,
+    "auto_created": False,
+    "source": None,
+    "created_at": "2026-03-01T10:00:00",
+    "updated_at": "2026-03-01T10:00:00",
+}
+
+# Homework analysis with per_problem data inside analysis_json
+_HOMEWORK_ANALYSIS_1 = {
+    "id": 1,
+    "user_id": USER_ID,
+    "assignment_id": 500,
+    "course_id": 10,
+    "page_number": 1,
+    "analysis_json": {
+        "overall_score": 0.8,
+        "per_problem": [
+            {
+                "problem_number": 1,
+                "correctness": 1.0,
+                "error_type": None,
+                "concept": "Quadratic equations",
+            },
+            {
+                "problem_number": 2,
+                "correctness": 0.5,
+                "error_type": "procedural",
+                "concept": "Factoring",
+            },
+        ],
+    },
+    "image_tokens": 1000,
+    "analyzed_at": "2026-03-10T10:00:00",
+}
+
+_HOMEWORK_ANALYSIS_2 = {
+    "id": 2,
+    "user_id": USER_ID,
+    "assignment_id": 500,
+    "course_id": 10,
+    "page_number": 2,
+    "analysis_json": {
+        "overall_score": 0.9,
+        "per_problem": [
+            {
+                "problem_number": 3,
+                "correctness": 1.0,
+                "error_type": None,
+                "concept": "Quadratic equations",
+            },
+            {
+                "problem_number": 4,
+                "correctness": 0.0,
+                "error_type": "conceptual",
+                "concept": "Completing the square",
+            },
+        ],
+    },
+    "image_tokens": 800,
+    "analyzed_at": "2026-03-10T10:00:00",
+}
+
+
+def _setup_upcoming_mock(
+    mock_client: MagicMock,
+    assessments: list[dict],
+    homework_analyses: list[dict] | None = None,
+    assignments: list[dict] | None = None,
+) -> None:
+    """Configure mock for assessments, homework_analyses, and assignments tables."""
+    assessment_chain = _chain_mock(assessments)
+    homework_chain = _chain_mock(homework_analyses or [])
+    assignment_chain = _chain_mock(assignments or [])
+
+    def table_router(name: str) -> MagicMock:
+        if name == "assessments":
+            return assessment_chain
+        if name == "homework_analyses":
+            return homework_chain
+        if name == "assignments":
+            return assignment_chain
+        return _chain_mock([])
+
+    mock_client.table = MagicMock(side_effect=table_router)
+
+
+class TestUpcomingReturnsNearest:
+    """GET /mastery-dashboard/upcoming returns the nearest future test/quiz."""
+
+    def test_upcoming_returns_nearest(self) -> None:
+        """Should return the assessment with the earliest future scheduled_date."""
+        mock_client = MagicMock()
+        # DB returns nearest first (ordered by scheduled_date ASC, limit 1)
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assessment_id"] == 100
+        assert data["name"] == "Chapter 5 Test"
+        assert data["assessment_type"] == "test"
+        assert data["course_id"] == 10
+        assert data["scheduled_date"] is not None
+
+
+class TestUpcomingNoFutureReturnsEmpty:
+    """When no future test/quiz exists, return null."""
+
+    def test_no_future_returns_empty(self) -> None:
+        """Should return null when no future assessments of type test/quiz exist."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(mock_client, [])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data is None
+
+
+class TestUpcomingFiltersByType:
+    """Only assessment_type IN ('test', 'quiz') are returned."""
+
+    def test_filters_by_type(self) -> None:
+        """Essay-type assessments should be excluded (filtered via DB query)."""
+        mock_client = MagicMock()
+        # The endpoint queries with .in_("assessment_type", ["test", "quiz"])
+        # so only test/quiz come back from DB. Simulating correct DB behavior:
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_QUIZ])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assessment_type"] == "quiz"
+        assert data["name"] == "Weekly Quiz 8"
+
+
+class TestUpcomingIncludesConcepts:
+    """Concepts are extracted from homework_analyses linked to the assessment."""
+
+    def test_includes_concepts(self) -> None:
+        """Should include deduplicated concepts from homework analyses."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(
+            mock_client,
+            [_ASSESSMENT_FUTURE_TEST],
+            [_HOMEWORK_ANALYSIS_1, _HOMEWORK_ANALYSIS_2],
+            assignments=[{"id": 500, "name": "Ch 5 HW", "canvas_assignment_id": 500}],
+        )
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        concepts = data["concepts"]
+        assert isinstance(concepts, list)
+        # Should have deduplicated concepts
+        assert "Quadratic equations" in concepts
+        assert "Factoring" in concepts
+        assert "Completing the square" in concepts
+        # No duplicates
+        assert len(concepts) == len(set(concepts))
+
+    def test_no_analyses_returns_empty_concepts(self) -> None:
+        """When no homework analyses exist, concepts should be empty list."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST], [])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming?course_id=10", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["concepts"] == []
+
+
+class TestUpcomingCourseIdFilter:
+    """Optional course_id query param filters assessments."""
+
+    def test_with_course_id(self) -> None:
+        """Should pass course_id filter to DB query."""
+        mock_client = MagicMock()
+        _setup_upcoming_mock(mock_client, [_ASSESSMENT_FUTURE_TEST])
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get(
+                "/mastery-dashboard/upcoming?course_id=10",
+                headers=HEADERS,
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["assessment_id"] == 100
+
+    def test_without_course_id(self) -> None:
+        """Should work without course_id param (returns from enrolled courses)."""
+        mock_client = MagicMock()
+
+        # Need to mock enrollments table for the no-course_id path
+        enrollment_chain = _chain_mock([{"course_id": 10}])
+        assessment_chain = _chain_mock([_ASSESSMENT_FUTURE_TEST])
+
+        def table_router(name: str) -> MagicMock:
+            if name == "enrollments":
+                return enrollment_chain
+            if name == "assessments":
+                return assessment_chain
+            return _chain_mock([])
+
+        mock_client.table = MagicMock(side_effect=table_router)
+        app = _build_app(mock_client)
+        with TestClient(app) as tc:
+            resp = tc.get("/mastery-dashboard/upcoming", headers=HEADERS)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data is not None

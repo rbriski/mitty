@@ -72,6 +72,7 @@ assignments = sa.Table(
     sa.Column("due_at", sa.DateTime, nullable=True),
     sa.Column("points_possible", sa.Float, nullable=True),
     sa.Column("html_url", sa.String, nullable=True),
+    sa.Column("chapter", sa.Text, nullable=True),
     sa.Column("updated_at", sa.DateTime, nullable=False),
 )
 
@@ -832,6 +833,12 @@ test_prep_sessions = sa.Table(
     ),
     sa.Column("duration_seconds", sa.Integer, nullable=True),
     sa.Column("phase_reached", sa.String, nullable=True),
+    sa.Column(
+        "session_type",
+        sa.Text,
+        nullable=False,
+        server_default=sa.text("'full'"),
+    ),
 )
 
 sa.Index(

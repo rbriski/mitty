@@ -1,18 +1,20 @@
 """LLM-powered math problem generator for test prep.
 
 Generates problems at a target difficulty for a given concept using Claude.
-Six problem types are supported: multiple choice, free response, worked
-example, error analysis, mixed, and calibration.  Prompts reference
-Sullivan & Sullivan Pre-Calculus 11th Edition for notation and style
-(DEC-011).
+Eight problem types are supported: multiple choice, free response, worked
+example, error analysis, find the mistake, review own errors, mixed, and
+calibration.  Prompts reference Sullivan & Sullivan Pre-Calculus 11th
+Edition for notation and style (DEC-011).
 
 Graceful degradation: if the AI client is unavailable, a simple fallback
 problem is returned so the student is never blocked.
 
-Traces: DEC-001 (structured AI output), DEC-011 (Sullivan style).
+Traces: DEC-001 (structured AI output), DEC-011 (Sullivan style),
+        US-010 (error analysis enhancements, R6 desirable difficulty).
 
 Public API:
     generate_problem(concept, difficulty, problem_type, ai_client, ...) -> dict
+    build_review_own_errors(wrong_answer) -> dict
 """
 
 from __future__ import annotations
@@ -43,6 +45,8 @@ class ProblemType(enum.StrEnum):
     free_response = "free_response"
     worked_example = "worked_example"
     error_analysis = "error_analysis"
+    find_the_mistake = "find_the_mistake"
+    review_own_errors = "review_own_errors"
     mixed = "mixed"
     calibration = "calibration"
 
@@ -163,7 +167,7 @@ async def generate_problem(
     Args:
         concept: The math concept/topic (e.g. "polynomial long division").
         difficulty: Target difficulty as a float 0.0-1.0.
-        problem_type: One of the six ``ProblemType`` values.
+        problem_type: One of the eight ``ProblemType`` values.
         ai_client: ``AIClient`` instance for Claude API calls.
         student_context: Optional student-provided context (wrapped via
             ``wrap_user_input`` for injection defense).
@@ -242,3 +246,62 @@ async def generate_problem(
             exc_info=True,
         )
         return _fallback_problem(concept, difficulty, problem_type)
+
+
+# ---------------------------------------------------------------------------
+# Review-own-errors builder (US-010, R6 — desirable difficulty)
+# ---------------------------------------------------------------------------
+
+
+def build_review_own_errors(
+    *,
+    wrong_answer: dict,
+) -> dict:
+    """Build a review-own-errors reflection problem from a prior wrong answer.
+
+    This is an *ungraded* reflection prompt: the student is shown their
+    original wrong answer and asked to self-explain what went wrong.
+    No LLM call is needed.
+
+    Args:
+        wrong_answer: A dict with keys from a ``test_prep_results`` row:
+            concept, problem_json (with prompt, correct_answer, explanation),
+            student_answer, feedback.
+
+    Returns:
+        A problem dict with ``type="review_own_errors"`` and ``is_reflection=True``.
+    """
+    pj = wrong_answer.get("problem_json", {})
+    original_prompt = pj.get("prompt", "")
+    original_correct = pj.get("correct_answer", "")
+    original_explanation = pj.get("explanation", "")
+    student_answer = wrong_answer.get("student_answer", "")
+    concept = wrong_answer.get("concept", "unknown")
+    feedback = wrong_answer.get("feedback", "")
+
+    reflection_prompt = (
+        "Review your earlier answer and reflect on what went wrong.\n\n"
+        f"Original problem:\n{original_prompt}\n\n"
+        f"Your answer: {student_answer}\n"
+        f"Correct answer: {original_correct}"
+    )
+    if feedback:
+        reflection_prompt += f"\nFeedback: {feedback}"
+
+    reflection_prompt += (
+        "\n\nIn the text box below, explain in your own words "
+        "what mistake you made and how you would solve it correctly. "
+        "This is an ungraded reflection — take your time."
+    )
+
+    return {
+        "type": "review_own_errors",
+        "concept": concept,
+        "difficulty": wrong_answer.get("difficulty", 0.5),
+        "prompt": reflection_prompt,
+        "choices": None,
+        "correct_answer": original_correct,
+        "explanation": original_explanation,
+        "hint": "Think about where your reasoning diverged from the correct approach.",
+        "is_reflection": True,
+    }

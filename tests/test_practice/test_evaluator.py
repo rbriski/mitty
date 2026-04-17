@@ -348,3 +348,81 @@ class TestMisconceptionDetectionReturned:
 
         assert result.misconceptions_detected == misconceptions
         assert len(result.misconceptions_detected) == 2
+
+
+# ---------------------------------------------------------------------------
+# Vision-based evaluation (camera/photo input)
+# ---------------------------------------------------------------------------
+
+
+class TestVisionEvaluation:
+    """Vision evaluation uses call_vision to read handwritten work."""
+
+    async def test_vision_evaluation_calls_call_vision(self) -> None:
+        from mitty.practice.evaluator import evaluate_answer_with_image
+
+        item = PracticeItem(
+            practice_type="worked_example",
+            question_text="Divide x^3 - 2x + 1 by (x - 1)",
+            correct_answer="x^2 + x - 1",
+            concept="polynomial long division",
+        )
+        mock_client = AsyncMock()
+
+        llm_eval = _LLMEvaluation(
+            is_correct=True,
+            score=0.9,
+            feedback="Good work! Division steps are correct.",
+            misconceptions_detected=[],
+        )
+        mock_client.call_vision = AsyncMock(return_value=llm_eval)
+
+        fake_image = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+
+        result = await evaluate_answer_with_image(
+            ai_client=mock_client,
+            practice_item=item,
+            image_bytes=fake_image,
+            student_text="",
+        )
+
+        assert result.is_correct is True
+        assert result.score == pytest.approx(0.9)
+        assert "correct" in result.feedback.lower()
+        mock_client.call_vision.assert_called_once()
+
+        # Verify call_vision was called with the image bytes
+        call_kwargs = mock_client.call_vision.call_args.kwargs
+        assert call_kwargs["images"] == [fake_image]
+        assert call_kwargs["call_type"] == "vision_eval"
+
+    async def test_vision_evaluation_includes_student_text(self) -> None:
+        from mitty.practice.evaluator import evaluate_answer_with_image
+
+        item = PracticeItem(
+            practice_type="worked_example",
+            question_text="Factor x^2 - 4",
+            correct_answer="(x-2)(x+2)",
+            concept="factoring",
+        )
+        mock_client = AsyncMock()
+
+        llm_eval = _LLMEvaluation(
+            is_correct=True,
+            score=1.0,
+            feedback="Perfect!",
+            misconceptions_detected=[],
+        )
+        mock_client.call_vision = AsyncMock(return_value=llm_eval)
+
+        result = await evaluate_answer_with_image(
+            ai_client=mock_client,
+            practice_item=item,
+            image_bytes=b"\x89PNG" + b"\x00" * 50,
+            student_text="I used difference of squares",
+        )
+
+        assert result.is_correct is True
+        # The user prompt should contain the student text
+        call_kwargs = mock_client.call_vision.call_args.kwargs
+        assert "difference of squares" in call_kwargs["user_prompt"]

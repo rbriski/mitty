@@ -16,6 +16,7 @@ authoritative state), DEC-010 (SSE, 30-min timeout, 1 concurrent per user).
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Annotated, Any
@@ -31,16 +32,23 @@ from mitty.api.schemas import (
     HomeworkAnalysisTrigger,
     TestPrepAnswerResult,
     TestPrepAnswerSubmit,
+    TestPrepConfidenceComparison,
+    TestPrepConfidenceSubmit,
     TestPrepMasteryProfile,
     TestPrepProblem,
     TestPrepSessionCreate,
     TestPrepSessionResponse,
     TestPrepSessionSummary,
 )
+from mitty.practice.evaluator import (
+    PracticeItem,
+    evaluate_answer,
+    evaluate_answer_with_image,
+)
 from mitty.prep.analyzer import analyze_homework_set
-from mitty.prep.generator import generate_problem
+from mitty.prep.generator import build_review_own_errors, generate_problem
 from mitty.prep.profiler import build_mastery_profile
-from mitty.prep.session import PHASE_ORDER, SessionEngine, SessionPhase
+from mitty.prep.session import SessionEngine, SessionPhase
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -189,32 +197,82 @@ async def _build_student_context(
     return "\n\n".join(parts) if parts else None
 
 
+# Map test-prep problem types to evaluator practice types.
+# Types not listed here default to "short_answer" (LLM evaluation).
+_EVAL_TYPE_MAP: dict[str, str] = {
+    "multiple_choice": "multiple_choice",
+    "worked_example": "worked_example",
+}
+
+
 async def _evaluate_answer(
     *,
     problem_json: dict[str, Any],
     student_answer: str,
+    ai_client: AIClient | None = None,
+    image_bytes: bytes | None = None,
 ) -> dict[str, Any]:
-    """Evaluate a student answer against the stored correct answer.
+    """Evaluate a student answer using the hybrid evaluator.
 
-    Simple exact-match evaluation for now.  Returns a dict with
-    is_correct, score, explanation.
+    Multiple-choice uses exact match; all other types use LLM
+    evaluation for semantic comparison (partial credit, alternate
+    formats). Falls back to simple exact-match when AI is unavailable.
+
+    When *image_bytes* is provided (camera/photo input), uses Claude
+    Vision to read handwritten work and evaluate it.
     """
-    correct_answer = problem_json.get("correct_answer", "")
-    # Normalise whitespace for comparison
-    normalised_student = student_answer.strip().lower()
-    normalised_correct = str(correct_answer).strip().lower()
+    problem_type = problem_json.get("type", "free_response")
+    eval_type = _EVAL_TYPE_MAP.get(problem_type, "short_answer")
 
-    is_correct = normalised_student == normalised_correct
-    score = 1.0 if is_correct else 0.0
-    explanation = (
-        "Correct!" if is_correct else f"The correct answer is: {correct_answer}"
+    item = PracticeItem(
+        practice_type=eval_type,
+        question_text=problem_json.get("prompt", ""),
+        correct_answer=str(problem_json.get("correct_answer", "")),
+        options_json=problem_json.get("choices"),
+        explanation=problem_json.get("explanation"),
+        concept=problem_json.get("concept", ""),
     )
 
-    return {
-        "is_correct": is_correct,
-        "score": score,
-        "explanation": explanation,
-    }
+    # Vision path: student submitted a photo of handwritten work
+    if image_bytes and ai_client:
+        try:
+            result = await evaluate_answer_with_image(
+                ai_client, item, image_bytes, student_text=student_answer
+            )
+            return {
+                "is_correct": result.is_correct,
+                "score": result.score,
+                "explanation": result.feedback,
+            }
+        except Exception:
+            logger.warning(
+                "Vision evaluation failed, falling back to text evaluation",
+                exc_info=True,
+            )
+            # Fall through to text-based evaluation
+
+    try:
+        result = await evaluate_answer(ai_client, item, student_answer)
+        return {
+            "is_correct": result.is_correct,
+            "score": result.score,
+            "explanation": result.feedback,
+        }
+    except (ValueError, Exception):
+        # AI unavailable — fall back to exact match
+        logger.debug(
+            "LLM evaluation unavailable, using exact match",
+            exc_info=True,
+        )
+        correct = str(problem_json.get("correct_answer", ""))
+        normalised_student = student_answer.strip().lower()
+        normalised_correct = correct.strip().lower()
+        is_correct = normalised_student == normalised_correct
+        return {
+            "is_correct": is_correct,
+            "score": 1.0 if is_correct else 0.0,
+            "explanation": "Correct!" if is_correct else "Not quite.",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -364,12 +422,13 @@ async def get_mastery_profile(
     current_user: CurrentUser,
     client: UserClient,
     course_id: int = Query(...),
-    assignment_id: int = Query(...),
+    assignment_id: int | None = Query(default=None),  # noqa: B008
 ) -> list[TestPrepMasteryProfile]:
     """Fetch per-concept mastery profile from homework analyses.
 
-    Aggregates homework analysis results for the specified course
-    and assignment, returning mastery profiles sorted by weakest first.
+    Aggregates ALL homework analyses for the course, returning mastery
+    profiles sorted by weakest first. The assignment_id parameter is
+    accepted but ignored (kept for backward compatibility).
     """
     user_id = current_user["user_id"]
 
@@ -377,7 +436,6 @@ async def get_mastery_profile(
         client=client,
         user_id=UUID(user_id),
         course_id=course_id,
-        assignment_id=assignment_id,
     )
 
 
@@ -410,6 +468,7 @@ async def create_session(
         user_id=UUID(user_id),
         course_id=data.course_id,
         concepts=data.concepts,
+        session_type=data.session_type,
     )
 
     row = {
@@ -424,6 +483,7 @@ async def create_session(
         "total_correct": 0,
         "duration_seconds": None,
         "phase_reached": engine.current_phase.value,
+        "session_type": data.session_type,
     }
 
     result = await client.table("test_prep_sessions").insert(row).execute()
@@ -477,6 +537,7 @@ async def submit_answer(
     data: TestPrepAnswerSubmit,
     current_user: CurrentUser,
     client: UserClient,
+    ai_client: OptionalAI,
 ) -> TestPrepAnswerResult:
     """Submit an answer for a problem in a test prep session.
 
@@ -510,11 +571,38 @@ async def submit_answer(
     problem_row = problem_result.data
     problem_json = problem_row.get("problem_json", {})
 
-    # Evaluate the answer
-    evaluation = await _evaluate_answer(
-        problem_json=problem_json,
-        student_answer=data.student_answer,
-    )
+    # Reflections (review_own_errors) are ungraded — auto-accept
+    is_reflection = problem_json.get("is_reflection", False)
+    if is_reflection:
+        evaluation = {
+            "is_correct": True,
+            "score": 1.0,
+            "explanation": "Reflection recorded. Nice work!",
+        }
+    else:
+        # Use LLM evaluation for focused phases; exact-match for
+        # diagnostic/calibration to keep them fast (~instant vs ~5s).
+        phase = session_data.get("state_json", {}).get("phase", "")
+        use_llm = phase not in ("diagnostic", "calibration")
+
+        # Decode image if student submitted a photo of their work
+        image_bytes: bytes | None = None
+        if data.image_base64:
+            try:
+                # Strip data-URL prefix if present (e.g. "data:image/jpeg;base64,...")
+                raw = data.image_base64
+                if "," in raw:
+                    raw = raw.split(",", 1)[1]
+                image_bytes = base64.b64decode(raw)
+            except Exception:
+                logger.warning("Failed to decode image_base64, ignoring image")
+
+        evaluation = await _evaluate_answer(
+            problem_json=problem_json,
+            student_answer=data.student_answer,
+            ai_client=ai_client if (use_llm or image_bytes) else None,
+            image_bytes=image_bytes,
+        )
 
     # Update the result row
     update_data: dict[str, Any] = {
@@ -530,6 +618,7 @@ async def submit_answer(
         client.table("test_prep_results")
         .update(update_data)
         .eq("id", data.problem_id)
+        .eq("session_id", str(session_id))
         .execute()
     )
     if not update_result.data:
@@ -553,6 +642,17 @@ async def submit_answer(
         concept=problem_row.get("concept"),
     )
 
+    # US-010: Record wrong answers from Phases 1-2 for review_own_errors
+    if not evaluation["is_correct"] and not is_reflection:
+        engine.record_wrong_answer(
+            problem_id=problem_row.get("id", 0),
+            concept=problem_row.get("concept", ""),
+            problem_json=problem_json,
+            student_answer=data.student_answer,
+            feedback=evaluation["explanation"],
+            difficulty=problem_row.get("difficulty", 0.5),
+        )
+
     # Persist updated session state
     await (
         client.table("test_prep_sessions")
@@ -571,6 +671,8 @@ async def submit_answer(
         is_correct=evaluation["is_correct"],
         score=evaluation["score"],
         explanation=evaluation["explanation"],
+        correct_answer=str(problem_json.get("correct_answer", "")),
+        worked_solution=problem_json.get("explanation", None),
         next_problem=None,  # Next problem generated on demand by the client
     )
 
@@ -623,10 +725,123 @@ async def next_problem(
             },
         )
 
-    # Pick concept round-robin based on total problems answered so far
-    total = state_json.get("total_problems", 0)
-    concept = concepts[total % len(concepts)]
+    # US-010: Restore session engine to determine error_analysis subtype
+    engine = SessionEngine.from_state_dict(
+        session_id=session_id,
+        user_id=UUID(user_id),
+        state_dict=state_json,
+    )
+
+    # Auto-advance: diagnostic ends after 1 question per concept
+    if phase == SessionPhase.diagnostic:
+        mastery = engine.state.concept_mastery
+        all_tested = all(mastery.get(c, {}).get("attempted", 0) >= 1 for c in concepts)
+        if all_tested:
+            try:
+                phase = engine.advance_phase()
+                # Persist the phase change
+                await (
+                    client.table("test_prep_sessions")
+                    .update(
+                        {
+                            "state_json": engine.to_state_dict(),
+                            "phase_reached": phase.value,
+                        }
+                    )
+                    .eq("id", str(session_id))
+                    .execute()
+                )
+                logger.info(
+                    "Session %s: auto-advanced from diagnostic (%d concepts tested)",
+                    session_id,
+                    len(concepts),
+                )
+            except ValueError:
+                pass  # already at final phase
+
+    # Pick concept round-robin based on phase-level problem count
+    phase_key = phase.value
+    phase_problems = engine.state.phase_problems.get(phase_key, 0)
+    concept = concepts[phase_problems % len(concepts)]
     problem_type = _PHASE_PROBLEM_TYPE.get(phase, "free_response")
+
+    # US-010: Phase 3 alternates between find_the_mistake and review_own_errors
+    is_reflection = False
+    if phase == SessionPhase.error_analysis:
+        subtype = engine.get_error_analysis_subtype()
+
+        if subtype == "review_own_errors":
+            wrong = engine.pop_wrong_answer()
+            if wrong is not None:
+                # Build reflection problem from the student's own wrong answer
+                problem_dict = build_review_own_errors(wrong_answer=wrong)
+                problem_type = "review_own_errors"
+                concept = wrong.get("concept", concept)
+                is_reflection = True
+
+                # Persist updated engine state (popped wrong answer + counter)
+                await (
+                    client.table("test_prep_sessions")
+                    .update({"state_json": engine.to_state_dict()})
+                    .eq("id", str(session_id))
+                    .execute()
+                )
+
+                # Insert into test_prep_results
+                now = datetime.now(UTC)
+                row = {
+                    "user_id": user_id,
+                    "session_id": str(session_id),
+                    "concept": concept,
+                    "difficulty": problem_dict.get("difficulty", difficulty),
+                    "created_at": now.isoformat(),
+                    "problem_json": {
+                        "type": problem_type,
+                        "concept": concept,
+                        "difficulty": problem_dict.get("difficulty", difficulty),
+                        "prompt": problem_dict["prompt"],
+                        "choices": None,
+                        "correct_answer": problem_dict.get("correct_answer", ""),
+                        "explanation": problem_dict.get("explanation", ""),
+                        "hint": problem_dict.get("hint", ""),
+                        "is_reflection": True,
+                    },
+                }
+                result = await client.table("test_prep_results").insert(row).execute()
+                if not result.data:
+                    raise HTTPException(
+                        status_code=500,
+                        detail={
+                            "code": "INSERT_FAILED",
+                            "message": "Failed to persist reflection problem.",
+                        },
+                    )
+                inserted = result.data[0]
+                return TestPrepProblem(
+                    id=inserted["id"],
+                    problem_type=problem_type,
+                    concept=concept,
+                    difficulty=problem_dict.get("difficulty", difficulty),
+                    prompt=problem_dict["prompt"],
+                    choices=None,
+                    correct_answer=None,
+                    is_reflection=True,
+                    phase=phase.value,
+                )
+
+            # No wrong answers left — fall through to find_the_mistake
+            subtype = "find_the_mistake"
+
+        # find_the_mistake: use the LLM generator with the new subtype
+        if subtype == "find_the_mistake":
+            problem_type = "find_the_mistake"
+            # Persist updated engine state (counter increment)
+            await (
+                client.table("test_prep_sessions")
+                .update({"state_json": engine.to_state_dict()})
+                .eq("id", str(session_id))
+                .execute()
+            )
 
     if ai_client is None:
         raise HTTPException(
@@ -645,6 +860,31 @@ async def next_problem(
         assessment_id=session_data.get("assessment_id"),
         concept=concept,
     )
+
+    # Fetch previously asked prompts to avoid duplicate questions
+    try:
+        prev_result = await (
+            client.table("test_prep_results")
+            .select("problem_json")
+            .eq("session_id", str(session_id))
+            .execute()
+        )
+        if prev_result.data:
+            prev_prompts = [
+                r["problem_json"].get("prompt", "")
+                for r in prev_result.data
+                if r.get("problem_json")
+            ]
+            if prev_prompts:
+                avoid_section = "PREVIOUSLY ASKED (do NOT repeat these):\n" + "\n".join(
+                    f"- {p[:150]}" for p in prev_prompts
+                )
+                if student_context:
+                    student_context += "\n\n" + avoid_section
+                else:
+                    student_context = avoid_section
+    except Exception:
+        logger.debug("Failed to fetch previous prompts", exc_info=True)
 
     problem_dict = await generate_problem(
         concept=concept,
@@ -694,7 +934,63 @@ async def next_problem(
         prompt=problem_dict["prompt"],
         choices=problem_dict.get("choices"),
         correct_answer=None,  # Don't leak correct answer to frontend
+        is_reflection=is_reflection,
+        phase=phase.value,
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /test-prep/sessions/{session_id}/confidence  (US-009 / DEC-008, R5)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/sessions/{session_id}/confidence",
+    response_model=TestPrepSessionResponse,
+)
+async def submit_confidence(
+    session_id: UUID,
+    data: TestPrepConfidenceSubmit,
+    current_user: CurrentUser,
+    client: UserClient,
+) -> TestPrepSessionResponse:
+    """Submit per-concept confidence ratings at a phase transition.
+
+    Stores ratings in state_json.per_concept_confidence keyed by
+    concept, with phase and rating per checkpoint.  Returns the
+    updated session.
+    """
+    user_id = current_user["user_id"]
+    session_data = await _verify_session_ownership(client, session_id, user_id)
+
+    state_dict = session_data.get("state_json", {})
+    engine = SessionEngine.from_state_dict(
+        session_id=session_id,
+        user_id=UUID(user_id),
+        state_dict=state_dict,
+    )
+
+    for concept, rating in data.ratings.items():
+        engine.record_confidence(concept=concept, rating=rating)
+
+    # Persist updated state
+    result = await (
+        client.table("test_prep_sessions")
+        .update({"state_json": engine.to_state_dict()})
+        .eq("id", str(session_id))
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "Failed to update session state.",
+            },
+        )
+
+    return TestPrepSessionResponse.model_validate(result.data[0])
 
 
 # ---------------------------------------------------------------------------
@@ -837,7 +1133,7 @@ async def complete_session(
     from mitty.api.schemas import PhaseScore
 
     phase_scores: list[PhaseScore] = []
-    for phase in PHASE_ORDER:
+    for phase in engine.phase_order:
         p_key = phase.value
         total = engine.state.phase_problems.get(p_key, 0)
         correct = engine.state.phase_correct.get(p_key, 0)
@@ -863,6 +1159,12 @@ async def complete_session(
             )
         )
 
+    # Build confidence comparison from running checkpoints (US-009)
+    confidence_rows = engine.get_confidence_vs_performance()
+    confidence_comparison = [
+        TestPrepConfidenceComparison(**row) for row in confidence_rows
+    ]
+
     return TestPrepSessionSummary(
         session_id=session_id,
         phase_scores=phase_scores,
@@ -870,4 +1172,5 @@ async def complete_session(
         total_problems=engine.state.total_problems,
         duration_seconds=duration,
         mastery_profile=mastery_profile,
+        confidence_comparison=confidence_comparison,
     )
